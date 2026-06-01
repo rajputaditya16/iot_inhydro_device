@@ -1,0 +1,131 @@
+[ PHONE / CLIENT SIDE ]                               [ SERVER SIDE ]
++------------------------+                           +------------------------+
+
+| 1. User/Auto Trigger   |                           |                        |
+|    "Check for Update"  |                           |                        |
++-----------+------------+                           |                        |
+
+            |                                        |                        |
+            v  (HTTPS Request)                       |                        |
++------------------------+   ⚡ Secure Handshake ⚡   |                        |
+
+| 2. Sends Client Manifest|------------------------->| 3. Query Database      |
+|    (Model, Build, ID)  |                           |    (Match exact build) |
++------------------------+                           +-----------+------------+
+            ^                                                    |
+
+            |             [ Server Authorization Token ]         |
+            +----------------------------------------------------+
+
+            |
+            v
++------------------------+
+| 4. Download Update     |
+|    (.bin / .zip payload) |
++-----------+------------+
+
+            |
+            v
++------------------------+
+| 5. Integrity Check     | <--- (Calculates Local SHA-256 Hash vs Server Hash)
+|    (Data Corruption?)  |
++-----------+------------+
+
+            | [If Passed]
+            v
++------------------------+
+| 6. Signature Check     | <--- (Decrypts with Vendor Public Key inside SoC)
+|    (Genuine Firmware?) |
++-----------+------------+
+
+            | [If Verified]
+            v
++------------------------+
+| 7. Execution Engine    |
+|    (Trigger Reboot)    |
++-----------+------------+
+
+            |
+            |----------------------------------------------------+
+            | (Traditional Method)                               | (Modern A/B Partition Method)
+            v                                                    v
++------------------------+                          +------------------------+
+
+| 8A. Recovery Mode      |                          | 8B. Background Flash   |
+|     - Main OS Unmounts |                          |     - Flashes Code to  |
+|     - Flashes Storage  |                          |       Inactive Slot    |
++-----------+------------+                          +-----------+------------+
+
+            |                                                    |
+            +-------------------------+--------------------------+
+
+                                      |
+                                      v
+                        +------------------------+
+                        | 9. Device Reboot       |
+                        |    & Dalvik/ART App    |
+                        |    Optimization        |
+                        +-----------+------------+
+
+                                      |
+                                      v
+                        +------------------------+
+                        | 10. Success Report     |
+                        |     Sent to Server     |
+                        +------------------------+
+
+
+Is dev-level flow chart ko ekdam simple language me samajhte hain. Pura process 4 bade hisson (Phases) me hota hai:
+## Phase 1: Handshake (Phone aur Server ki Baat-Cheet)
+
+   1. Trigger: Aapne phone me "Check for Update" dabaya.
+   2. Fingerprint Match: Phone server ko apna ek unique id (fingerprint) bhejta hai, jaise: "Bhai, main is model par hoon aur ye mera current version hai."
+   3. Target Match: Server database me check karta hai ki aapke phone ke liye koi naya version hai ya nahi.
+   4. JSON Response: Agar update hai, toh server poori file bhejne ke bajay ek choti si Metadata JSON file bhejta hai. Isme likha hota hai ki update ka size kya hai aur use check kaise karna hai.
+
+## Phase 2: Security Check (Chori Pakadna)
+
+   1. Manifest Stream: Phone poori 2GB-3GB ki file download nahi karta. Wo sabse pehle uske shuruat ke kuch KB (Manifest) download karta hai.
+   2. Signature Verification: Phone ke andar company ki ek Secret Key pehle se locked hoti hai. Phone check karta hai ki ye naya update asli company ne hi bheja hai ya kisi hacker ne badal diya hai. Agar sign match nahi hua, toh download vahin ruk jata hai.
+
+## Phase 3: Flashing (Naya Software Daalna)
+Yahan phone ke do tarike hote hain:
+
+* Tarika A (Modern A/B System): Isme phone me do slots hote hain (Slot A aur Slot B).
+* Aap phone chala rahe hote hain Slot A par.
+   * Update chupke se background me install hota hai Slot B par.
+   * Download hote-hote hi blocks check hote rehte hain (dm-verity).
+   * Jab sab khatam ho jata hai, phone aapse kehta hai: "Bas 1 minute ke liye restart kar lo."
+* Tarika B (Purana/Legacy System):
+* Isme poori .zip file pehle phone me download hoti hai.
+   * Phone switch off hokar Recovery Mode (black screen) me jata hai.
+   * Purana system delete hota hai aur naya flash hota hai. Isme 5-10 minute phone band rehta hai.
+
+## Phase 4: Final Test (Check Karna ki Phone On Hua Ya Nahi)
+
+   1. Reboot: Phone naye software ke saath on hota hai.
+   2. Watchdog Guard: Ek automatic timer chalta hai. Agar naya software kharab hua aur phone logo par hi atak gaya (Bootloop), toh ye system turant naye update ko cancel karke phone ko purane chalte hue version par vapas le aata hai (Rollback).
+   3. Optimization: Agar sab theek raha, toh background me apps ko naye software ke hisab se optimize kiya jata hai (dexopt).
+   4. Success Report: Phone server ko message bhejta hai: "Update done, sab sahi chal raha hai!"
+
+------------------------------
+Agar aap ek developer hain, toh kya aapko iska Server-side JSON Format dekhna hai, ya phir phone ke andar chalne wala Android Java Code samajhna hai?
+
+[Unit]
+Description=Secure Industrial HMI Service
+After=network.target target.login
+ConditionPathExists=/home/pi/app/my_hmi_core.so
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/app
+# Environment variable setup for GUI display
+Environment=DISPLAY=:0
+# Xinit ke sath directly application run karna bina full desktop environment ke (Resource saving + Secure)
+ExecStart=/usr/bin/xinit /usr/bin/python3 -c "import my_hmi_core" -- :0 -nolisten tcp vt7
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

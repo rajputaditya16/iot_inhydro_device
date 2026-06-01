@@ -1,0 +1,71 @@
+{
+    "ssid": "YOUR_WIFI_NAME",
+    "password": "YOUR_WIFI_PASSWORD",
+    "device_id": "system1",
+    "tz_offset": 5.5,
+    "mqtt_broker": "mqtt3.thingspeak.com",
+    "mqtt_client_id": "",
+    "mqtt_user": "",
+    "mqtt_pass": "",
+    "ts_channel_id": "",
+    "ts_write_key": "",
+    "ts_read_key": "",
+    "mqtt_cmd_topic": "",
+    "mqtt_status_topic": "",
+    "relays": {
+        "light": {
+            "pin": 4,
+            "mode": "auto",
+            "manual_state": 0,
+            "start_time": "08:00",
+            "end_time": "20:00",
+            "on_min": 0,
+            "off_min": 0,
+            "days": [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+            ]
+        },
+        "motor": {
+            "pin": 12,
+            "mode": "auto",
+            "manual_state": 0,
+            "start_time": "00:00",
+            "end_time": "23:59",
+            "on_min": 15,
+            "off_min": 30,
+            "days": [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+            ]
+        },
+        "pump": {
+            "pin": 5,
+            "mode": "manual",
+            "manual_state": 0,
+            "start_time": "10:00",
+            "end_time": "15:00",
+            "on_min": 5,
+            "off_min": 10,
+            "days": [
+                1,
+                1,
+                1,
+                1,
+                1,
+                1,
+                1
+            ]
+        }
+    }
+}

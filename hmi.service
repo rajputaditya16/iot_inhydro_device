@@ -1,0 +1,29 @@
+[Unit]
+Description=Industrial HMI Auto Start
+After=graphical.target display-manager.service
+Wants=graphical.target
+# This is the magic line. It tells systemd to NEVER give up restarting.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=inhydro
+WorkingDirectory=/home/inhydro/Desktop/grap
+
+ExecStartPre=/bin/sleep 10
+
+ExecStart=/home/inhydro/Desktop/grap/iot_env/bin/python /home/inhydro/Desktop/grap/password3.py
+
+# Restart policy (brute force until GUI is ready)
+Restart=always
+RestartSec=3
+
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/inhydro/.Xauthority
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target
