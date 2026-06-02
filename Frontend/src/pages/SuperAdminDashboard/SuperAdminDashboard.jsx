@@ -14,6 +14,7 @@ const SuperAdminDashboard = () => {
   const previousMetricsRef = useRef(null); 
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
+  const API_BASE = import.meta.env.VITE_API_URL || '';
 
   // Transform ThingSpeak API response to device format
   const transformApiData = (apiData, dbDevice) => {
@@ -36,9 +37,15 @@ const SuperAdminDashboard = () => {
     const fetchData = async () => {
       try {
         // Step 1: Fetch all devices from our backend
-        const res = await fetch('/api/devices', {
+        const res = await fetch(`${API_BASE}/api/devices`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          throw new Error('Received non-JSON response from server (Backend might be down)');
+        }
+
         const data = await res.json();
         if (!data.success) {
           setDevices([]);
@@ -121,14 +128,12 @@ const SuperAdminDashboard = () => {
         const liveDevices = await Promise.all(liveDevicePromises);
         const allDevices = [...liveDevices, ...devicesWithoutTS];
 
-        // Check if data changed
+        // Check if data changed (for animation indicator only)
         const currentKey = JSON.stringify(allDevices.map((d) => ({ t: d.temp, m: d.moisture, e: d.ec, p: d.ph })));
         const changed = previousMetricsRef.current !== currentKey;
         setHasNewData(changed);
-        if (changed) {
-          previousMetricsRef.current = currentKey;
-          setDevices(allDevices);
-        }
+        previousMetricsRef.current = currentKey;
+        setDevices(allDevices); // Always update devices so stats always reflect latest API data
 
         setLoading(false);
       } catch (err) {

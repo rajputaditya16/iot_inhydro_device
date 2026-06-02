@@ -45,12 +45,12 @@ const DeviceCard = ({ device, onClick, hasNewData = true }) => {
       </div>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* <div className="grid grid-cols-2 gap-3">
         <MetricValue type="temp" baseValue={device.temp} unit="°C" icon={Thermometer} />
         <MetricValue type="moisture" baseValue={device.moisture} unit="%" icon={Droplets} />
         <MetricValue type="ec" baseValue={device.ec} unit="mS/cm" icon={Zap} />
         <MetricValue type="ph" baseValue={device.ph} unit="pH" icon={FlaskConical} />
-      </div>
+      </div> */}
 
       {!hasNewData && (
         <p className="mt-3 text-[10px] font-medium text-amber-300/90">No new sensor change yet</p>
