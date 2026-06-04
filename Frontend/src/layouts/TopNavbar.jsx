@@ -66,68 +66,6 @@ const TopNavbar = ({ pageTitle, collapsed, setCollapsed }) => {
 
       {/* Right Side */}
       <div className="flex items-center gap-2">
-        {/* Online Status */}
-        <div className="hidden items-center gap-2 rounded-full border border-slate-700/50 bg-slate-800/50 px-3 py-1.5 sm:flex">
-          {isOnline ? (
-            <>
-              <Wifi className="h-3.5 w-3.5 text-emerald-400" />
-              <span className="text-xs font-medium text-emerald-400">Online</span>
-            </>
-          ) : (
-            <>
-              <WifiOff className="h-3.5 w-3.5 text-red-400" />
-              <span className="text-xs font-medium text-red-400">Offline</span>
-            </>
-          )}
-        </div>
-
-        {/* Notifications */}
-        {/* <div className="relative" ref={notifRef}>
-          <button
-            onClick={() => setShowNotifications(!showNotifications)}
-            className="relative rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
-          >
-            <Bell className="h-5 w-5" />
-            {unreadCount > 0 && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-                {unreadCount}
-              </span>
-            )}
-          </button>
-
-          <AnimatePresence>
-            {showNotifications && (
-              <motion.div
-                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                transition={{ duration: 0.2 }}
-                className="absolute right-0 top-12 w-80 overflow-hidden rounded-xl border border-slate-700 bg-slate-800 shadow-2xl"
-              >
-                <div className="border-b border-slate-700 p-3">
-                  <h3 className="text-sm font-semibold text-white">Notifications</h3>
-                </div>
-                <div className="max-h-80 overflow-y-auto">
-                  {mockNotifications.map((notif) => (
-                   <div
-                      key={notif.id}
-                      className={`flex gap-3 border-b border-slate-700/50 p-3 transition-colors hover:bg-slate-700/30 ${!notif.read ? 'bg-slate-700/10' : ''
-
-                      }`}
-                    >
-                      <div className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${notifTypeColors[notif.type]}`} />
-                      <div>
-                        <p className="text-xs text-slate-300">{notif.message}</p>
-                        <p className="mt-1 text-[10px] text-slate-500">{notif.time}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div> */}
-
         {/* Profile Dropdown */}
         <div className="relative" ref={profileRef}>
           <button

@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Thermometer, Droplets, Zap, FlaskConical, Wifi, WifiOff, Battery } from 'lucide-react';
+import { Thermometer, Droplets, Zap, FlaskConical, Wifi, WifiOff } from 'lucide-react';
 import { getStatusBg, getStatusDot, getMetricStatus, getMetricColor, formatTimestamp } from '../utils/helpers';
 import { useAnimatedCounter } from '../hooks/useAnimatedCounter';
 
@@ -61,10 +61,6 @@ const DeviceCard = ({ device, onClick, hasNewData = true }) => {
         <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
           {device.status === 'offline' ? <WifiOff className="h-3 w-3" /> : <Wifi className="h-3 w-3" />}
           {formatTimestamp(device.lastUpdated)}
-        </div>
-        <div className="flex items-center gap-1 text-[10px] text-slate-500">
-          <Battery className="h-3 w-3" />
-          {device.battery}%
         </div>
       </div>
     </motion.div>

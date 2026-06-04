@@ -186,13 +186,17 @@ const LiveMonitoring = () => {
           return;
         }
 
+        const lastUpdatedTime = new Date(latestFeed.created_at);
+        const diffMs = Date.now() - lastUpdatedTime.getTime();
+        // 5 minutes threshold
+        const isOnline = diffMs < 5 * 60 * 1000;
+
         const device = {
           id: selectedDeviceId,
           name: deviceMeta?.name || 'Live Sensor Data',
           location: deviceMeta?.location || 'API Feed',
-          status: 'online',
+          status: isOnline ? 'online' : 'offline',
           lastUpdated: latestFeed.created_at,
-          battery: deviceMeta?.battery || 100,
         };
 
         const currentMetrics = {};
@@ -339,7 +343,6 @@ const LiveMonitoring = () => {
           location: deviceMeta?.location || 'MQTT Stream',
           status: 'online',
           lastUpdated: new Date().toISOString(),
-          battery: deviceMeta?.battery || 100,
         });
 
         setLoading(false);
