@@ -82,3 +82,20 @@ SCAN failed sudo abterminal is required to read the password ; either use the -S
 sudo a password is required   
  then use this command in raspberry pi terminal 
  **   echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/$USER
+
+
+add these lines in bluetooth.service root file after this command
+sudo nano /lib/systemd/system/bluetooth.service
+
+ExecStart=/usr/lib/bluetooth/bluetoothd -C
+ExecStartPost=/bin/chmod 777 /var/run/sdp
+
+run this in terminal:
+
+--  sudo apt-get install -y bluez bluez-tools network-manager
+
+--  sudo sdptool add SP
+--  sudo chmod 777 /var/run/sdp
+--  sudo systemctl daemon-reload
+--  sudo systemctl enable bluetooth
+--  sudo systemctl restart bluetooth
