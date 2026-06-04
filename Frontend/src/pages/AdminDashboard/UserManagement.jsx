@@ -538,7 +538,7 @@ const UserManagement = () => {
               <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-500">
                 Assign Locations
               </label>
-              <div className="space-y-2">
+              <div className="space-y-2 flex flex-wrap items-start justify-start max-h-60 overflow-y-scroll">
                 {locations.length === 0 ? (
                   <p className="text-sm text-slate-500 italic">No locations found. Add devices with locations first.</p>
                 ) : (

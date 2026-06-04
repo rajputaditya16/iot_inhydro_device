@@ -14,21 +14,25 @@ const SuperAdminDashboard = () => {
   const previousMetricsRef = useRef(null); 
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
+  const API_BASE = import.meta.env.VITE_API_URL || '';
 
   // Transform ThingSpeak API response to device format
   const transformApiData = (apiData, dbDevice) => {
     if (!apiData || !apiData.entry_id) return null;
+    const lastUpdatedTime = new Date(apiData.created_at); 
+    const diffMs = Date.now() - lastUpdatedTime.getTime();
+    // 5 minutes threshold
+    const isOnline = diffMs < 5 * 60 * 1000;
     return {
       id: dbDevice._id,
       name: dbDevice.name,
       location: dbDevice.location,
-      status: 'online',
+      status: isOnline ? 'online' : 'offline',
       temp: parseFloat(apiData.field1) || 0,
       moisture: parseFloat(apiData.field2) || 0,  
       ph: parseFloat(apiData.field3) || 0,
       ec: parseFloat(apiData.field4) || 0,
       lastUpdated: apiData.created_at,
-      battery: dbDevice.battery || 100,
     };
   };
 
@@ -36,9 +40,15 @@ const SuperAdminDashboard = () => {
     const fetchData = async () => {
       try {
         // Step 1: Fetch all devices from our backend
-        const res = await fetch('/api/devices', {
+        const res = await fetch(`${API_BASE}/api/devices`, {
           headers: { Authorization: `Bearer ${token}` },
         });
+
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          throw new Error('Received non-JSON response from server (Backend might be down)');
+        }
+
         const data = await res.json();
         if (!data.success) {
           setDevices([]);
@@ -65,7 +75,6 @@ const SuperAdminDashboard = () => {
             ph: 0,
             ec: 0,
             lastUpdated: d.lastUpdated || d.updatedAt,
-            battery: d.battery || 100,
           }));
           setDevices(offlineDevices);
           setHasNewData(false);
@@ -90,7 +99,6 @@ const SuperAdminDashboard = () => {
               status: 'offline',
               temp: 0, moisture: 0, ph: 0, ec: 0,
               lastUpdated: dbDevice.lastUpdated || dbDevice.updatedAt,
-              battery: dbDevice.battery || 100,
             };
           } catch {
             return {
@@ -100,7 +108,6 @@ const SuperAdminDashboard = () => {
               status: 'offline',
               temp: 0, moisture: 0, ph: 0, ec: 0,
               lastUpdated: dbDevice.lastUpdated || dbDevice.updatedAt,
-              battery: dbDevice.battery || 100,
             };
           }
         });
@@ -115,20 +122,17 @@ const SuperAdminDashboard = () => {
             status: d.status || 'offline',
             temp: 0, moisture: 0, ph: 0, ec: 0,
             lastUpdated: d.lastUpdated || d.updatedAt,
-            battery: d.battery || 100,
           }));
 
         const liveDevices = await Promise.all(liveDevicePromises);
         const allDevices = [...liveDevices, ...devicesWithoutTS];
 
-        // Check if data changed
+        // Check if data changed (for animation indicator only)
         const currentKey = JSON.stringify(allDevices.map((d) => ({ t: d.temp, m: d.moisture, e: d.ec, p: d.ph })));
         const changed = previousMetricsRef.current !== currentKey;
         setHasNewData(changed);
-        if (changed) {
-          previousMetricsRef.current = currentKey;
-          setDevices(allDevices);
-        }
+        previousMetricsRef.current = currentKey;
+        setDevices(allDevices); // Always update devices so stats always reflect latest API data
 
         setLoading(false);
       } catch (err) {
@@ -220,7 +224,7 @@ const SuperAdminDashboard = () => {
       <div>
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-white">Global Live Device Overview (Super Admin)</h2>
+            <h2 className="text-lg font-semibold text-white"> Device Overview (Super Admin)</h2>
             <p className="text-sm text-slate-400">Real-time sensor data from all connected devices across the entire system</p>
           </div>
           {/* Filter Tabs */}

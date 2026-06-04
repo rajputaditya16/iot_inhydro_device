@@ -1,26 +1,29 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Cpu, Search, Plus, Battery, MapPin, Activity, Edit2, Trash2, PowerOff, ShieldAlert, Radio, Key, Eye, EyeOff, Send } from 'lucide-react';
+import { Cpu, Search, Plus, MapPin, Activity, Edit2, Trash2, PowerOff, ShieldAlert, Radio, Key, Eye, EyeOff, Send, Info, Copy, Check, Calendar, Clock } from 'lucide-react';
 import { getStatusBg, getStatusDot, formatTimestamp } from '../../utils/helpers';
 import { SkeletonTable } from '../../components/Skeleton';
 import EmptyState from '../../components/EmptyState';
 import Modal from '../../components/Modal';
-const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const EMPTY_FORM = {
   name: '',
   location: '',
   status: 'offline',
-  battery: 100,
   deviceType: 'system2',
   mqttId: '',
-  thingspeak: { 
-    channelId: '', 
+  clientName: '',
+  locationCode: '',
+  model: '',
+  unit: '',
+  nicknameByClient: '',
+  thingspeak: {
+    channelId: '',
     clientId: '',
     username: '',
     password: '',
-    readApiKey: '', 
+    readApiKey: '',
     writeApiKey: '',
     port: 1883,
   },
@@ -69,6 +72,15 @@ const DevicesPage = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [pushingId, setPushingId] = useState(null); // Track which device is being pushed
 
+  // Details Modal State
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedDeviceIdDetails, setSelectedDeviceIdDetails] = useState(null);
+  const selectedDeviceDetails = devices.find(d => (d._id || d.id) === selectedDeviceIdDetails);
+  const [copiedId, setCopiedId] = useState(false);
+  const [showDetailsPassword, setShowDetailsPassword] = useState(false);
+  const [showDetailsWriteKey, setShowDetailsWriteKey] = useState(false);
+  const [showDetailsReadKey, setShowDetailsReadKey] = useState(false);
+
   const token = localStorage.getItem('token');
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const isAdmin = user.accountType === 'admin' || user.accountType === 'superadmin';
@@ -87,7 +99,52 @@ const DevicesPage = () => {
       }
       const data = await res.json();
       if (data.success) {
-        setDevices(data.data);
+        const dbDevices = data.data;
+        // Initialize all non-blocked devices as offline to remove stale status display
+        const initialDevices = dbDevices.map(device => {
+          if (device.status === 'blocked') return device;
+          return { ...device, status: 'offline' };
+        });
+        setDevices(initialDevices);
+
+        // Fetch live status from ThingSpeak in background for each non-blocked device
+        const checkLiveStatuses = async () => {
+          const updatedDevices = await Promise.all(
+            initialDevices.map(async (device) => {
+              if (device.status === 'blocked') return device;
+
+              const channelId = device.thingspeak?.channelId || device.thingspeak?.tempChannelId;
+              const readApiKey = device.thingspeak?.readApiKey || device.thingspeak?.tempReadApiKey;
+
+              if (!channelId || !readApiKey) {
+                return device; // Remains offline
+              }
+
+              try {
+                const tsRes = await fetch(
+                  `https://api.thingspeak.com/channels/${channelId}/feeds.json?api_key=${readApiKey}&results=1`
+                );
+                if (tsRes.ok) {
+                  const tsData = await tsRes.json();
+                  const latestFeed = tsData && tsData.feeds && tsData.feeds[0];
+                  if (latestFeed) {
+                    const lastUpdatedTime = new Date(latestFeed.created_at);
+                    const diffMs = Date.now() - lastUpdatedTime.getTime();
+                    // 5 minutes threshold
+                    const isOnline = diffMs < 5 * 60 * 1000;
+                    return { ...device, status: isOnline ? 'online' : 'offline' };
+                  }
+                }
+              } catch (err) {
+                console.error(`Error checking status for device ${device.name}:`, err);
+              }
+              return { ...device, status: 'offline' };
+            })
+          );
+          setDevices(updatedDevices);
+        };
+
+        checkLiveStatuses();
       }
     } catch (error) {
       console.error('Failed to fetch devices', error);
@@ -113,9 +170,13 @@ const DevicesPage = () => {
         name: device.name,
         location: device.location,
         status: device.status,
-        battery: device.battery,
-        deviceType: device.deviceType || 'system2',
+        deviceType: device.deviceType,
         mqttId: device.mqttId || '',
+        clientName: device.clientName || '',
+        locationCode: device.locationCode || '',
+        model: device.model || '',
+        unit: device.unit || '',
+        nicknameByClient: device.nicknameByClient || '',
         thingspeak: {
           channelId: device.thingspeak?.channelId || device.thingspeak?.tempChannelId || '',
           clientId: device.thingspeak?.clientId || device.thingspeak?.tempClientId || '',
@@ -275,7 +336,7 @@ const DevicesPage = () => {
             <option value="offline">Offline</option>
             <option value="blocked">Blocked</option>
           </select>
-          {isAdmin &&(
+          {isAdmin && (
             <button
               onClick={() => handleOpenModal()}
               className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-green-500/20"
@@ -303,7 +364,6 @@ const DevicesPage = () => {
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Device</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Location</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Status</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Battery</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">ThingSpeak</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Last Updated</th>
                 <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">Actions</th>
@@ -340,12 +400,6 @@ const DevicesPage = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <Battery className={`h-4 w-4 ${device.battery > 50 ? 'text-emerald-400' : device.battery > 20 ? 'text-yellow-400' : 'text-red-400'}`} />
-                        <span className="text-slate-300">{device.battery}%</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
                       {hasThingspeak ? (
                         <div className="flex items-center gap-1.5">
                           <Radio className="h-3.5 w-3.5 text-blue-400" />
@@ -359,6 +413,20 @@ const DevicesPage = () => {
                     <td className="px-6 py-4">
                       <div className="flex items-center justify-end gap-1">
                         <button
+                          onClick={() => {
+                            setSelectedDeviceIdDetails(deviceId);
+                            setShowDetailsModal(true);
+                            setShowDetailsPassword(false);
+                            setShowDetailsWriteKey(false);
+                            setShowDetailsReadKey(false);
+                          }}
+                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-blue-500/10 hover:text-blue-400"
+                          title="View Device Details"
+                        >
+                          <Info className="h-4 w-4" />
+                        </button>
+
+                        <button
                           onClick={() => navigate(`/monitoring?device=${deviceId}`)}
                           className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-green-500/10 hover:text-green-400"
                           title="View Live Data"
@@ -369,7 +437,7 @@ const DevicesPage = () => {
                         {isAdmin && (
                           <>
                             <div className="w-px h-4 bg-slate-700/50 mx-1"></div>
-                            
+
                             <button
                               onClick={() => handleToggleBlock(deviceId)}
                               className={`rounded-lg p-2 transition-colors ${isBlocked ? 'text-orange-400 hover:bg-orange-500/10' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
@@ -397,11 +465,10 @@ const DevicesPage = () => {
                                 <button
                                   onClick={() => handlePushConfig(deviceId, device.name)}
                                   disabled={pushingId === deviceId}
-                                  className={`rounded-lg p-2 transition-colors ${
-                                    pushingId === deviceId
+                                  className={`rounded-lg p-2 transition-colors ${pushingId === deviceId
                                       ? 'text-purple-300 bg-purple-500/10 cursor-wait'
                                       : 'text-purple-400 hover:bg-purple-500/10 hover:text-purple-300'
-                                  }`}
+                                    }`}
                                   title="Push ThingSpeak Config to Device (MQTT)"
                                 >
                                   <Send className={`h-4 w-4 ${pushingId === deviceId ? 'animate-pulse' : ''}`} />
@@ -431,7 +498,7 @@ const DevicesPage = () => {
                 <p>{error}</p>
               </div>
             )}
-            
+
             {/* Device Info Section */}
             <div className="space-y-4">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-2">
@@ -462,34 +529,7 @@ const DevicesPage = () => {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-300">Status</label>
-                    <select
-                      value={formData.status}
-                      onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
-                    >
-                      <option value="online">Online</option>
-                      <option value="offline">Offline</option>
-                      <option value="warning">Warning</option>
-                      <option value="critical">Critical</option>
-                      <option value="blocked">Blocked</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-slate-300">Battery (%)</label>
-                    <input
-                      type="number"
-                      required
-                      min="0"
-                      max="100"
-                      value={formData.battery}
-                      onChange={(e) => setFormData({ ...formData, battery: Number(e.target.value) })}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
-                    />
-                  </div>
-                </div>
+
 
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-300">Device Type</label>
@@ -517,6 +557,63 @@ const DevicesPage = () => {
                     placeholder="Must match device script topic"
                   />
                 </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-300">Client Name</label>
+                    <input
+                      type="text"
+                      value={formData.clientName || ''}
+                      onChange={(e) => setFormData({ ...formData, clientName: e.target.value })}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                      placeholder="e.g. Acme Corp"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-300">Nickname by Client</label>
+                    <input
+                      type="text"
+                      value={formData.nicknameByClient || ''}
+                      onChange={(e) => setFormData({ ...formData, nicknameByClient: e.target.value })}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                      placeholder="e.g. Pump-01"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-300">Location Code</label>
+                    <input
+                      type="text"
+                      value={formData.locationCode || ''}
+                      onChange={(e) => setFormData({ ...formData, locationCode: e.target.value })}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                      placeholder="e.g. LOC-012"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-300">Model</label>
+                    <input
+                      type="text"
+                      value={formData.model || ''}
+                      onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                      placeholder="e.g. Inhydro-V3"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-300">Unit</label>
+                  <input
+                    type="text"
+                    value={formData.unit || ''}
+                    onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                    placeholder="e.g. Unit-A"
+                  />
+                </div>
               </div>
             </div>
 
@@ -527,20 +624,20 @@ const DevicesPage = () => {
               <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-2">
                 <Radio className="h-3.5 w-3.5 text-blue-400" /> ThingSpeak Configuration
               </h4>
-                <div className="space-y-3 pl-1">
-                  <InputGroup label="Channel ID" value={formData.thingspeak.channelId} onChange={(v) => updateThingspeak('channelId', v)} />
-                  <InputGroup label="Username" value={formData.thingspeak.username} onChange={(v) => updateThingspeak('username', v)} />
-                  <InputGroup label="Password" value={formData.thingspeak.password} onChange={(v) => updateThingspeak('password', v)} type="password" />
-                  <InputGroup label="Client ID" value={formData.thingspeak.clientId} onChange={(v) => updateThingspeak('clientId', v)} />
-                  <div className="grid grid-cols-2 gap-4">
-                    <InputGroup label="Read API Key" value={formData.thingspeak.readApiKey} onChange={(v) => updateThingspeak('readApiKey', v)} type="password" />
-                    <InputGroup label="Write API Key" value={formData.thingspeak.writeApiKey} onChange={(v) => updateThingspeak('writeApiKey', v)} type="password" />
-                  </div>
-
-                  <div className="w-24">
-                    <InputGroup label="MQTT Port" value={formData.thingspeak.port} onChange={(v) => updateThingspeak('port', Number(v))} type="number" />
-                  </div>
+              <div className="space-y-3 pl-1">
+                <InputGroup label="Channel ID" value={formData.thingspeak.channelId} onChange={(v) => updateThingspeak('channelId', v)} />
+                <InputGroup label="Username" value={formData.thingspeak.username} onChange={(v) => updateThingspeak('username', v)} />
+                <InputGroup label="Password" value={formData.thingspeak.password} onChange={(v) => updateThingspeak('password', v)} type="password" />
+                <InputGroup label="Client ID" value={formData.thingspeak.clientId} onChange={(v) => updateThingspeak('clientId', v)} />
+                <div className="grid grid-cols-2 gap-4">
+                  <InputGroup label="Read API Key" value={formData.thingspeak.readApiKey} onChange={(v) => updateThingspeak('readApiKey', v)} type="password" />
+                  <InputGroup label="Write API Key" value={formData.thingspeak.writeApiKey} onChange={(v) => updateThingspeak('writeApiKey', v)} type="password" />
                 </div>
+
+                <div className="w-24">
+                  <InputGroup label="MQTT Port" value={formData.thingspeak.port} onChange={(v) => updateThingspeak('port', Number(v))} type="number" />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -562,6 +659,306 @@ const DevicesPage = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* DEVICE DETAILS MODAL */}
+      <Modal
+        isOpen={showDetailsModal}
+        onClose={() => {
+          setShowDetailsModal(false);
+          setSelectedDeviceIdDetails(null);
+        }}
+        title="Device Details"
+        size="lg"
+      >
+        {selectedDeviceDetails && (
+          <div className="flex flex-col max-h-[85vh] text-slate-200">
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto pr-2 space-y-6 custom-scrollbar pb-4">
+
+              {/* Header Info */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between bg-slate-900/30 p-4 rounded-xl border border-slate-700/30">
+                <div className="flex items-center gap-3">
+                  <div className={`rounded-xl p-3 ${selectedDeviceDetails.status === 'blocked' ? 'bg-red-500/10' : 'bg-green-500/10'}`}>
+                    <Cpu className={`h-6 w-6 ${selectedDeviceDetails.status === 'blocked' ? 'text-red-400' : 'text-green-400'}`} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white leading-tight">{selectedDeviceDetails.name}</h3>
+                    <p className="text-xs text-slate-400 mt-1 font-mono">
+                      Type: <span className="text-slate-300 font-semibold">{
+                        selectedDeviceDetails.deviceType === 'system2' ? 'Standard System' :
+                          selectedDeviceDetails.deviceType === 'almora' ? 'Almora Machine' :
+                            selectedDeviceDetails.deviceType === 'almora2' ? 'Almora Machine 2' :
+                              selectedDeviceDetails.deviceType === 'multi_sensor' ? 'Cold Storage (Multi)' :
+                                selectedDeviceDetails.deviceType === 'light_motor_pump' ? 'Light Motor Pump' :
+                                  selectedDeviceDetails.deviceType === 'office_control' ? 'Office Control' :
+                                    selectedDeviceDetails.deviceType || 'Unknown'
+                      }</span>
+                    </p>
+                  </div>
+                </div>
+                <div>
+                  <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider ${selectedDeviceDetails.status === 'blocked' ? 'bg-slate-800 border-slate-700 text-slate-400' : getStatusBg(selectedDeviceDetails.status)}`}>
+                    <span className={`h-2 w-2 rounded-full ${selectedDeviceDetails.status === 'blocked' ? 'bg-slate-500' : getStatusDot(selectedDeviceDetails.status)}`} />
+                    {selectedDeviceDetails.status}
+                  </span>
+                </div>
+              </div>
+
+              {/* Grid Content */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                {/* General Details Card */}
+                <div className="rounded-xl border border-slate-700/30 bg-slate-900/10 p-5 space-y-4">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700/50 pb-2 flex items-center gap-1.5">
+                    <Cpu className="h-4 w-4 text-green-400" /> General Specifications
+                  </h4>
+
+                  <div className="space-y-3.5 text-sm">
+                    <div className="flex justify-between items-center py-0.5">
+                      <span className="text-slate-400 font-medium">Device ID</span>
+                      <div className="flex items-center gap-1.5 font-mono text-xs bg-slate-900/60 px-2 py-1 rounded border border-slate-700/50 max-w-[180px] sm:max-w-xs">
+                        <span className="truncate text-slate-300">{selectedDeviceDetails._id || selectedDeviceDetails.id}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(selectedDeviceDetails._id || selectedDeviceDetails.id);
+                            setCopiedId(true);
+                            setTimeout(() => setCopiedId(false), 2000);
+                          }}
+                          className="text-slate-400 hover:text-white transition-colors p-0.5"
+                          title="Copy ID"
+                        >
+                          {copiedId ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center border-t border-slate-800/60 pt-2.5">
+                      <span className="text-slate-400 font-medium">Location</span>
+                      <span className="text-white flex items-center gap-1">
+                        <MapPin className="h-3.5 w-3.5 text-slate-400" />
+                        {selectedDeviceDetails.location}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center border-t border-slate-800/60 pt-2.5">
+                      <span className="text-slate-400 font-medium">MQTT Topic ID</span>
+                      <span className="text-white font-mono text-xs bg-slate-900/40 px-2 py-0.5 rounded border border-slate-700/30">
+                        {selectedDeviceDetails.mqttId || 'Not set'}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center border-t border-slate-800/60 pt-2.5">
+                      <span className="text-slate-400 font-medium">Client Name</span>
+                      <span className="text-white font-semibold">{selectedDeviceDetails.clientName || 'Not set'}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center border-t border-slate-800/60 pt-2.5">
+                      <span className="text-slate-400 font-medium">Nickname by Client</span>
+                      <span className="text-white italic">{selectedDeviceDetails.nicknameByClient || 'Not set'}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center border-t border-slate-800/60 pt-2.5">
+                      <span className="text-slate-400 font-medium">Location Code</span>
+                      <span className="text-white font-mono text-xs">{selectedDeviceDetails.locationCode || 'Not set'}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center border-t border-slate-800/60 pt-2.5">
+                      <span className="text-slate-400 font-medium">Model</span>
+                      <span className="text-white">{selectedDeviceDetails.model || 'Not set'}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center border-t border-slate-800/60 pt-2.5">
+                      <span className="text-slate-400 font-medium">Unit</span>
+                      <span className="text-white font-mono text-xs">{selectedDeviceDetails.unit || 'Not set'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* System Timestamps & Diagnostics */}
+                <div className="rounded-xl border border-slate-700/30 bg-slate-900/10 p-5 space-y-4">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700/50 pb-2 flex items-center gap-1.5">
+                    <Activity className="h-4 w-4 text-green-400" /> Activity & Diagnostics
+                  </h4>
+
+                  <div className="space-y-4 text-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 rounded-lg bg-slate-800 text-slate-400 mt-0.5">
+                        <Clock className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400 font-medium">Last Connection / Update</p>
+                        <p className="text-white mt-0.5 font-medium">{formatTimestamp(selectedDeviceDetails.lastUpdated)}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-3 border-t border-slate-800/60 pt-3">
+                      <div className="p-2 rounded-lg bg-slate-800 text-slate-400 mt-0.5">
+                        <Calendar className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400 font-medium">Created On</p>
+                        <p className="text-white mt-0.5 font-medium">{selectedDeviceDetails.createdAt ? new Date(selectedDeviceDetails.createdAt).toLocaleString() : 'N/A'}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-3 border-t border-slate-800/60 pt-3">
+                      <div className="p-2 rounded-lg bg-slate-800 text-slate-400 mt-0.5">
+                        <Calendar className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400 font-medium">Last Modified</p>
+                        <p className="text-white mt-0.5 font-medium">{selectedDeviceDetails.updatedAt ? new Date(selectedDeviceDetails.updatedAt).toLocaleString() : 'N/A'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* ThingSpeak Configuration Section */}
+              <div className="rounded-xl border border-slate-700/30 bg-slate-900/10 p-5 space-y-4">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700/50 pb-2 flex items-center gap-1.5">
+                  <Radio className="h-4 w-4 text-blue-400" /> ThingSpeak Configuration
+                </h4>
+
+                {selectedDeviceDetails.thingspeak && (selectedDeviceDetails.thingspeak.channelId || selectedDeviceDetails.thingspeak.tempChannelId) ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm">
+                    <div className="flex justify-between items-center py-1">
+                      <span className="text-slate-400 font-medium">Channel ID</span>
+                      <span className="text-white font-mono font-semibold">{selectedDeviceDetails.thingspeak.channelId || selectedDeviceDetails.thingspeak.tempChannelId}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1 md:border-l md:border-slate-800/60 md:pl-6">
+                      <span className="text-slate-400 font-medium">MQTT Port</span>
+                      <span className="text-white font-mono">{selectedDeviceDetails.thingspeak.port || 1883}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1 border-t border-slate-800/60 pt-2 md:border-t-0 md:pt-0">
+                      <span className="text-slate-400 font-medium">Username</span>
+                      <span className="text-white font-mono">{selectedDeviceDetails.thingspeak.username || selectedDeviceDetails.thingspeak.tempUsername || 'Not set'}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center py-1 border-t border-slate-800/60 pt-2 md:border-l md:border-slate-800/60 md:pl-6 md:border-t-0 md:pt-0">
+                      <span className="text-slate-400 font-medium">Client ID</span>
+                      <span className="text-white font-mono truncate max-w-[180px]" title={selectedDeviceDetails.thingspeak.clientId || selectedDeviceDetails.thingspeak.tempClientId || ''}>
+                        {selectedDeviceDetails.thingspeak.clientId || selectedDeviceDetails.thingspeak.tempClientId || 'Not set'}
+                      </span>
+                    </div>
+
+                    {/* Sensitive Fields */}
+                    <div className="flex justify-between items-center py-1 border-t border-slate-800/60 pt-2 col-span-1 md:col-span-2 grid grid-cols-2 gap-4">
+
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs text-slate-400 font-medium">Read API Key</span>
+                        <div className="relative flex items-center bg-slate-900/60 rounded border border-slate-700/50 px-2 py-1 font-mono text-xs h-8">
+                          <input
+                            type={showDetailsReadKey ? 'text' : 'password'}
+                            value={selectedDeviceDetails.thingspeak.readApiKey || selectedDeviceDetails.thingspeak.tempReadApiKey || ''}
+                            readOnly
+                            className="bg-transparent text-slate-300 outline-none w-full pr-6"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowDetailsReadKey(!showDetailsReadKey)}
+                            className="absolute right-2 text-slate-500 hover:text-slate-300"
+                          >
+                            {showDetailsReadKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs text-slate-400 font-medium">Write API Key</span>
+                        <div className="relative flex items-center bg-slate-900/60 rounded border border-slate-700/50 px-2 py-1 font-mono text-xs h-8">
+                          <input
+                            type={showDetailsWriteKey ? 'text' : 'password'}
+                            value={selectedDeviceDetails.thingspeak.writeApiKey || selectedDeviceDetails.thingspeak.tempWriteApiKey || ''}
+                            readOnly
+                            className="bg-transparent text-slate-300 outline-none w-full pr-6"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowDetailsWriteKey(!showDetailsWriteKey)}
+                            className="absolute right-2 text-slate-500 hover:text-slate-300"
+                          >
+                            {showDetailsWriteKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+
+                    </div>
+
+                    <div className="flex flex-col gap-1 border-t border-slate-800/60 pt-2 col-span-1 md:col-span-2">
+                      <span className="text-xs text-slate-400 font-medium">Password</span>
+                      <div className="relative flex items-center bg-slate-900/60 rounded border border-slate-700/50 px-2.5 py-1 font-mono text-xs h-8">
+                        <input
+                          type={showDetailsPassword ? 'text' : 'password'}
+                          value={selectedDeviceDetails.thingspeak.password || selectedDeviceDetails.thingspeak.tempPassword || ''}
+                          readOnly
+                          className="bg-transparent text-slate-300 outline-none w-full pr-6"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowDetailsPassword(!showDetailsPassword)}
+                          className="absolute right-2.5 text-slate-500 hover:text-slate-300"
+                        >
+                          {showDetailsPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 italic py-2">ThingSpeak has not been configured for this device.</p>
+                )}
+              </div>
+
+            </div>
+
+            {/* Persistent Footer Actions */}
+            <div className="pt-4 flex flex-wrap justify-between items-center gap-3 border-t border-slate-700/50 mt-4 bg-slate-800">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDetailsModal(false);
+                    navigate(`/monitoring?device=${selectedDeviceDetails._id || selectedDeviceDetails.id}`);
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-2 text-xs font-semibold text-green-400 hover:bg-green-500 hover:text-white transition-all shadow-md shadow-green-500/5"
+                >
+                  <Activity className="h-3.5 w-3.5" /> Live Monitoring
+                </button>
+
+                {isAdmin && (selectedDeviceDetails.thingspeak?.channelId || selectedDeviceDetails.thingspeak?.tempChannelId) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handlePushConfig(selectedDeviceDetails._id || selectedDeviceDetails.id, selectedDeviceDetails.name);
+                    }}
+                    disabled={pushingId === (selectedDeviceDetails._id || selectedDeviceDetails.id)}
+                    className={`flex items-center gap-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-xs font-semibold text-purple-400 hover:bg-purple-500 hover:text-white transition-all shadow-md shadow-purple-500/5 ${pushingId === (selectedDeviceDetails._id || selectedDeviceDetails.id) ? 'opacity-50 cursor-wait' : ''
+                      }`}
+                  >
+                    <Send className={`h-3.5 w-3.5 ${pushingId === (selectedDeviceDetails._id || selectedDeviceDetails.id) ? 'animate-pulse' : ''}`} /> Push Config (MQTT)
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDetailsModal(false);
+                  setSelectedDeviceIdDetails(null);
+                }}
+                className="rounded-xl border border-slate-700 px-5 py-2 text-xs font-medium text-slate-300 hover:bg-slate-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

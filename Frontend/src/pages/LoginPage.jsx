@@ -169,7 +169,7 @@ const LoginPage = () => {
               lineHeight: 1.15,
             }}
           >
-            Smart Soil
+            Smart
             <span style={{
               display: 'block',
               background: 'linear-gradient(135deg, #60bf71 0%, #3ecf8e 50%, #38d9a9 100%)',
@@ -177,7 +177,7 @@ const LoginPage = () => {
               WebkitTextFillColor: 'transparent',
               marginTop: '0.15rem',
             }}>
-              Monitoring System
+              Hydroponics System
             </span>
           </motion.h1>
 

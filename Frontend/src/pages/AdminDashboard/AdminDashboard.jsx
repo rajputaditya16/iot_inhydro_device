@@ -19,17 +19,20 @@ const AdminDashboard = () => {
   // Transform ThingSpeak API response to device format
   const transformApiData = (apiData, dbDevice) => {
     if (!apiData || !apiData.entry_id) return null;
+    const lastUpdatedTime = new Date(apiData.created_at);
+    const diffMs = Date.now() - lastUpdatedTime.getTime();
+    // 5 minutes threshold
+    const isOnline = diffMs < 5 * 60 * 1000;
     return {
       id: dbDevice._id,
       name: dbDevice.name,
       location: dbDevice.location,
-      status: 'online',
+      status: isOnline ? 'online' : 'offline',
       temp: parseFloat(apiData.field1) || 0,
       moisture: parseFloat(apiData.field2) || 0,  
       ph: parseFloat(apiData.field3) || 0,
       ec: parseFloat(apiData.field4) || 0,
       lastUpdated: apiData.created_at,
-      battery: dbDevice.battery || 100,
     };
   };
 
@@ -72,7 +75,6 @@ const AdminDashboard = () => {
             ph: 0,
             ec: 0,
             lastUpdated: d.lastUpdated || d.updatedAt,
-            battery: d.battery || 100,
           }));
           setDevices(offlineDevices);
           setHasNewData(false);
@@ -97,7 +99,6 @@ const AdminDashboard = () => {
               status: 'offline',
               temp: 0, moisture: 0, ph: 0, ec: 0,
               lastUpdated: dbDevice.lastUpdated || dbDevice.updatedAt,
-              battery: dbDevice.battery || 100,
             };
           } catch {
             return {
@@ -107,7 +108,6 @@ const AdminDashboard = () => {
               status: 'offline',
               temp: 0, moisture: 0, ph: 0, ec: 0,
               lastUpdated: dbDevice.lastUpdated || dbDevice.updatedAt,
-              battery: dbDevice.battery || 100,
             };
           }
         });
@@ -122,7 +122,6 @@ const AdminDashboard = () => {
             status: d.status || 'offline',
             temp: 0, moisture: 0, ph: 0, ec: 0,
             lastUpdated: d.lastUpdated || d.updatedAt,
-            battery: d.battery || 100,
           }));
 
         const liveDevices = await Promise.all(liveDevicePromises);
