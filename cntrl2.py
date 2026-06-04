@@ -10,20 +10,20 @@ import paho.mqtt.client as mqtt
 
 
 # Room 1 sensor ports
-R1_PORT_SOIL = "/dev/serial/by-path/usb-0:1.1-port0"
-R1_PORT_MD02 = "/dev/serial/by-path/usb-0:1.2-port0"
-R1_PORT_ORP  = "/dev/serial/by-path/usb-0:1.3-port0"
+R1_PORT_SOIL = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.2:1.0-port0"
+R1_PORT_MD02 = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.1:1.0-port0"
+R1_PORT_ORP  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.3:1.0-port0"
 R1_PORT_CO2  = "/dev/serial/by-path/usb-0:1.4-port0"
 
 # Room 2 sensor ports
-R2_PORT_SOIL = "/dev/serial/by-path/usb-0:1.5-port0"
-R2_PORT_MD02 = "/dev/serial/by-path/usb-0:1.6-port0"
-R2_PORT_ORP  = "/dev/serial/by-path/usb-0:1.7-port0"
-R2_PORT_CO2  = "/dev/serial/by-path/usb-0:1.8-port0"
+R2_PORT_SOIL = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.6:1.0-port0"
+R2_PORT_MD02 = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.5:1.0-port0"
+R2_PORT_ORP  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.4:1.0-port0"
+R2_PORT_CO2  = "/dev/serial/by-path/platform-3f98000.usb-usb-0:1:2:1:0-port0"
 
 # MODBUS SETTINGS
 RELAY_BAUD = 9600
-RELAY_PORT_FIXED = "/dev/serial/by-path/usb-0:1:2:1:0-port0"
+RELAY_PORT_FIXED = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.7:1.0-port0"
 POSSIBLE_RELAY_IDS = [255, 1, 2, 0, 3]  
 working_relay_id = None
 
@@ -1054,7 +1054,7 @@ def build_setpoint_screen(room):
         c_day.grid(row=r_idx, column=1, padx=2, pady=1)
         val_lbl_d = tk.Label(c_day, text=str(setpoints[room][d_key]), font=("Arial", 9, "bold"), fg="#e65100", bg="white", width=6, anchor="center")
         val_lbl_d.pack(side="left")
-        tk.Button(c_day, text="✎", font=("Arial", 8, "bold"), bg="#f5f5f5", fg="#333", bd=1, relief="groove",
+        tk.Button(c_day, text="EDIT", font=("Arial", 8, "bold"), bg="#f5f5f5", fg="#333", bd=1, relief="groove",
                   command=lambda k=d_key, r=room: open_keypad_room(r, k)).pack(side="right")
         labels_s[d_key] = val_lbl_d
         
@@ -1063,7 +1063,7 @@ def build_setpoint_screen(room):
         c_night.grid(row=r_idx, column=2, padx=2, pady=1)
         val_lbl_n = tk.Label(c_night, text=str(setpoints[room][n_key]), font=("Arial", 9, "bold"), fg="#e65100", bg="white", width=6, anchor="center")
         val_lbl_n.pack(side="left")
-        tk.Button(c_night, text="✎", font=("Arial", 8, "bold"), bg="#f5f5f5", fg="#333", bd=1, relief="groove",
+        tk.Button(c_night, text="EDIT", font=("Arial", 8, "bold"), bg="#f5f5f5", fg="#333", bd=1, relief="groove",
                   command=lambda k=n_key, r=room: open_keypad_room(r, k)).pack(side="right")
         labels_s[n_key] = val_lbl_n
 
@@ -1108,7 +1108,7 @@ def build_setpoint_screen(room):
                                    font=("Arial", 9, "bold"), fg="#e65100" if r_key != "Name" else "#333", bg="white", width=10, anchor="center")
                 val_lbl.pack(side="left", expand=True)
                 
-                btn = tk.Button(col_frame, text="✎", font=("Arial", 8, "bold"), bg="#f5f5f5", fg="#333",
+                btn = tk.Button(col_frame, text="EDIT", font=("Arial", 8, "bold"), bg="#f5f5f5", fg="#333",
                                 activebackground=color, activeforeground="white", bd=1, relief="groove",
                                 command=lambda k=full_key, r=room: open_keypad_room(r, k))
                 btn.pack(side="right", padx=2)
