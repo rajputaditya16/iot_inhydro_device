@@ -10,7 +10,9 @@ const defaultSetpoints = {
   "Timer1 Name": "TIMER 1", "Timer1 Start": "10:00", "Timer1 Stop": "17:00", "Timer1 ON Min": 15, "Timer1 OFF Min": 30,
   "Timer2 Name": "TIMER 2", "Timer2 Start": "10:00", "Timer2 Stop": "17:00", "Timer2 ON Min": 15, "Timer2 OFF Min": 30,
   "Timer3 Name": "TIMER 3", "Timer3 Start": "10:00", "Timer3 Stop": "17:00", "Timer3 ON Min": 15, "Timer3 OFF Min": 30,
-  "Timer4 Name": "AC TIMER", "Timer4 Start": "10:00", "Timer4 Stop": "17:00", "Timer4 ON Min": 15, "Timer4 OFF Min": 30,
+  "Timer4 Name": "AC TIMER",
+  "Timer4 D_Start": "10:00", "Timer4 D_Stop": "17:00", "Timer4 D_ON Min": 15, "Timer4 D_OFF Min": 30,
+  "Timer4 N_Start": "17:01", "Timer4 N_Stop": "09:59", "Timer4 N_ON Min": 15, "Timer4 N_OFF Min": 30,
 };
 
 const InputRow = ({ label, objKey, type = "number", data, onChange }) => (
@@ -135,10 +137,19 @@ const OfficeControlSettings = () => {
       if (topic.endsWith('setpoints/current')) {
         try {
           const incomingData = JSON.parse(message.toString());
-          setSetpoints(prev => ({
-            ...prev,
-            [room]: { ...prev[room], ...incomingData }
-          }));
+          setSetpoints(prev => {
+            const merged = { ...prev[room], ...incomingData };
+            const credKeys = ["CLIENT ID", "USERNAME", "PASSWORD", "CHANNEL ID", "PORT", "READ API KEY", "WRITE API KEY"];
+            credKeys.forEach(k => {
+              if (prev[room] && prev[room][k] && (!incomingData[k] || incomingData[k] === "")) {
+                merged[k] = prev[room][k];
+              }
+            });
+            return {
+              ...prev,
+              [room]: merged
+            };
+          });
         } catch (error) {
           console.error("Error parsing current setpoints from device", error);
         }
@@ -165,12 +176,12 @@ const OfficeControlSettings = () => {
     }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (client && client.connected) {
       setStatus('saving');
 
       const payload = { ...setpoints[activeRoom] };
-      const numericFields = ['EC MIN', 'EC MAX', 'PH LOW', 'PH HIGH', 'R T Max', 'R T Min', 'R H Max', 'R H Min', 'Timer1 ON Min', 'Timer1 OFF Min', 'Timer2 ON Min', 'Timer2 OFF Min', 'Timer3 ON Min', 'Timer3 OFF Min', 'Timer4 ON Min', 'Timer4 OFF Min', 'PORT'];
+      const numericFields = ['EC MIN', 'EC MAX', 'PH LOW', 'PH HIGH', 'R T Max', 'R T Min', 'R H Max', 'R H Min', 'Timer1 ON Min', 'Timer1 OFF Min', 'Timer2 ON Min', 'Timer2 OFF Min', 'Timer3 ON Min', 'Timer3 OFF Min', 'Timer4 D_ON Min', 'Timer4 D_OFF Min', 'Timer4 N_ON Min', 'Timer4 N_OFF Min', 'PORT'];
 
       numericFields.forEach(field => {
         if (payload[field] !== undefined && payload[field] !== "") {
@@ -178,6 +189,47 @@ const OfficeControlSettings = () => {
           payload[field] = isNaN(numValue) ? payload[field] : numValue;
         }
       });
+
+      // Save credentials to MongoDB and trigger push-config if superadmin
+      if (isSuperadmin && selectedDevice) {
+        try {
+          const dbPayload = {
+            thingspeak: {
+              clientId: payload["CLIENT ID"] || "",
+              username: payload["USERNAME"] || "",
+              password: payload["PASSWORD"] || "",
+              channelId: payload["CHANNEL ID"] || "",
+              port: Number(payload["PORT"]) || 1883,
+              readApiKey: payload["READ API KEY"] || "",
+              writeApiKey: payload["WRITE API KEY"] || ""
+            }
+          };
+
+          // 1. Update Database
+          const updateRes = await fetch(`${API_BASE}/api/devices/${selectedDevice._id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(dbPayload),
+          });
+          const updateData = await updateRes.json();
+          if (updateData.success) {
+            setDevices(prev => prev.map(d => d._id === selectedDevice._id ? updateData.data : d));
+          }
+
+          // 2. Trigger push-config via Backend
+          await fetch(`${API_BASE}/api/devices/${selectedDevice._id}/push-config`, {
+            method: 'PUT',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+        } catch (err) {
+          console.error("Failed to sync credentials to DB/Device", err);
+        }
+      }
 
       if (!isSuperadmin) {
         delete payload["CLIENT ID"];
@@ -355,13 +407,29 @@ const OfficeControlSettings = () => {
                 <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer3 OFF Min" />
               </div>
             </div>
-            <div className="space-y-4 border border-slate-700/50 p-4 rounded-xl">
+            <div className="md:col-span-2 space-y-4 border border-slate-700/50 p-4 rounded-xl">
               <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Timer 4 Name (AC TIMER)" objKey="Timer4 Name" type="text" />
-              <div className="grid grid-cols-2 gap-4">
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer4 Start" type="text" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer4 Stop" type="text" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer4 ON Min" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer4 OFF Min" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                {/* Day Settings */}
+                <div className="space-y-4 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
+                  <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider">Day Settings</h5>
+                  <div className="grid grid-cols-2 gap-3">
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer4 D_Start" type="text" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer4 D_Stop" type="text" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer4 D_ON Min" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer4 D_OFF Min" />
+                  </div>
+                </div>
+                {/* Night Settings */}
+                <div className="space-y-4 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
+                  <h5 className="text-xs font-semibold text-purple-400 uppercase tracking-wider">Night Settings</h5>
+                  <div className="grid grid-cols-2 gap-3">
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer4 N_Start" type="text" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer4 N_Stop" type="text" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer4 N_ON Min" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer4 N_OFF Min" />
+                  </div>
+                </div>
               </div>
             </div>
           </div>

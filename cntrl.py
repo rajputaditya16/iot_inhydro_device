@@ -454,7 +454,9 @@ def on_control_message(client, userdata, msg):
     except Exception as e:
         print(f"Control MQTT error: {e}")
 
-control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "Inhydro_Dual_Room_001")
+import uuid
+client_id = f"Inhydro_Dual_{DEVICE_NAME.strip()}_{uuid.uuid4().hex[:6]}"
+control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id)
 control_client.on_message = on_control_message
 try:
     control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)

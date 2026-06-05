@@ -330,10 +330,17 @@ def on_control_message(client, userdata, msg):
         n_stop  = new_sp.get("Timer4 N_Stop", setpoints[room].get("Timer4 N_Stop", "09:59"))
         
         # Also validate formatting of any updated time values
-        for k, v in new_sp.items():
-            if ":" in str(v) and not k.endswith("Name"):
+        time_keys = [
+            "Timer1 Start", "Timer1 Stop",
+            "Timer2 Start", "Timer2 Stop",
+            "Timer3 Start", "Timer3 Stop",
+            "Timer4 D_Start", "Timer4 D_Stop",
+            "Timer4 N_Start", "Timer4 N_Stop"
+        ]
+        for k in time_keys:
+            if k in new_sp:
                 try:
-                    datetime.datetime.strptime(str(v), "%H:%M")
+                    datetime.datetime.strptime(str(new_sp[k]), "%H:%M")
                 except:
                     print(f"⚠️ Remote setpoint reject: invalid time format for {k}")
                     return
