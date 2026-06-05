@@ -27,8 +27,33 @@ const deviceSchema = new mongoose.Schema(
       type: String,
       enum: ['system2', 'almora', 'almora2', 'multi_sensor', 'light_motor_pump', 'office_control'],
       default: 'system2',
-    }, 
+    },
     mqttId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    clientName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    locationCode: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    model: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    unit: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    nicknameByClient: {
       type: String,
       trim: true,
       default: '',
