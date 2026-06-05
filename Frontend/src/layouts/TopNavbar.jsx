@@ -1,15 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bell, ChevronDown,Settings, LogOut, Wifi, WifiOff, Menu } from 'lucide-react';
-import { mockNotifications} from '../data/mockData';
 import { useNavigate } from 'react-router-dom';
-// import { mockNotifications } from '../data/mockData';
 
 const TopNavbar = ({ pageTitle, collapsed, setCollapsed }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [isOnline] = useState(true);
-  const notifRef = useRef(null);
+  const notifRef = useRef(null); 
   const profileRef = useRef(null);
   const navigate = useNavigate();
    const [currentUser, setCurrentUser] = useState({ name: 'User', email: '', role: 'user' });
@@ -30,8 +28,6 @@ const TopNavbar = ({ pageTitle, collapsed, setCollapsed }) => {
     }
   }, []);
 
-  const unreadCount = mockNotifications.filter((n) => !n.read).length;
-
   // Close dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -41,13 +37,6 @@ const TopNavbar = ({ pageTitle, collapsed, setCollapsed }) => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const notifTypeColors = {
-    critical: 'bg-red-500',
-    warning: 'bg-yellow-500',
-    info: 'bg-blue-500',
-    success: 'bg-emerald-500',
-  };
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-700/50 bg-slate-900/80 px-4 backdrop-blur-xl lg:px-6">

@@ -5,7 +5,6 @@ import ForgotPassword from './pages/ForgotPassword';
 import AdminDashboard from './pages/AdminDashboard/AdminDashboard';
 import SuperAdminDashboard from './pages/SuperAdminDashboard/SuperAdminDashboard';
 import LiveMonitoring from './pages/AdminDashboard/LiveMonitoring';
-// import LocationsPage from './pages/LocationsPage';
 import DevicesPage from './pages/AdminDashboard/DevicesPage';
 import AnalyticsPage from './pages/AdminDashboard/AnalyticsPage';
 import UserManagement from './pages/AdminDashboard/UserManagement';
@@ -31,7 +30,6 @@ function App() {
         {/* Auth */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
-
         {/* ── Shared Dashboard Layout ── */}
         <Route element={<SharedLayoutRoute />}>
           <Route path="/dashboard" element={<ProtectedRoute allowedAccountTypes={['admin']}><AdminDashboard /></ProtectedRoute>} />
@@ -39,8 +37,7 @@ function App() {
           <Route path="/superadmin-dashboard" element={<ProtectedRoute allowedAccountTypes={['superadmin']}><SuperAdminDashboard /></ProtectedRoute>} />
 
           {/* Shared Routes */}
-          {/* <Route path="/locations" element={<LocationsPage />} /> */}
-          {/* <Route path="/locations" element={<LocationsPage />} /> */}
+
           <Route path="/devices" element={<DevicesPage />} />
           <Route path="/monitoring" element={<LiveMonitoring />} />
           <Route path="/analytics" element={<AnalyticsPage />} />

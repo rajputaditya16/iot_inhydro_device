@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { User, Bell, Shield, Palette, Globe, Save, Moon, Sun, Monitor, Settings } from 'lucide-react';
-import { mockUser } from '../../data/mockData';
 import DeviceSettings from '../AdminDashboard/DeviceSettings';
 import AlmoraSettings from '../AdminDashboard/AlmoraSettings';
 import Almora2Settings from '../AdminDashboard/Almora2Settings';
@@ -11,13 +10,6 @@ import OfficeControlSettings from '../AdminDashboard/OfficeControlSettings';
 
 const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('profile');
-  const [notifications, setNotifications] = useState({
-    email: true,
-    push: true,
-    critical: true,
-    weekly: false,
-  });
-
   
   const [currentUser, setCurrentUser] = useState({ name: 'User', email: '', role: 'user' });
 
@@ -36,12 +28,6 @@ const SettingsPage = () => {
       console.error('Error parsing user data from localStorage', error);
     }
   }, []);
-  // const [notifications, setNotifications] = useState({
-  //   email: true,
-  //   push: true,
-  //   critical: true,
-  //   weekly: false,  
-  // });
   const tabs = [
     { key: 'profile', label: 'Profile', icon: User },
     ...((currentUser.role === 'admin' || currentUser.role === 'superadmin') ? [

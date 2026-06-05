@@ -119,7 +119,7 @@ const Sidebar = ({ collapsed, isMobile = false, isOpen = true, onItemClick, user
             <div className="overflow-hidden">
               <p className="truncate text-xs font-semibold text-white">{displayName}</p>
               <p className={`text-[10px] font-semibold uppercase tracking-wider ${displayRole === 'superadmin' ? 'text-purple-400' :
-                  displayRole === 'admin' ? 'text-red-400' : 'text-green-400'
+                displayRole === 'admin' ? 'text-red-400' : 'text-green-400'
                 }`}>{displayRole}</p>
             </div>
           </div>

@@ -3,10 +3,11 @@ import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Edit3,
 import mqtt from 'mqtt';
 
 const defaultSetpoints = {
-  "EC MIN": 1200, "EC MAX": 1800,
+  "EC MIN": 1.2, "EC MAX": 1.8,
   "PH LOW": 5.8, "PH HIGH": 6.5,
-  "R T Max": 35.0, "R T Min": 15.0,
-  "R H Max": 80.0, "R H Min": 30.0,
+  "D T Max": 35.0, "DT Min": 15.0,
+  "N T Max": 35.0, "N T Min": 15.0,
+  "H Max": 80.0, "H Min": 30.0,
   "Timer1 Name": "TIMER 1", "Timer1 Start": "10:00", "Timer1 Stop": "17:00", "Timer1 ON Min": 15, "Timer1 OFF Min": 30,
   "Timer2 Name": "TIMER 2", "Timer2 Start": "10:00", "Timer2 Stop": "17:00", "Timer2 ON Min": 15, "Timer2 OFF Min": 30,
   "Timer3 Name": "TIMER 3", "Timer3 Start": "10:00", "Timer3 Stop": "17:00", "Timer3 ON Min": 15, "Timer3 OFF Min": 30,
@@ -37,6 +38,14 @@ const OfficeControlSettings = () => {
   const [status, setStatus] = useState('disconnected');
   const [loading, setLoading] = useState(true);
   const [client, setClient] = useState(null);
+  const [toast, setToast] = useState({ show: false, type: 'success', message: '' });
+
+  const showToast = (type, message) => {
+    setToast({ show: true, type, message });
+    setTimeout(() => {
+      setToast({ show: false, type: '', message: '' });
+    }, 4000);
+  };
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState('');
@@ -167,7 +176,7 @@ const OfficeControlSettings = () => {
         mqttClient.end();
       }
     };
-  }, [deviceRoot, selectedDevice, isSuperadmin]);
+  }, [deviceRoot]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleChange = (room, key, value) => {
     setSetpoints(prev => ({
@@ -181,7 +190,7 @@ const OfficeControlSettings = () => {
       setStatus('saving');
 
       const payload = { ...setpoints[activeRoom] };
-      const numericFields = ['EC MIN', 'EC MAX', 'PH LOW', 'PH HIGH', 'R T Max', 'R T Min', 'R H Max', 'R H Min', 'Timer1 ON Min', 'Timer1 OFF Min', 'Timer2 ON Min', 'Timer2 OFF Min', 'Timer3 ON Min', 'Timer3 OFF Min', 'Timer4 D_ON Min', 'Timer4 D_OFF Min', 'Timer4 N_ON Min', 'Timer4 N_OFF Min', 'PORT'];
+      const numericFields = ['EC MIN', 'EC MAX', 'PH LOW', 'PH HIGH', 'D T Max', 'DT Min', 'N T Max', 'N T Min', 'H Max', 'H Min', 'Timer1 ON Min', 'Timer1 OFF Min', 'Timer2 ON Min', 'Timer2 OFF Min', 'Timer3 ON Min', 'Timer3 OFF Min', 'Timer4 D_ON Min', 'Timer4 D_OFF Min', 'Timer4 N_ON Min', 'Timer4 N_OFF Min', 'PORT'];
 
       numericFields.forEach(field => {
         if (payload[field] !== undefined && payload[field] !== "") {
@@ -228,6 +237,7 @@ const OfficeControlSettings = () => {
           });
         } catch (err) {
           console.error("Failed to sync credentials to DB/Device", err);
+          showToast('error', "Failed to sync credentials to Database");
         }
       }
 
@@ -245,13 +255,16 @@ const OfficeControlSettings = () => {
         if (err) {
           console.error(err);
           setStatus('error');
+          showToast('error', `Failed to push setpoints for Room ${activeRoom}`);
         } else {
           setStatus('saved');
+          showToast('success', `Setpoints pushed to Room ${activeRoom} successfully!`);
           setTimeout(() => setStatus('connected'), 3000);
         }
       });
     } else {
       setStatus('error');
+      showToast('error', "MQTT client is not connected");
     }
   };
 
@@ -277,6 +290,26 @@ const OfficeControlSettings = () => {
 
   return (
     <div className="space-y-6">
+      {toast.show && (
+        <div className={`fixed top-6 right-6 z-50 flex items-center gap-3 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 max-w-sm ${
+          toast.type === 'success' 
+            ? 'border-emerald-500/30 bg-slate-900/95 text-emerald-400 shadow-emerald-950/20' 
+            : 'border-red-500/30 bg-slate-900/95 text-red-400 shadow-red-950/20'
+        }`}>
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="h-5 w-5 shrink-0 animate-pulse" />
+          ) : (
+            <AlertCircle className="h-5 w-5 shrink-0 animate-pulse" />
+          )}
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold text-white">
+              {toast.type === 'success' ? 'Success' : 'Error'}
+            </span>
+            <span className="text-xs text-slate-300">{toast.message}</span>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
@@ -366,14 +399,16 @@ const OfficeControlSettings = () => {
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
           <h4 className="mb-4 text-sm font-semibold text-green-400">Core Limits</h4>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="EC Minimum (µS/cm)" objKey="EC MIN" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="EC Maximum (µS/cm)" objKey="EC MAX" />
+            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="EC Minimum (mS/cm)" objKey="EC MIN" />
+            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="EC Maximum (mS/cm)" objKey="EC MAX" />
             <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="pH Low Limit" objKey="PH LOW" />
             <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="pH High Limit" objKey="PH HIGH" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Room Temp Min (°C)" objKey="R T Min" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Room Temp Max (°C)" objKey="R T Max" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Room Humidity Min (%)" objKey="R H Min" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Room Humidity Max (%)" objKey="R H Max" />
+            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Day Temp Min (°C)" objKey="DT Min" />
+            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Day Temp Max (°C)" objKey="D T Max" />
+            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Night Temp Min (°C)" objKey="N T Min" />
+            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Night Temp Max (°C)" objKey="N T Max" />
+            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Room Humidity Min (%)" objKey="H Min" />
+            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Room Humidity Max (%)" objKey="H Max" />
           </div>
         </div>
 
