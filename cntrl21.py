@@ -181,12 +181,14 @@ def default_setpoints():
         "Timer2 Start": "10:00", "Timer2 Stop": "17:00",
         "Timer2 ON Min": 15,     "Timer2 OFF Min": 30,
         "Timer3 Name": "TIMER 3",
-        "Timer3 Start": "10:00", "Timer3 Stop": "17:00",
-        "Timer3 ON Min": 15,     "Timer3 OFF Min": 30,
+        "Timer3 D_Start": "10:00", "Timer3 D_Stop": "17:00",
+        "Timer3 D_ON Min": 15,     "Timer3 D_OFF Min": 30,
+        "Timer3 N_Start": "17:05", "Timer3 N_Stop": "09:55",
+        "Timer3 N_ON Min": 15,     "Timer3 N_OFF Min": 30,
         "Timer4 Name": "AC TIMER",
         "Timer4 D_Start": "10:00", "Timer4 D_Stop": "17:00",
         "Timer4 D_ON Min": 15,     "Timer4 D_OFF Min": 30,
-        "Timer4 N_Start": "10:00", "Timer4 N_Stop": "17:00",
+        "Timer4 N_Start": "17:05", "Timer4 N_Stop": "09:55",
         "Timer4 N_ON Min": 15,     "Timer4 N_OFF Min": 30,
         "CLIENT ID": "", "USERNAME": "", "PASSWORD": "",
         "CHANNEL ID": "", "PORT": 1883,
@@ -323,17 +325,12 @@ def on_control_message(client, userdata, msg):
         }
         new_sp   = {key_map.get(k, k): v for k, v in new_data.items()}
 
-        # Validate day/night timer bounds for Timer 4 to avoid conflicts
-        d_start = new_sp.get("Timer4 D_Start", setpoints[room].get("Timer4 D_Start", "10:00"))
-        d_stop  = new_sp.get("Timer4 D_Stop", setpoints[room].get("Timer4 D_Stop", "17:00"))
-        n_start = new_sp.get("Timer4 N_Start", setpoints[room].get("Timer4 N_Start", "17:01"))
-        n_stop  = new_sp.get("Timer4 N_Stop", setpoints[room].get("Timer4 N_Stop", "09:59"))
-        
         # Also validate formatting of any updated time values
         time_keys = [
             "Timer1 Start", "Timer1 Stop",
             "Timer2 Start", "Timer2 Stop",
-            "Timer3 Start", "Timer3 Stop",
+            "Timer3 D_Start", "Timer3 D_Stop",
+            "Timer3 N_Start", "Timer3 N_Stop",
             "Timer4 D_Start", "Timer4 D_Stop",
             "Timer4 N_Start", "Timer4 N_Stop"
         ]
@@ -345,9 +342,28 @@ def on_control_message(client, userdata, msg):
                     print(f"⚠️ Remote setpoint reject: invalid time format for {k}")
                     return
 
-        if d_stop == n_start or n_stop == d_start:
-            print(f"⚠️ Remote setpoint reject: Day/Night timer conflict")
-            return
+        # Validate day/night timer bounds for Timer 3 and Timer 4 to avoid conflicts
+        for prefix in ["Timer3", "Timer4"]:
+            d_start = new_sp.get(f"{prefix} D_Start", setpoints[room].get(f"{prefix} D_Start", "10:00"))
+            d_stop  = new_sp.get(f"{prefix} D_Stop", setpoints[room].get(f"{prefix} D_Stop", "17:00"))
+            n_start = new_sp.get(f"{prefix} N_Start", setpoints[room].get(f"{prefix} N_Start", "17:01"))
+            n_stop  = new_sp.get(f"{prefix} N_Stop", setpoints[room].get(f"{prefix} N_Stop", "09:59"))
+            
+            try:
+                t_d_start = datetime.datetime.strptime(str(d_start), "%H:%M").time()
+                t_d_stop  = datetime.datetime.strptime(str(d_stop),  "%H:%M").time()
+                t_n_start = datetime.datetime.strptime(str(n_start), "%H:%M").time()
+                t_n_stop  = datetime.datetime.strptime(str(n_stop),  "%H:%M").time()
+            except Exception as e:
+                print(f"⚠️ Remote setpoint reject: invalid time format: {e}")
+                return
+
+            if (t_d_start >= t_d_stop or
+                t_n_start < t_d_stop or
+                t_d_start < t_n_stop or
+                t_n_start == t_n_stop):
+                print(f"⚠️ Remote setpoint reject: Day/Night timer conflict for {prefix}")
+                return
 
         ts_changed = any(
             str(new_sp.get(k)) != str(setpoints[room].get(k))
@@ -407,6 +423,10 @@ def read_md02(inst, label):
         except Exception:
             rt = inst.read_register(1, 1, signed=True, functioncode=3)
             rh = inst.read_register(2, 1, functioncode=3)
+        if rt is not None:
+            rt = round(rt - 5.0, 1)
+        if rh is not None:
+            rh = round(rh - 3.0, 1)
         return {"room_temp": rt, "room_humi": rh}
     except Exception as e:
         print(f"⚠️ [{label} MD02] Read failed: {e}")
@@ -583,7 +603,7 @@ TIMER_CHANNELS = {
 TIMER_KEYS = [
     ("Timer1 Start","Timer1 Stop","Timer1 ON Min","Timer1 OFF Min"),
     ("Timer2 Start","Timer2 Stop","Timer2 ON Min","Timer2 OFF Min"),
-    ("Timer3 Start","Timer3 Stop","Timer3 ON Min","Timer3 OFF Min"),
+    ("Timer3 D_Start","Timer3 D_Stop","Timer3 D_ON Min","Timer3 D_OFF Min"),
     ("Timer4 D_Start","Timer4 D_Stop","Timer4 D_ON Min","Timer4 D_OFF Min"),
 ]
 
@@ -599,21 +619,23 @@ def run_timers(room):
     now = time.time()
     sp  = setpoints[room]
     for i, (sk, ek, onk, offk) in enumerate(TIMER_KEYS):
-        ch       = TIMER_CHANNELS[room][i]
+        ch       = TIMER_CHANNELS[room][i] if i < 3 else ROOM_CHANNELS[room]["ac"]
         ts       = timer_state[room][i]
         is_ac_timer = (ch == ROOM_CHANNELS[room]["ac"])
+        is_day_night = (i in [2, 3])
 
-        if is_ac_timer:
-            in_day = is_within_window(sp.get("Timer4 D_Start", "10:00"), sp.get("Timer4 D_Stop", "17:00"))
-            in_night = is_within_window(sp.get("Timer4 N_Start", "10:00"), sp.get("Timer4 N_Stop", "17:00"))
+        if is_day_night:
+            prefix = f"Timer{i+1}"
+            in_day = is_within_window(sp.get(f"{prefix} D_Start", "10:00"), sp.get(f"{prefix} D_Stop", "17:00"))
+            in_night = is_within_window(sp.get(f"{prefix} N_Start", "10:00"), sp.get(f"{prefix} N_Stop", "17:00"))
             in_window = in_day or in_night
             
             if in_night and not in_day:
-                run_sec  = float(sp.get("Timer4 N_ON Min", 15)) * 60
-                stop_sec = float(sp.get("Timer4 N_OFF Min", 30)) * 60
+                run_sec  = float(sp.get(f"{prefix} N_ON Min", 15)) * 60
+                stop_sec = float(sp.get(f"{prefix} N_OFF Min", 30)) * 60
             else:
-                run_sec  = float(sp.get("Timer4 D_ON Min", 15)) * 60
-                stop_sec = float(sp.get("Timer4 D_OFF Min", 30)) * 60
+                run_sec  = float(sp.get(f"{prefix} D_ON Min", 15)) * 60
+                stop_sec = float(sp.get(f"{prefix} D_OFF Min", 30)) * 60
         else:
             run_sec  = float(sp.get(onk,  15)) * 60
             stop_sec = float(sp.get(offk, 30)) * 60
@@ -681,7 +703,19 @@ def auto_trust_devices():
             bt.stdin.write(cmd)
         bt.stdin.flush()
     except Exception as e: print("BT agent error:", e)
+    
+    last_discoverable_check = 0
     while True:
+        now = time.time()
+        # Re-enforce discoverable/pairable modes every 60 seconds to bypass OS timeout
+        if now - last_discoverable_check >= 60:
+            try:
+                subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "agent", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                last_discoverable_check = now
+            except: pass
+            
         try:
             out = subprocess.check_output(['bluetoothctl','paired-devices'], text=True)
             for line in out.split('\n'):
@@ -797,8 +831,10 @@ def make_home_box(room):
         row_f.pack(fill="x", pady=4)
         tk.Label(row_f, text=display[k], font=SML, fg="#333",
                  bg="#e0e0e0", width=12, anchor="w").pack(side="left")
-        lbl = tk.Label(row_f, text="---", font=("Arial",16,"bold"),
-                       fg="#0d47a1", bg="#e0e0e0", width=15, anchor="e")
+        # EC: auto-width (0) so full "X.XX mS/cm (YYY ppm)" fits without clipping
+        val_width = 0 if k == "ec" else 15
+        lbl = tk.Label(row_f, text="---", font=("Arial", 16, "bold"),
+                       fg="#0d47a1", bg="#e0e0e0", width=val_width, anchor="e")
         lbl.pack(side="right")
         labels_map[k] = lbl
 
@@ -991,8 +1027,10 @@ def build_setpoint_screen(room):
         tk.Label(cell, text=lbl_txt, font=("Arial", 9, "bold"), fg="#444",
                  bg="white", anchor="w", width=width_lbl).pack(side="left", padx=1)
         
+        is_name = key.endswith("Name")
         val_lbl = tk.Label(cell, text=str(setpoints[room][key]),
-                           font=("Arial", 9, "bold"), fg="#e65100", bg="white", width=6, anchor="center")
+                           font=("Arial", 9, "bold"), fg="#333" if is_name else "#e65100",
+                           bg="white", width=12 if is_name else 6, anchor="center")
         val_lbl.pack(side="left", padx=2)
         
         btn = tk.Button(cell, text="EDIT", font=("Arial", 8, "bold"), bg="#f5f5f5", fg="#333",
@@ -1035,16 +1073,21 @@ def build_setpoint_screen(room):
     
     # AC Name Row
     f_ac_name = tk.Frame(card_ac, bg="white")
-    f_ac_name.pack(fill="x", pady=2, padx=4)
-    make_cell(f_ac_name, "Timer4 Name", "Name:", width_lbl=8)
+    f_ac_name.pack(fill="x", pady=4, padx=10)
+    name_cell = make_cell(f_ac_name, "Timer4 Name", "Name:", width_lbl=8)
+    if name_cell:
+        name_cell.pack(side="left")
     
     grid_ac = tk.Frame(card_ac, bg="white")
-    grid_ac.pack(pady=2, padx=4)
+    grid_ac.pack(pady=4, padx=10, fill="x")
+    grid_ac.columnconfigure(0, weight=1, minsize=80)
+    grid_ac.columnconfigure(1, weight=2, minsize=120)
+    grid_ac.columnconfigure(2, weight=2, minsize=120)
     
     # Grid Headers
-    tk.Label(grid_ac, text="Setting", font=("Arial", 9, "bold"), fg="#555", bg="white", width=8, anchor="w").grid(row=0, column=0, padx=2)
-    tk.Label(grid_ac, text="Day", font=("Arial", 9, "bold"), fg=color, bg="white", width=10, anchor="center").grid(row=0, column=1, padx=2)
-    tk.Label(grid_ac, text="Night", font=("Arial", 9, "bold"), fg=color, bg="white", width=10, anchor="center").grid(row=0, column=2, padx=2)
+    tk.Label(grid_ac, text="Setting", font=("Arial", 9, "bold"), fg="#555", bg="white", width=10, anchor="w").grid(row=0, column=0, padx=2, pady=2)
+    tk.Label(grid_ac, text="Day", font=("Arial", 9, "bold"), fg=color, bg="white", width=14, anchor="center").grid(row=0, column=1, padx=2, pady=2)
+    tk.Label(grid_ac, text="Night", font=("Arial", 9, "bold"), fg=color, bg="white", width=14, anchor="center").grid(row=0, column=2, padx=2, pady=2)
     
     ac_rows = [
         ("Start", "Timer4 D_Start", "Timer4 N_Start", "Start:"),
@@ -1054,29 +1097,29 @@ def build_setpoint_screen(room):
     ]
     
     for r_idx, (r_key, d_key, n_key, r_lbl) in enumerate(ac_rows, 1):
-        tk.Label(grid_ac, text=r_lbl, font=("Arial", 9, "bold"), fg="#555", bg="white", width=8, anchor="w").grid(row=r_idx, column=0, padx=2, pady=1)
+        tk.Label(grid_ac, text=r_lbl, font=("Arial", 9, "bold"), fg="#555", bg="white", width=10, anchor="w").grid(row=r_idx, column=0, padx=2, pady=2)
         
         # Day cell
         c_day = tk.Frame(grid_ac, bg="white")
-        c_day.grid(row=r_idx, column=1, padx=2, pady=1)
-        val_lbl_d = tk.Label(c_day, text=str(setpoints[room][d_key]), font=("Arial", 9, "bold"), fg="#e65100", bg="white", width=6, anchor="center")
-        val_lbl_d.pack(side="left")
+        c_day.grid(row=r_idx, column=1, padx=2, pady=2, sticky="nsew")
+        val_lbl_d = tk.Label(c_day, text=str(setpoints[room][d_key]), font=("Arial", 9, "bold"), fg="#e65100", bg="white", width=8, anchor="center")
+        val_lbl_d.pack(side="left", expand=True)
         tk.Button(c_day, text="EDIT", font=("Arial", 8, "bold"), bg="#f5f5f5", fg="#333", bd=1, relief="groove",
                   command=lambda k=d_key, r=room: open_keypad_room(r, k)).pack(side="right")
         labels_s[d_key] = val_lbl_d
         
         # Night cell
         c_night = tk.Frame(grid_ac, bg="white")
-        c_night.grid(row=r_idx, column=2, padx=2, pady=1)
-        val_lbl_n = tk.Label(c_night, text=str(setpoints[room][n_key]), font=("Arial", 9, "bold"), fg="#e65100", bg="white", width=6, anchor="center")
-        val_lbl_n.pack(side="left")
+        c_night.grid(row=r_idx, column=2, padx=2, pady=2, sticky="nsew")
+        val_lbl_n = tk.Label(c_night, text=str(setpoints[room][n_key]), font=("Arial", 9, "bold"), fg="#e65100", bg="white", width=8, anchor="center")
+        val_lbl_n.pack(side="left", expand=True)
         tk.Button(c_night, text="EDIT", font=("Arial", 8, "bold"), bg="#f5f5f5", fg="#333", bd=1, relief="groove",
                   command=lambda k=n_key, r=room: open_keypad_room(r, k)).pack(side="right")
         labels_s[n_key] = val_lbl_n
 
-    # Timers 1-3 Card (Right Pane)
+    # Timers 1-2 Card (Right Pane)
     card_timers = tk.LabelFrame(right_pane, text=" CYCLIC TIMERS ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
-    card_timers.pack(fill="both", expand=True, pady=4, padx=5)
+    card_timers.pack(fill="x", pady=4, padx=5)
     
     cols = [
         {"name": "Timer 1", "keys": {
@@ -1084,9 +1127,6 @@ def build_setpoint_screen(room):
         }},
         {"name": "Timer 2", "keys": {
             "Name": "Timer2 Name", "Start": "Timer2 Start", "Stop": "Timer2 Stop", "ON Min": "Timer2 ON Min", "OFF Min": "Timer2 OFF Min"
-        }},
-        {"name": "Timer 3", "keys": {
-            "Name": "Timer3 Name", "Start": "Timer3 Start", "Stop": "Timer3 Stop", "ON Min": "Timer3 ON Min", "OFF Min": "Timer3 OFF Min"
         }},
     ]
     
@@ -1121,6 +1161,56 @@ def build_setpoint_screen(room):
                 btn.pack(side="right", padx=2)
                 labels_s[full_key] = val_lbl
 
+    # Timer 3 Card (Right Pane)
+    card_t3 = tk.LabelFrame(right_pane, text=" TIMER 3 (CYCLIC) ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
+    card_t3.pack(fill="x", pady=4, padx=5)
+    
+    # Timer 3 Name Row
+    f_t3_name = tk.Frame(card_t3, bg="white")
+    f_t3_name.pack(fill="x", pady=4, padx=10)
+    name_cell_t3 = make_cell(f_t3_name, "Timer3 Name", "Name:", width_lbl=8)
+    if name_cell_t3:
+        name_cell_t3.pack(side="left")
+    
+    grid_t3 = tk.Frame(card_t3, bg="white")
+    grid_t3.pack(pady=4, padx=10, fill="x")
+    grid_t3.columnconfigure(0, weight=1, minsize=80)
+    grid_t3.columnconfigure(1, weight=2, minsize=120)
+    grid_t3.columnconfigure(2, weight=2, minsize=120)
+    
+    # Grid Headers
+    tk.Label(grid_t3, text="Setting", font=("Arial", 9, "bold"), fg="#555", bg="white", width=10, anchor="w").grid(row=0, column=0, padx=2, pady=2)
+    tk.Label(grid_t3, text="Day", font=("Arial", 9, "bold"), fg=color, bg="white", width=14, anchor="center").grid(row=0, column=1, padx=2, pady=2)
+    tk.Label(grid_t3, text="Night", font=("Arial", 9, "bold"), fg=color, bg="white", width=14, anchor="center").grid(row=0, column=2, padx=2, pady=2)
+    
+    t3_rows = [
+        ("Start", "Timer3 D_Start", "Timer3 N_Start", "Start:"),
+        ("Stop", "Timer3 D_Stop", "Timer3 N_Stop", "Stop:"),
+        ("ON Min", "Timer3 D_ON Min", "Timer3 N_ON Min", "ON Min:"),
+        ("OFF Min", "Timer3 D_OFF Min", "Timer3 N_OFF Min", "OFF Min:"),
+    ]
+    
+    for r_idx, (r_key, d_key, n_key, r_lbl) in enumerate(t3_rows, 1):
+        tk.Label(grid_t3, text=r_lbl, font=("Arial", 9, "bold"), fg="#555", bg="white", width=10, anchor="w").grid(row=r_idx, column=0, padx=2, pady=2)
+        
+        # Day cell
+        c_day = tk.Frame(grid_t3, bg="white")
+        c_day.grid(row=r_idx, column=1, padx=2, pady=2, sticky="nsew")
+        val_lbl_d = tk.Label(c_day, text=str(setpoints[room][d_key]), font=("Arial", 9, "bold"), fg="#e65100", bg="white", width=8, anchor="center")
+        val_lbl_d.pack(side="left", expand=True)
+        tk.Button(c_day, text="EDIT", font=("Arial", 8, "bold"), bg="#f5f5f5", fg="#333", bd=1, relief="groove",
+                  command=lambda k=d_key, r=room: open_keypad_room(r, k)).pack(side="right")
+        labels_s[d_key] = val_lbl_d
+        
+        # Night cell
+        c_night = tk.Frame(grid_t3, bg="white")
+        c_night.grid(row=r_idx, column=2, padx=2, pady=2, sticky="nsew")
+        val_lbl_n = tk.Label(c_night, text=str(setpoints[room][n_key]), font=("Arial", 9, "bold"), fg="#e65100", bg="white", width=8, anchor="center")
+        val_lbl_n.pack(side="left", expand=True)
+        tk.Button(c_night, text="EDIT", font=("Arial", 8, "bold"), bg="#f5f5f5", fg="#333", bd=1, relief="groove",
+                  command=lambda k=n_key, r=room: open_keypad_room(r, k)).pack(side="right")
+        labels_s[n_key] = val_lbl_n
+
     sp_labels[room] = labels_s
 
     kp_frame    = tk.Frame(fr, bg="white")
@@ -1153,14 +1243,28 @@ def build_setpoint_screen(room):
                     kp_display.config(text="INVALID TIME")
                     return
 
-            # Validate Day/Night AC timers: day stop != night start, and night stop != day start
-            if sp_selected_key in ["Timer4 D_Start", "Timer4 D_Stop", "Timer4 N_Start", "Timer4 N_Stop"]:
-                d_start = val if sp_selected_key == "Timer4 D_Start" else setpoints[room].get("Timer4 D_Start", "10:00")
-                d_stop  = val if sp_selected_key == "Timer4 D_Stop" else setpoints[room].get("Timer4 D_Stop", "17:00")
-                n_start = val if sp_selected_key == "Timer4 N_Start" else setpoints[room].get("Timer4 N_Start", "17:01")
-                n_stop  = val if sp_selected_key == "Timer4 N_Stop" else setpoints[room].get("Timer4 N_Stop", "09:59")
+            # Validate Day/Night AC/Cyclic timers: day stop != night start, and night stop != day start
+            if sp_selected_key in ["Timer3 D_Start", "Timer3 D_Stop", "Timer3 N_Start", "Timer3 N_Stop",
+                                   "Timer4 D_Start", "Timer4 D_Stop", "Timer4 N_Start", "Timer4 N_Stop"]:
+                prefix = "Timer3" if "Timer3" in sp_selected_key else "Timer4"
+                d_start = val if sp_selected_key == f"{prefix} D_Start" else setpoints[room].get(f"{prefix} D_Start", "10:00")
+                d_stop  = val if sp_selected_key == f"{prefix} D_Stop" else setpoints[room].get(f"{prefix} D_Stop", "17:00")
+                n_start = val if sp_selected_key == f"{prefix} N_Start" else setpoints[room].get(f"{prefix} N_Start", "17:01")
+                n_stop  = val if sp_selected_key == f"{prefix} N_Stop" else setpoints[room].get(f"{prefix} N_Stop", "09:59")
                 
-                if d_stop == n_start or n_stop == d_start:
+                try:
+                    t_d_start = datetime.datetime.strptime(str(d_start), "%H:%M").time()
+                    t_d_stop  = datetime.datetime.strptime(str(d_stop),  "%H:%M").time()
+                    t_n_start = datetime.datetime.strptime(str(n_start), "%H:%M").time()
+                    t_n_stop  = datetime.datetime.strptime(str(n_stop),  "%H:%M").time()
+                except:
+                    kp_display.config(text="INVALID TIME")
+                    return
+
+                if (t_d_start >= t_d_stop or
+                    t_n_start < t_d_stop or
+                    t_d_start < t_n_stop or
+                    t_n_start == t_n_stop):
                     kp_display.config(text="TIME CONFLICT")
                     return
 
@@ -1256,7 +1360,8 @@ def update_room_detail(room, data, warnings):
         sv("soil_temp", f"{soil['soil_temp']} °C")
         sv("moisture",  f"{soil['moisture']} %")
         disp_ec = (soil['ec'] * 0.85) / 1000
-        sv("ec",        f"{disp_ec:.2f} µS/cm")
+        tds_ec = disp_ec * 500
+        sv("ec",        f"{disp_ec:.2f} mS/cm ({tds_ec:.0f} ppm)")
         sv("ph",        f"{soil['ph']}")
     else:
         for k in ["soil_temp","moisture","ec","ph"]: sv(k, "SENSOR ERROR", err=True)
@@ -1298,11 +1403,12 @@ def update_room_detail(room, data, warnings):
         ts = timer_state[room][i]
         d[f"t{i+1}_status"].config(
             text=f"{'ON' if relay_is_on(tch[i]) else 'OFF'} ({ts['state']})")
-        if i == 3:
+        if i in [2, 3]:
+            prefix = f"Timer{i+1}"
             d[f"t{i+1}_window"].config(
-                text=f"D:{sp.get('Timer4 D_Start','10:00')}-{sp.get('Timer4 D_Stop','17:00')} N:{sp.get('Timer4 N_Start','10:00')}-{sp.get('Timer4 N_Stop','17:00')}")
+                text=f"D:{sp.get(f'{prefix} D_Start','10:00')}-{sp.get(f'{prefix} D_Stop','17:00')} N:{sp.get(f'{prefix} N_Start','10:00')}-{sp.get(f'{prefix} N_Stop','17:00')}")
             d[f"t{i+1}_cycle"].config(
-                text=f"D:{sp.get('Timer4 D_ON Min',15)}m/D:{sp.get('Timer4 D_OFF Min',30)}m N:{sp.get('Timer4 N_ON Min',15)}m/N:{sp.get('Timer4 N_OFF Min',30)}m")
+                text=f"D:{sp.get(f'{prefix} D_ON Min',15)}m/D:{sp.get(f'{prefix} D_OFF Min',30)}m N:{sp.get(f'{prefix} N_ON Min',15)}m/N:{sp.get(f'{prefix} N_OFF Min',30)}m")
         else:
             d[f"t{i+1}_window"].config(
                 text=f"{sp.get(f'Timer{i+1} Start','10:00')} – {sp.get(f'Timer{i+1} Stop','17:00')}")
@@ -1323,7 +1429,8 @@ def update_home_summary(room, data):
         sv("soil_temp", f"{soil['soil_temp']} °C")
         sv("moisture",  f"{soil['moisture']} %")
         disp_ec = (soil['ec'] * 0.85) / 1000
-        sv("ec",        f"{disp_ec:.2f} µS/cm")
+        tds_ec = disp_ec * 500
+        sv("ec",        f"{disp_ec:.2f} mS/cm ({tds_ec:.0f} ppm)")
         sv("ph",        f"{soil['ph']}")
     else:
         for k in ["soil_temp","moisture","ec","ph"]: sv(k, "SENSOR ERROR", err=True)

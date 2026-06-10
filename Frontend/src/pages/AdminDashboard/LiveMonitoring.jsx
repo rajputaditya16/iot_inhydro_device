@@ -146,7 +146,7 @@ const LiveMonitoring = () => {
     const lower = name.toLowerCase();
     if (lower.includes('temp')) return { icon: Thermometer, unit: '°C', type: 'temperature' };
     if (lower.includes('moist') || lower.includes('humid')) return { icon: Droplets, unit: '%', type: 'moisture' };
-    if (lower.includes('ec') || lower.includes('conduct')) return { icon: Zap, unit: 'µS/cm', type: 'ec' };
+    if (lower.includes('ec') || lower.includes('conduct')) return { icon: Zap, unit: 'mS/cm', type: 'ec' };
     if (lower.includes('ph')) return { icon: FlaskConical, unit: 'pH', type: 'ph' };
     if (lower.includes('co2') || lower.includes('carbon')) return { icon: Activity, unit: 'ppm', type: 'co2' };
     return { icon: Radio, unit: '', type: 'default' };
@@ -538,13 +538,48 @@ const LiveMonitoring = () => {
                     icon={Droplets}
                     type="moisture"
                   />
-                  <BigMetric
-                    label="Soil EC"
-                    value={officeControlData[activeRoomTab].soil?.ec}
-                    unit="µS/cm"
-                    icon={Zap}
-                    type="ec"
-                  />
+                  {/* EC card — shows mS/cm + TDS in one line */}
+                  {(() => {
+                    const ecVal = officeControlData[activeRoomTab].soil?.ec;
+                    const tdsVal = ecVal != null ? Math.round(ecVal * 500) : null;
+                    const ecStatus = getMetricStatus('ec', ecVal ?? 0);
+                    const ecColor = getMetricColor(ecStatus);
+                    const bgMap = {
+                      'text-emerald-400': 'bg-emerald-500/10 border-emerald-500/20',
+                      'text-yellow-400':  'bg-yellow-500/10 border-yellow-500/20',
+                      'text-red-400':     'bg-red-500/10 border-red-500/20',
+                      'text-slate-500':   'bg-slate-500/10 border-slate-500/20',
+                    };
+                    return (
+                      <motion.div
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className={`rounded-2xl border p-4 ${bgMap[ecColor] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className={`rounded-lg p-1.5 ${ecColor} bg-white/5`}>
+                            <Zap className="h-4 w-4" />
+                          </div>
+                          <span className="text-sm font-medium text-slate-400">Soil EC</span>
+                        </div>
+                        <div className="mt-3 flex items-baseline gap-1.5 flex-wrap">
+                          <span className={`text-2xl font-bold tabular-nums ${ecColor}`}>
+                            {ecVal != null ? ecVal.toFixed(2) : '--'}
+                          </span>
+                          <span className="text-sm text-slate-500">mS/cm</span>
+                          {tdsVal != null && (
+                            <span className="text-sm text-slate-400 font-semibold">
+                              ({tdsVal} ppm)
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <div className={`h-1.5 w-1.5 rounded-full ${ecStatus === 'normal' ? 'bg-emerald-400' : ecStatus === 'warning' ? 'bg-yellow-400' : ecStatus === 'critical' ? 'bg-red-400' : 'bg-slate-500'}`} />
+                          <span className="text-xs text-slate-500 capitalize">{ecStatus}</span>
+                        </div>
+                      </motion.div>
+                    );
+                  })()}
                   <BigMetric
                     label="Soil pH"
                     value={officeControlData[activeRoomTab].soil?.ph}
@@ -614,7 +649,7 @@ const LiveMonitoring = () => {
                     data={officeControlHistory[activeRoomTab].ec}
                     type="ec"
                     title="Soil EC Trend"
-                    unit="µS/cm"
+                    unit="mS/cm"
                   />
                   <LiveChart
                     data={officeControlHistory[activeRoomTab].ph}

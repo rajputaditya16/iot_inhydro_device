@@ -10,10 +10,12 @@ const defaultSetpoints = {
   "H Max": 80.0, "H Min": 30.0,
   "Timer1 Name": "TIMER 1", "Timer1 Start": "10:00", "Timer1 Stop": "17:00", "Timer1 ON Min": 15, "Timer1 OFF Min": 30,
   "Timer2 Name": "TIMER 2", "Timer2 Start": "10:00", "Timer2 Stop": "17:00", "Timer2 ON Min": 15, "Timer2 OFF Min": 30,
-  "Timer3 Name": "TIMER 3", "Timer3 Start": "10:00", "Timer3 Stop": "17:00", "Timer3 ON Min": 15, "Timer3 OFF Min": 30,
+  "Timer3 Name": "TIMER 3",
+  "Timer3 D_Start": "10:00", "Timer3 D_Stop": "17:00", "Timer3 D_ON Min": 15, "Timer3 D_OFF Min": 30,
+  "Timer3 N_Start": "17:05", "Timer3 N_Stop": "09:55", "Timer3 N_ON Min": 15, "Timer3 N_OFF Min": 30,
   "Timer4 Name": "AC TIMER",
   "Timer4 D_Start": "10:00", "Timer4 D_Stop": "17:00", "Timer4 D_ON Min": 15, "Timer4 D_OFF Min": 30,
-  "Timer4 N_Start": "17:01", "Timer4 N_Stop": "09:59", "Timer4 N_ON Min": 15, "Timer4 N_OFF Min": 30,
+  "Timer4 N_Start": "17:05", "Timer4 N_Stop": "09:55", "Timer4 N_ON Min": 15, "Timer4 N_OFF Min": 30,
 };
 
 const InputRow = ({ label, objKey, type = "number", data, onChange }) => (
@@ -190,7 +192,7 @@ const OfficeControlSettings = () => {
       setStatus('saving');
 
       const payload = { ...setpoints[activeRoom] };
-      const numericFields = ['EC MIN', 'EC MAX', 'PH LOW', 'PH HIGH', 'D T Max', 'DT Min', 'N T Max', 'N T Min', 'H Max', 'H Min', 'Timer1 ON Min', 'Timer1 OFF Min', 'Timer2 ON Min', 'Timer2 OFF Min', 'Timer3 ON Min', 'Timer3 OFF Min', 'Timer4 D_ON Min', 'Timer4 D_OFF Min', 'Timer4 N_ON Min', 'Timer4 N_OFF Min', 'PORT'];
+      const numericFields = ['EC MIN', 'EC MAX', 'PH LOW', 'PH HIGH', 'D T Max', 'DT Min', 'N T Max', 'N T Min', 'H Max', 'H Min', 'Timer1 ON Min', 'Timer1 OFF Min', 'Timer2 ON Min', 'Timer2 OFF Min', 'Timer3 D_ON Min', 'Timer3 D_OFF Min', 'Timer3 N_ON Min', 'Timer3 N_OFF Min', 'Timer4 D_ON Min', 'Timer4 D_OFF Min', 'Timer4 N_ON Min', 'Timer4 N_OFF Min', 'PORT'];
 
       numericFields.forEach(field => {
         if (payload[field] !== undefined && payload[field] !== "") {
@@ -291,11 +293,10 @@ const OfficeControlSettings = () => {
   return (
     <div className="space-y-6">
       {toast.show && (
-        <div className={`fixed top-6 right-6 z-50 flex items-center gap-3 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 max-w-sm ${
-          toast.type === 'success' 
-            ? 'border-emerald-500/30 bg-slate-900/95 text-emerald-400 shadow-emerald-950/20' 
-            : 'border-red-500/30 bg-slate-900/95 text-red-400 shadow-red-950/20'
-        }`}>
+        <div className={`fixed top-6 right-6 z-50 flex items-center gap-3 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 max-w-sm ${toast.type === 'success'
+          ? 'border-emerald-500/30 bg-slate-900/95 text-emerald-400 shadow-emerald-950/20'
+          : 'border-red-500/30 bg-slate-900/95 text-red-400 shadow-red-950/20'
+          }`}>
           {toast.type === 'success' ? (
             <CheckCircle2 className="h-5 w-5 shrink-0 animate-pulse" />
           ) : (
@@ -433,13 +434,29 @@ const OfficeControlSettings = () => {
                 <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer2 OFF Min" />
               </div>
             </div>
-            <div className="space-y-4 border border-slate-700/50 p-4 rounded-xl">
+            <div className="md:col-span-2 space-y-4 border border-slate-700/50 p-4 rounded-xl">
               <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Timer 3 Name" objKey="Timer3 Name" type="text" />
-              <div className="grid grid-cols-2 gap-4">
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer3 Start" type="text" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer3 Stop" type="text" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer3 ON Min" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer3 OFF Min" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                {/* Day Settings */}
+                <div className="space-y-4 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
+                  <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider">Day Settings</h5>
+                  <div className="grid grid-cols-2 gap-3">
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer3 D_Start" type="text" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer3 D_Stop" type="text" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer3 D_ON Min" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer3 D_OFF Min" />
+                  </div>
+                </div>
+                {/* Night Settings */}
+                <div className="space-y-4 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
+                  <h5 className="text-xs font-semibold text-purple-400 uppercase tracking-wider">Night Settings</h5>
+                  <div className="grid grid-cols-2 gap-3">
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer3 N_Start" type="text" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer3 N_Stop" type="text" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer3 N_ON Min" />
+                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer3 N_OFF Min" />
+                  </div>
+                </div>
               </div>
             </div>
             <div className="md:col-span-2 space-y-4 border border-slate-700/50 p-4 rounded-xl">

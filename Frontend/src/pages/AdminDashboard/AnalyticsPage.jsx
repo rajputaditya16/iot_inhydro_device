@@ -71,7 +71,7 @@ const getFieldMeta = (name) => {
   const lowerName = name.toLowerCase();
   if (lowerName.includes('temp')) return { type: 'temperature', unit: '°C', icon: TrendingUp, color: 'text-orange-400', bg: 'bg-orange-500/10 border-orange-500/20' };
   if (lowerName.includes('moist') || lowerName.includes('hum')) return { type: 'moisture', unit: '%', icon: Activity, color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20' };
-  if (lowerName.includes('ec')) return { type: 'ec', unit: 'µS/cm', icon: BarChart3, color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' };
+  if (lowerName.includes('ec')) return { type: 'ec', unit: 'mS/cm', icon: BarChart3, color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' };
   if (lowerName.includes('ph')) return { type: 'ph', unit: '', icon: TrendingDown, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' };
   if (lowerName.includes('co2')) return { type: 'co2', unit: 'PPM', icon: Activity, color: 'text-teal-400', bg: 'bg-teal-500/10 border-teal-500/20' };
   return { type: 'default', unit: '', icon: Activity, color: 'text-slate-400', bg: 'bg-slate-800/50 border-slate-700/50' };

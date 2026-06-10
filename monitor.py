@@ -540,118 +540,201 @@ def restart_program():
 root = tk.Tk()
 root.title("Sensor Monitor")
 root.geometry("1280x720")
-# root.attributes("-fullscreen", True)
+root.config(bg="#f8fafc")
 
-header = tk.Frame(root)
-header.pack(fill="x", pady=10, padx=20)
+# Header Section (Reduced pady to bring it closer to boxes)
+header = tk.Frame(root, bg="#f8fafc")
+header.pack(fill="x", pady=(10, 2), padx=20)
 
+# Left Side: Title & Subtitle
+title_frame = tk.Frame(header, bg="#f8fafc")
+title_frame.pack(side="left", padx=(10, 20))
+
+tk.Label(
+    title_frame,
+    text="INHYDRO SMART MONITOR",
+    font=("Helvetica", 24, "bold"),
+    fg="#0f172a",
+    bg="#f8fafc"
+).pack(anchor="w")
+
+"""tk.Label(
+    title_frame,
+    text=f"Device ID: {DEVICE_NAME.upper()}",
+    font=("Helvetica", 10, "bold"),
+    fg="#64748b",
+    bg="#f8fafc"
+).pack(anchor="w", pady=(2, 0))"""
+
+# Right: Brand Image Logo in the last upside right corner (Scaled down to 100x63 for compact height)
 LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
 try:
-    logo_raw = Image.open(LOGO_PATH).resize((130, 82), Image.LANCZOS)
+    logo_raw = Image.open(LOGO_PATH).resize((100, 63), Image.LANCZOS)
     logo_img = ImageTk.PhotoImage(logo_raw)
-    lbl_logo = tk.Label(header, image=logo_img)
+    lbl_logo = tk.Label(header, image=logo_img, bg="#f8fafc")
     lbl_logo.image = logo_img
-    lbl_logo.pack(side="right", padx=10)
+    lbl_logo.pack(side="right", padx=(30,10))
 except Exception as e:
     print(f"Logo error: {e}")
 
-"""tk.Label(
-    header,
-    text=f"Comprehensive Sensor Monitor - {DEVICE_NAME}",
-    font=("Arial", 18, "bold"),
-    fg="#2c3e50"
-).pack(side="left", padx=10, pady=10)"""
+# Footer Section
+footer = tk.Frame(root, bg="#f8fafc")
+footer.pack(side="bottom", fill="x", pady=(5, 10), padx=20)
 
-footer = tk.Frame(root)
-footer.pack(side="bottom", fill="x", pady=10)
+divider = tk.Frame(root, height=1, bg="#e2e8f0")
+divider.pack(fill="x", side="bottom", pady=(2, 5))
 
-btn_frame = tk.Frame(footer)
-btn_frame.pack(side="right", padx=40)
+# Clock & Date in the lower left side
+clock_frame = tk.Frame(footer, bg="#f8fafc")
+clock_frame.pack(side="left", padx=10)
 
-tk.Button(
+lbl_clock = tk.Label(
+    clock_frame,
+    text="00:00:00",
+    font=("Helvetica", 18, "bold"),
+    fg="#0f172a",
+    bg="#f8fafc"
+)
+lbl_clock.pack(anchor="w")
+
+lbl_date = tk.Label(
+    clock_frame,
+    text="Loading date...",
+    font=("Helvetica", 9, "bold"),
+    fg="#64748b",
+    bg="#f8fafc"
+)
+lbl_date.pack(anchor="w")
+
+# Buttons in the footer right side
+btn_frame = tk.Frame(footer, bg="#f8fafc")
+btn_frame.pack(side="right", padx=20)
+
+btn_restart = tk.Button(
     btn_frame,
-    text="RESTART",
-    font=("Arial", 14, "bold"),
-    bg="#f39c12",
+    text="RESTART ",
+    font=("Helvetica", 10, "bold"),
+    bg="#d97706",
     fg="white",
-    activebackground="#d35400",
+    activebackground="#b45309",
     activeforeground="white",
     bd=0,
     highlightthickness=0,
     command=restart_program,
     padx=20,
-    pady=10
-).pack(side="left", padx=10)
+    pady=8,
+    cursor="hand2"
+)
+btn_restart.pack(side="left", padx=10)
 
-tk.Button(
+btn_exit = tk.Button(
     btn_frame,
-    text="EXIT",
-    font=("Arial", 14, "bold"),
-    bg="#e74c3c",
+    text="EXIT ",
+    font=("Helvetica", 10, "bold"),
+    bg="#e11d48",
     fg="white",
-    activebackground="#c0392b",
+    activebackground="#be123c",
     activeforeground="white",
     bd=0,
     highlightthickness=0,
     command=root.destroy,
     padx=20,
-    pady=10
-).pack(side="left", padx=10)
+    pady=8,
+    cursor="hand2"
+)
+btn_exit.pack(side="left", padx=10)
 
-frame = tk.Frame(root)
-frame.pack(expand=True, fill="both", padx=10, pady=10)
+# Main Grid Frame (Reduced vertical padding to fit screen)
+frame = tk.Frame(root, bg="#f8fafc")
+frame.pack(expand=True, fill="both", padx=20, pady=(2, 5))
 
 labels = {}
-cols = 6
-row, col = 0, 0
 
-sensor_keys = [
-    "Water Temp", "Water Moisture", "Water EC", "Water pH",
-    "Room Temp", "Room Humidity", "ORP", "CO2",
-    "VPD", "DLI", "Wind Speed", "Wind Direction",
-    "DO", "PPFD", "Nitrogen", "Phosphorus", "Potassium"
-]
+# Column 1: Soil Sensors
+col_soil = tk.Frame(frame, bg="#f8fafc")
+col_soil.pack(side="left", expand=True, fill="both")
 
-for key in sensor_keys:
-    box = tk.Frame(frame, bg="white", bd=2, relief="groove", width=170, height=90)
-    box.pack_propagate(False)
-    box.grid(row=row, column=col, padx=10, pady=10)
-    
-    lbl_title = tk.Label(
-        box,
-        text=key,
-        font=("Arial", 11, "bold"),
-        bg="white",
-        fg="#7f8c8d"
-    )
-    lbl_title.pack(pady=(5, 2))
-    
-    lbl_val = tk.Label(
-        box,
-        text="Reading...",
-        font=("Arial", 14, "bold"),
-        bg="white",
-        fg="#2980b9"
-    )
-    lbl_val.pack(pady=(2, 5))
-    
-    labels[key] = lbl_val
-    
-    col += 1
-    if col >= cols:
-        col = 0
-        row += 1
+# Divider 1
+sep1 = tk.Frame(frame, width=1, bg="#cbd5e1")
+sep1.pack(side="left", fill="y", padx=10)
 
-for i in range(cols):
-    frame.columnconfigure(i, weight=1)
+# Column 2: Room, CO2, ORP
+col_room = tk.Frame(frame, bg="#f8fafc")
+col_room.pack(side="left", expand=True, fill="both")
+
+# Divider 2
+sep2 = tk.Frame(frame, width=1, bg="#cbd5e1")
+sep2.pack(side="left", fill="y", padx=10)
+
+# Column 3: DO & NPK
+col_do_npk = tk.Frame(frame, bg="#f8fafc")
+col_do_npk.pack(side="left", expand=True, fill="both")
+
+# Divider 3
+sep3 = tk.Frame(frame, width=1, bg="#cbd5e1")
+sep3.pack(side="left", fill="y", padx=10)
+
+# Column 4: Rest of the Sensors
+col_others = tk.Frame(frame, bg="#f8fafc")
+col_others.pack(side="left", expand=True, fill="both")
+
+soil_keys = ["Water Temp", "Water Moisture", "Water EC", "Water pH"]
+room_keys = ["Room Temp", "Room Humidity", "CO2", "ORP"]
+do_npk_keys = ["DO", "Nitrogen", "Phosphorus", "Potassium"]
+others_keys = ["VPD", "DLI", "Wind Speed", "Wind Direction", "PPFD"]
+
+def create_column_cards(parent_frame, keys):
+    for key in keys:
+        box = tk.Frame(
+            parent_frame,
+            bg="#f1f5f9",
+            highlightthickness=1,
+            highlightbackground="#e2e8f0",
+            width=180,
+            height=68
+        )
+        box.pack_propagate(False)
+        box.pack(pady=3, anchor="center")
+        
+        lbl_title = tk.Label(
+            box,
+            text=key.upper(),
+            font=("Helvetica", 8, "bold"),
+            bg="#white",
+            fg="#64748b"
+        )
+        lbl_title.pack(pady=(8, 2))
+        
+        lbl_val = tk.Label(
+            box,
+            text="Reading...",
+            font=("Helvetica", 12, "bold"),
+            bg="white",
+            fg="#475569"
+        )
+        lbl_val.pack(pady=(0, 8))
+        
+        labels[key] = lbl_val
+
+create_column_cards(col_soil, soil_keys)
+create_column_cards(col_room, room_keys)
+create_column_cards(col_do_npk, do_npk_keys)
+create_column_cards(col_others, others_keys)
 
 def update_ui():
+    # Update real-time clock
+    now = datetime.datetime.now()
+    lbl_clock.config(text=now.strftime("%H:%M:%S"))
+    lbl_date.config(text=now.strftime("%A, %B %d, %Y"))
+
+    # Update sensor cards
     for key, val in latest_data.items():
         if key in labels:
+            labels[key].config(text=val)
             if "N/A" in val:
-                labels[key].config(text=val, fg="#e74c3c")
+                labels[key].config(fg="#dc2626")  # Rose/Red-600
             else:
-                labels[key].config(text=val, fg="#27ae60")
+                labels[key].config(fg="#059669")  # Emerald-600
     
     publish_live_telemetry()
     publish_telemetry()
