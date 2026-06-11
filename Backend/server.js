@@ -3,6 +3,8 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const User = require('./models/User');
 const Admin = require('./models/Admin');
+// const { syncAllDevices } = require('./scripts/syncThingspeak');
+const { startMqttSubscriber } = require('./utils/mqttSubscriber');
 require('dotenv').config();
 
 // ── Route imports ────────────────────────────
@@ -144,6 +146,8 @@ mongoose
 
     app.listen(PORT, () => {
       console.log(`🚀  Server running on http://localhost:${PORT}`);
+      // Start the MQTT Subscriber daemon to store real-time telemetry
+      startMqttSubscriber();
     });
   })
   .catch((err) => {

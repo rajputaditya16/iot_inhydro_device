@@ -1,5 +1,5 @@
 const express = require('express');
-const { getDevices, createDevice, updateDevice, deleteDevice, toggleBlockDevice, pushThingspeakConfig } = require('../controllers/deviceController');
+const { getDevices, createDevice, updateDevice, deleteDevice, toggleBlockDevice, pushThingspeakConfig, getDeviceAnalytics } = require('../controllers/deviceController');
 const { protect, restrictTo } = require('../middleware/auth');
 
 const router = express.Router();
@@ -18,4 +18,5 @@ router
 
 router.put('/:id/block', restrictTo('admin', 'superadmin'), toggleBlockDevice);
 router.put('/:id/push-config', restrictTo('admin', 'superadmin'), pushThingspeakConfig);
+router.get('/:id/analytics', getDeviceAnalytics);
 module.exports = router;

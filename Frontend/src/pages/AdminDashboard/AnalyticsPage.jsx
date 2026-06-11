@@ -4,16 +4,6 @@ import { Download, Calendar, RefreshCw, WifiOff, BarChart3, TrendingUp, Trending
 import LiveChart from '../../components/LiveChart';
 import { SkeletonCard } from '../../components/Skeleton';
 
-// Build ThingSpeak API URL with date range using per-device keys
-const buildApiUrl = (channelId, readApiKey, start, end) => {
-  const params = new URLSearchParams({
-    api_key: readApiKey,
-    start: start.toISOString(),
-    end: end.toISOString(),
-    results: '8000',
-  });
-  return `https://api.thingspeak.com/channels/${channelId}/feeds.json?${params}`;
-};
 
 // Get date ranges for filters
 const getDateRange = (filter, customStartDate = null, customEndDate = null) => {
@@ -159,11 +149,17 @@ const AnalyticsPage = () => {
   // Device selector state
   const [allDevices, setAllDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
+  const [selectedRoom, setSelectedRoom] = useState('room1');
   const [devicesLoading, setDevicesLoading] = useState(true);
+
+  // Reset room selection when device changes
+  useEffect(() => {
+    setSelectedRoom('room1');
+  }, [selectedDeviceId]);
   const token = localStorage.getItem('token');
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
-  // Fetch devices with ThingSpeak config
+  // Fetch devices with analytics database configuration
   useEffect(() => {
     const fetchDevices = async () => {
       try {
@@ -196,7 +192,7 @@ const AnalyticsPage = () => {
   const selectedDevice = allDevices.find((d) => d._id === selectedDeviceId);
 
   const fetchData = useCallback(async () => {
-    if (!selectedDevice?.thingspeak?.channelId) {
+    if (!selectedDeviceId) {
       setRawFeeds([]);
       setLoading(false);
       return;
@@ -204,31 +200,25 @@ const AnalyticsPage = () => {
     setLoading(true);
     setError(null);
     try {
-      const channelId = selectedDevice.thingspeak?.channelId || selectedDevice.tempChannelId;
-      const readApiKey = selectedDevice.thingspeak?.readApiKey || selectedDevice.tempReadApiKey;
-
-      if (!channelId || !readApiKey) {
-        setRawFeeds([]);
-        setLoading(false);
-        setError("Missing Channel ID or Read API Key. Please update device settings.");
-        return;
-      }
-
       const { start, end } = getDateRange(filter, customStartDate, customEndDate);
-      const url = buildApiUrl(channelId, readApiKey, start, end);
-      const res = await fetch(url);
+      const roomParam = selectedDevice?.deviceType === 'office_control' ? `&room=${selectedRoom}` : '';
+      const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics?start=${start.toISOString()}&end=${end.toISOString()}${roomParam}`;
+      
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (res.status === 404) {
-        throw new Error("ThingSpeak Channel not found (404). Please verify your Channel ID is correct and public, or provide a valid Read API Key.");
+        throw new Error("Analytics data not found for this device (404).");
       }
       if (!res.ok) throw new Error(`API responded with ${res.status}`);
       const result = await res.json();
 
-      // Strict frontend filtering to enforce proper date ranges
-      // (ThingSpeak sometimes ignores start/end bounds if results=8000 is passed incorrectly)
-      const exactFeeds = (result?.feeds || []).filter((f) => {
-        const t = new Date(f.created_at).getTime();
-        return t >= start.getTime() && t <= end.getTime();
-      });
+      if (!result.success) {
+        throw new Error(result.message || 'Server failed to return analytics');
+      }
+
+      // Backend already returns correct date-filtered feeds
+      const exactFeeds = result.feeds || [];
 
       const cFields = [];
       for (let i = 1; i <= 8; i++) {
@@ -242,14 +232,14 @@ const AnalyticsPage = () => {
 
       setRawFeeds(exactFeeds);
     } catch (err) {
-      console.error('ThingSpeak API error:', err);
+      console.error('Analytics API error:', err);
       setError(err.message || 'Failed to fetch data');
       setRawFeeds([]);
       setChannelFields([]);
     } finally {
       setLoading(false);
     }
-  }, [filter, customStartDate, customEndDate, selectedDevice]);
+  }, [filter, customStartDate, customEndDate, selectedDeviceId, token, API_BASE, selectedRoom, selectedDevice?.deviceType]);
 
   useEffect(() => {
     fetchData();
@@ -317,7 +307,7 @@ const AnalyticsPage = () => {
           <Cpu className="h-12 w-12 text-yellow-400 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-white mb-2">No Devices Configured</h3>
           <p className="text-sm text-slate-400">
-            No devices have ThingSpeak credentials configured. Go to <strong>Devices → Edit</strong> and add Channel ID & API keys.
+            No devices have analytics credentials configured. Go to <strong>Devices → Edit</strong> and add Channel ID & API keys.
           </p>
         </div>
       </div>
@@ -343,10 +333,22 @@ const AnalyticsPage = () => {
           >
             {allDevices.map((d) => (
               <option key={d._id} value={d._id}>
-                {d.name} — CH:{d.thingspeak?.channelId}
+                {d.name} (CH: {d.thingspeak?.channelId || 'Local'})
               </option>
             ))}
           </select>
+
+          {/* Room Selector for office_control Devices */}
+          {selectedDevice?.deviceType === 'office_control' && (
+            <select
+              value={selectedRoom}
+              onChange={(e) => setSelectedRoom(e.target.value)}
+              className="rounded-xl border border-slate-700 bg-slate-800/50 px-3 py-2 text-sm text-white outline-none focus:border-green-500"
+            >
+              <option value="room1">Room 1</option>
+              <option value="room2">Room 2</option>
+            </select>
+          )}
 
           {/* Time Filter Tabs */}
           <div className="flex gap-1 rounded-xl bg-slate-800/50 p-1">
@@ -503,7 +505,7 @@ const AnalyticsPage = () => {
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-red-500/50 bg-red-500/5 py-20">
           <WifiOff className="h-12 w-12 text-red-400 mb-4" />
           <p className="text-sm font-medium text-red-400">Unable to load charts due to an error</p>
-          <p className="mt-1 text-xs text-red-400/70">Please check your ThingSpeak configuration in device settings</p>
+          <p className="mt-1 text-xs text-red-400/70">Please check your database device configuration or connection</p>
         </div>
       ) : rawFeeds.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-700/50 py-20">
