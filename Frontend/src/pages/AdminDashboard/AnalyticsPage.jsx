@@ -132,7 +132,7 @@ const downloadJSON = (feeds, channelFields, filterLabel) => {
   const data = feeds.map((f) => {
     const obj = { timestamp: f.created_at };
     channelFields.forEach(cfg => {
-       obj[cfg.name] = parseRobustFloat(f[cfg.key]);
+      obj[cfg.name] = parseRobustFloat(f[cfg.key]);
     });
     return obj;
   });
@@ -206,14 +206,14 @@ const AnalyticsPage = () => {
     try {
       const channelId = selectedDevice.thingspeak?.channelId || selectedDevice.tempChannelId;
       const readApiKey = selectedDevice.thingspeak?.readApiKey || selectedDevice.tempReadApiKey;
-      
+
       if (!channelId || !readApiKey) {
         setRawFeeds([]);
         setLoading(false);
         setError("Missing Channel ID or Read API Key. Please update device settings.");
         return;
       }
-      
+
       const { start, end } = getDateRange(filter, customStartDate, customEndDate);
       const url = buildApiUrl(channelId, readApiKey, start, end);
       const res = await fetch(url);
@@ -222,7 +222,7 @@ const AnalyticsPage = () => {
       }
       if (!res.ok) throw new Error(`API responded with ${res.status}`);
       const result = await res.json();
-      
+
       // Strict frontend filtering to enforce proper date ranges
       // (ThingSpeak sometimes ignores start/end bounds if results=8000 is passed incorrectly)
       const exactFeeds = (result?.feeds || []).filter((f) => {
@@ -360,11 +360,10 @@ const AnalyticsPage = () => {
                     setCustomEndDate('');
                   }
                 }}
-                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                  filter === btn.key
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${filter === btn.key
                     ? 'bg-green-500/20 text-green-400 shadow-sm'
                     : 'text-slate-400 hover:text-white'
-                }`}
+                  }`}
               >
                 {btn.label}
               </button>

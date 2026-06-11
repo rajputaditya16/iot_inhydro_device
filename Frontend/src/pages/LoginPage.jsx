@@ -297,9 +297,59 @@ const LoginPage = () => {
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.7, delay: 0.3 }}
           style={{ width: '100%', maxWidth: '420px', position: 'relative', zIndex: 1 }}
+          className="login-right-content-wrapper"
         >
+          {/* Mobile Header (Only visible on screens <= 900px) */}
+          <div className="mobile-header">
+            <div style={{
+              marginBottom: '1.25rem',
+              filter: 'drop-shadow(2px 3px 3px rgba(255,255,255,0.15))',
+              padding: '24px',
+              rotate: "12deg",
+              backgroundImage: `url(${white_stoke})`,
+              backgroundSize: '100% 100%',
+              backgroundPosition: 'center',
+              borderRadius: '9999px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <img
+                src={logo}
+                alt="INHYDRO Logo"
+                style={{
+                  rotate: "-12deg",
+                  maxWidth: '120px',
+                  height: 'auto',
+                }}
+              />
+            </div>
+            <h1 className="mobile-title" style={{
+              fontSize: '1.85rem', fontWeight: 800, color: '#ffffff',
+              marginBottom: '0.5rem', letterSpacing: '-0.025em',
+              lineHeight: 1.2,
+            }}>
+              Smart
+              <span style={{
+                display: 'block',
+                background: 'linear-gradient(135deg, #60bf71 0%, #3ecf8e 50%, #38d9a9 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                marginTop: '0.15rem',
+              }}>
+                Hydroponics System
+              </span>
+            </h1>
+            <p className="mobile-subtitle" style={{
+              color: 'rgba(148,175,204,0.7)', fontSize: '0.85rem',
+              lineHeight: 1.5, maxWidth: '280px', margin: '0 auto 1.5rem auto',
+            }}>
+              Precision agriculture through real-time IoT sensing and intelligent analytics.
+            </p>
+          </div>
+
           {/* Welcome heading */}
-          <div style={{ marginBottom: '2rem' }}>
+          <div style={{ marginBottom: '2rem' }} className="welcome-heading">
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -340,33 +390,22 @@ const LoginPage = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.6, duration: 0.5 }}
+            className="login-card"
             style={{
-              background: '#ffffff',
               borderRadius: '1.25rem',
-              border: '1px solid rgba(0,0,0,0.06)',
               padding: '2rem',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 8px 32px rgba(0,0,0,0.06)',
             }}
           >
             <form onSubmit={handleLogin}>
               {/* Email Field */}
               <div style={{ marginBottom: '1.25rem' }}>
-                <label style={{
+                <label className="login-label" style={{
                   display: 'block', fontSize: '0.78rem', fontWeight: 600,
-                  color: '#374151', marginBottom: '0.5rem', letterSpacing: '0.02em',
+                  marginBottom: '0.5rem', letterSpacing: '0.02em',
                 }}>
                   Email Address
                 </label>
-                <div style={{
-                  position: 'relative',
-                  borderRadius: '0.75rem',
-                  border: isFocused.email
-                    ? '2px solid #60bf71'
-                    : '2px solid #e5e7eb',
-                  background: isFocused.email ? 'rgba(96,191,113,0.02)' : '#f9fafb',
-                  transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
-                  boxShadow: isFocused.email ? '0 0 0 4px rgba(96,191,113,0.08)' : 'none',
-                }}>
+                <div className={`login-input-container ${isFocused.email ? 'focused' : ''}`}>
                   <input
                     type="email"
                     value={email}
@@ -375,11 +414,12 @@ const LoginPage = () => {
                     onBlur={() => setIsFocused(f => ({ ...f, email: false }))}
                     placeholder="you@company.com"
                     required
+                    className="login-input"
                     style={{
                       width: '100%', padding: '0.85rem 1rem',
                       border: 'none', outline: 'none',
                       background: 'transparent',
-                      fontSize: '0.9rem', color: '#1f2937',
+                      fontSize: '0.9rem',
                       borderRadius: '0.75rem',
                     }}
                   />
@@ -388,23 +428,13 @@ const LoginPage = () => {
 
               {/* Password Field */}
               <div style={{ marginBottom: '1.25rem' }}>
-                <label style={{
+                <label className="login-label" style={{
                   display: 'block', fontSize: '0.78rem', fontWeight: 600,
-                  color: '#374151', marginBottom: '0.5rem', letterSpacing: '0.02em',
+                  marginBottom: '0.5rem', letterSpacing: '0.02em',
                 }}>
                   Password
                 </label>
-                <div style={{
-                  position: 'relative',
-                  borderRadius: '0.75rem',
-                  border: isFocused.password
-                    ? '2px solid #60bf71'
-                    : '2px solid #e5e7eb',
-                  background: isFocused.password ? 'rgba(96,191,113,0.02)' : '#f9fafb',
-                  transition: 'all 0.25s cubic-bezier(0.4,0,0.2,1)',
-                  boxShadow: isFocused.password ? '0 0 0 4px rgba(96,191,113,0.08)' : 'none',
-                  display: 'flex', alignItems: 'center',
-                }}>
+                <div className={`login-input-container ${isFocused.password ? 'focused' : ''}`}>
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={password}
@@ -413,25 +443,25 @@ const LoginPage = () => {
                     onBlur={() => setIsFocused(f => ({ ...f, password: false }))}
                     placeholder="Enter your password"
                     required
+                    className="login-input"
                     style={{
                       flex: 1, padding: '0.85rem 1rem',
                       border: 'none', outline: 'none',
                       background: 'transparent',
-                      fontSize: '0.9rem', color: '#1f2937',
+                      fontSize: '0.9rem',
                       borderRadius: '0.75rem',
                     }}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
+                    className="eye-btn"
                     style={{
                       background: 'none', border: 'none', cursor: 'pointer',
                       padding: '0.5rem 0.85rem',
-                      color: '#9ca3af', display: 'flex', alignItems: 'center',
+                      display: 'flex', alignItems: 'center',
                       transition: 'color 0.2s',
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = '#60bf71')}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = '#9ca3af')}
                   >
                     {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
@@ -443,9 +473,9 @@ const LoginPage = () => {
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 marginBottom: '1.75rem', fontSize: '0.82rem',
               }}>
-                <label style={{
+                <label className="remember-label" style={{
                   display: 'flex', alignItems: 'center', gap: '0.5rem',
-                  color: '#6b7280', cursor: 'pointer', userSelect: 'none',
+                  cursor: 'pointer', userSelect: 'none',
                 }}>
                   <input
                     type="checkbox"
@@ -460,13 +490,12 @@ const LoginPage = () => {
                 <button
                   type="button"
                   onClick={() => navigate('/forgot-password')}
+                  className="forgot-btn"
                   style={{
                     background: 'none', border: 'none', cursor: 'pointer',
-                    color: '#60bf71', fontWeight: 600, fontSize: '0.82rem',
+                    fontWeight: 600, fontSize: '0.82rem',
                     transition: 'color 0.2s',
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.color = '#3d945a')}
-                  onMouseLeave={(e) => (e.currentTarget.style.color = '#60bf71')}
                 >
                   Forgot password?
                 </button>
@@ -536,12 +565,13 @@ const LoginPage = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 1.2 }}
+            className="login-footer"
             style={{
-              textAlign: 'center', fontSize: '0.75rem', color: '#9ca3af',
+              textAlign: 'center', fontSize: '0.75rem',
               marginTop: '2rem',
             }}
           >
-            &copy; 2026 <span style={{ color: '#374151', fontWeight: 700 }}>INHYDRO</span>&ensp;·&ensp;All rights reserved
+            &copy; 2026 <span className="login-footer-brand">INHYDRO</span>&ensp;·&ensp;All rights reserved
           </motion.p>
         </motion.div>
       </div>
@@ -567,6 +597,64 @@ const LoginPage = () => {
           to { transform: rotate(360deg); }
         }
 
+        /* Desktop Styles */
+        .mobile-header {
+          display: none !important;
+        }
+        .login-card {
+          background: #ffffff;
+          border: 1px solid rgba(0,0,0,0.06);
+          box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 32px rgba(0,0,0,0.06);
+        }
+        .login-label {
+          color: #374151;
+        }
+        .login-input-container {
+          position: relative;
+          border-radius: 0.75rem;
+          border: 2px solid #e5e7eb;
+          background: #f9fafb;
+          display: flex;
+          align-items: center;
+          transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+        }
+        .login-input-container.focused {
+          border: 2px solid #60bf71;
+          background: rgba(96,191,113,0.02);
+          box-shadow: 0 0 0 4px rgba(96,191,113,0.08);
+        }
+        .login-input {
+          color: #1f2937;
+        }
+        input::placeholder {
+          color: #b0b8c4 !important;
+        }
+        .remember-label {
+          color: #6b7280;
+        }
+        .forgot-btn {
+          color: #60bf71;
+        }
+        .forgot-btn:hover {
+          color: #3d945a;
+        }
+        .eye-btn {
+          color: #9ca3af;
+          display: flex;
+          align-items: center;
+        }
+        .eye-btn:hover {
+          color: #60bf71 !important;
+        }
+        .login-footer {
+          color: #9ca3af;
+        }
+        .login-footer-brand {
+          color: #374151;
+          font-weight: 700;
+        }
+
+        /* Mobile Styles */
         @media (max-width: 900px) {
           .login-left-panel {
             display: none !important;
@@ -574,15 +662,69 @@ const LoginPage = () => {
           .login-right-panel {
             flex: 1 1 100% !important;
             background: linear-gradient(180deg, #0f2035 0%, #132a42 50%, #0a1628 100%) !important;
+            overflow-y: auto !important;
+            padding: 2rem 1.5rem !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: flex-start !important;
+            align-items: center !important;
           }
-          .login-right-panel h2 {
+          .login-right-content-wrapper {
+            margin: 2rem 0 !important;
+          }
+          .mobile-header {
+            display: flex !important;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+          }
+          .welcome-heading {
+            display: none !important;
+          }
+          .login-card {
+            background: rgba(30, 41, 59, 0.45) !important;
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25) !important;
+          }
+          .login-label {
+            color: rgba(255, 255, 255, 0.9) !important;
+          }
+          .login-input-container {
+            border: 2px solid rgba(255, 255, 255, 0.1) !important;
+            background: rgba(15, 23, 42, 0.5) !important;
+          }
+          .login-input-container.focused {
+            border: 2px solid #60bf71 !important;
+            background: rgba(96,191,113,0.04) !important;
+            box-shadow: 0 0 0 4px rgba(96,191,113,0.15) !important;
+          }
+          .login-input {
             color: #ffffff !important;
           }
-          .login-right-panel p {
-            color: rgba(255,255,255,0.55) !important;
+          input::placeholder {
+            color: #64748b !important;
           }
-          .login-right-panel label {
-            color: rgba(255,255,255,0.7) !important;
+          .remember-label {
+            color: rgba(255, 255, 255, 0.6) !important;
+          }
+          .forgot-btn {
+            color: #60bf71 !important;
+          }
+          .forgot-btn:hover {
+            color: #8dd99b !important;
+          }
+          .eye-btn {
+            color: rgba(255, 255, 255, 0.4) !important;
+          }
+          .eye-btn:hover {
+            color: #60bf71 !important;
+          }
+          .login-footer {
+            color: rgba(255, 255, 255, 0.4) !important;
+          }
+          .login-footer-brand {
+            color: rgba(255, 255, 255, 0.7) !important;
           }
         }
 
@@ -590,11 +732,11 @@ const LoginPage = () => {
           .login-right-panel {
             padding: 1.25rem !important;
           }
+          .login-right-content-wrapper {
+            margin: 1rem 0 !important;
+          }
         }
 
-        input::placeholder {
-          color: #b0b8c4 !important;
-        }
         input:focus {
           outline: none;
         }

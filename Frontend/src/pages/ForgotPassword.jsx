@@ -256,8 +256,58 @@ const ForgotPassword = () => {
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.7, delay: 0.3 }}
           style={{ width: '100%', maxWidth: '420px', position: 'relative', zIndex: 1 }}
+          className="login-right-content-wrapper"
         >
-          <div style={{ marginBottom: '2rem' }}>
+          {/* Mobile Header (Only visible on screens <= 900px) */}
+          <div className="mobile-header">
+            <div style={{
+              marginBottom: '1.25rem',
+              filter: 'drop-shadow(2px 3px 3px rgba(255,255,255,0.15))',
+              padding: '24px',
+              rotate: "12deg",
+              backgroundImage: `url(${white_stoke})`,
+              backgroundSize: '100% 100%',
+              backgroundPosition: 'center',
+              borderRadius: '9999px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <img
+                src={logo}
+                alt="INHYDRO Logo"
+                style={{
+                  rotate: "-12deg",
+                  maxWidth: '120px',
+                  height: 'auto',
+                }}
+              />
+            </div>
+            <h1 className="mobile-title" style={{
+              fontSize: '1.85rem', fontWeight: 800, color: '#ffffff',
+              marginBottom: '0.5rem', letterSpacing: '-0.025em',
+              lineHeight: 1.2,
+            }}>
+              Smart Soil
+              <span style={{
+                display: 'block',
+                background: 'linear-gradient(135deg, #60bf71 0%, #3ecf8e 50%, #38d9a9 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                marginTop: '0.15rem',
+              }}>
+                Monitoring System
+              </span>
+            </h1>
+            <p className="mobile-subtitle" style={{
+              color: 'rgba(148,175,204,0.7)', fontSize: '0.85rem',
+              lineHeight: 1.5, maxWidth: '280px', margin: '0 auto 1.5rem auto',
+            }}>
+              Precision agriculture through real-time IoT sensing and intelligent analytics.
+            </p>
+          </div>
+
+          <div style={{ marginBottom: '2rem' }} className="welcome-heading">
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -288,7 +338,7 @@ const ForgotPassword = () => {
               {step === 3 && 'Reset Password'}
               {step === 4 && 'Password Reset'}
             </motion.h2>
-            <p style={{ color: '#7a8fa3', fontSize: '0.9rem', lineHeight: 1.5 }}>
+            <p style={{ color: '#7a8fa3', fontSize: '0.9rem', lineHeight: 1.5 }} className="recovery-subtitle">
               {step === 1 && "Enter your registered email address to receive an OTP."}
               {step === 2 && "Enter the 6-digit code sent to your email."}
               {step === 3 && "Create a new strong password."}
@@ -300,9 +350,10 @@ const ForgotPassword = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.6, duration: 0.5 }}
+            className="login-card"
             style={{
-              background: '#ffffff', borderRadius: '1.25rem', border: '1px solid rgba(0,0,0,0.06)',
-              padding: '2rem', boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 8px 32px rgba(0,0,0,0.06)',
+              borderRadius: '1.25rem',
+              padding: '2rem',
             }}
           >
             <AnimatePresence mode="wait">
@@ -314,9 +365,9 @@ const ForgotPassword = () => {
                   onSubmit={handleRequestOtp}
                 >
                   <div style={{ marginBottom: '1.5rem' }}>
-                    <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#374151', marginBottom: '0.5rem' }}>Email Address</label>
-                    <div style={{ position: 'relative', borderRadius: '0.75rem', border: isFocused.email ? '2px solid #60bf71' : '2px solid #e5e7eb', background: isFocused.email ? 'rgba(96,191,113,0.02)' : '#f9fafb', transition: 'all 0.2s', boxShadow: isFocused.email ? '0 0 0 4px rgba(96,191,113,0.08)' : 'none' }}>
-                      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onFocus={() => setIsFocused(f => ({ ...f, email: true }))} onBlur={() => setIsFocused(f => ({ ...f, email: false }))} placeholder="you@company.com" required style={{ width: '100%', padding: '0.85rem 1rem', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.9rem', color: '#1f2937' }} />
+                    <label className="login-label" style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.5rem' }}>Email Address</label>
+                    <div className={`login-input-container ${isFocused.email ? 'focused' : ''}`}>
+                      <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onFocus={() => setIsFocused(f => ({ ...f, email: true }))} onBlur={() => setIsFocused(f => ({ ...f, email: false }))} placeholder="you@company.com" required className="login-input" style={{ width: '100%', padding: '0.85rem 1rem', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.9rem' }} />
                     </div>
                   </div>
                   {error && <div style={{ color: '#dc2626', fontSize: '0.82rem', marginBottom: '1rem', background: 'rgba(239,68,68,0.06)', padding: '0.75rem', borderRadius: '0.65rem', border: '1px solid rgba(239,68,68,0.2)' }}>⚠ {error}</div>}
@@ -334,9 +385,9 @@ const ForgotPassword = () => {
                   onSubmit={handleVerifyOtp}
                 >
                   <div style={{ marginBottom: '1.5rem' }}>
-                    <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#374151', marginBottom: '0.5rem' }}>Enter OTP</label>
-                    <div style={{ position: 'relative', borderRadius: '0.75rem', border: isFocused.otp ? '2px solid #60bf71' : '2px solid #e5e7eb', background: isFocused.otp ? 'rgba(96,191,113,0.02)' : '#f9fafb', transition: 'all 0.2s', boxShadow: isFocused.otp ? '0 0 0 4px rgba(96,191,113,0.08)' : 'none' }}>
-                      <input type="text" value={otp} onChange={(e) => setOtp(e.target.value)} onFocus={() => setIsFocused(f => ({ ...f, otp: true }))} onBlur={() => setIsFocused(f => ({ ...f, otp: false }))} placeholder="123456" maxLength={6} required style={{ width: '100%', padding: '0.85rem 1rem', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.9rem', color: '#1f2937', letterSpacing: '4px', textAlign: 'center', fontWeight: 'bold' }} />
+                    <label className="login-label" style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.5rem' }}>Enter OTP</label>
+                    <div className={`login-input-container ${isFocused.otp ? 'focused' : ''}`}>
+                      <input type="text" value={otp} onChange={(e) => setOtp(e.target.value)} onFocus={() => setIsFocused(f => ({ ...f, otp: true }))} onBlur={() => setIsFocused(f => ({ ...f, otp: false }))} placeholder="123456" maxLength={6} required className="login-input" style={{ width: '100%', padding: '0.85rem 1rem', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.9rem', letterSpacing: '4px', textAlign: 'center', fontWeight: 'bold' }} />
                     </div>
                   </div>
                   {error && <div style={{ color: '#dc2626', fontSize: '0.82rem', marginBottom: '1rem', background: 'rgba(239,68,68,0.06)', padding: '0.75rem', borderRadius: '0.65rem', border: '1px solid rgba(239,68,68,0.2)' }}>⚠ {error}</div>}
@@ -354,9 +405,9 @@ const ForgotPassword = () => {
                   onSubmit={handleResetPassword}
                 >
                   <div style={{ marginBottom: '1.5rem' }}>
-                    <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#374151', marginBottom: '0.5rem' }}>New Password</label>
-                    <div style={{ position: 'relative', borderRadius: '0.75rem', border: isFocused.password ? '2px solid #60bf71' : '2px solid #e5e7eb', background: isFocused.password ? 'rgba(96,191,113,0.02)' : '#f9fafb', transition: 'all 0.2s', boxShadow: isFocused.password ? '0 0 0 4px rgba(96,191,113,0.08)' : 'none' }}>
-                      <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} onFocus={() => setIsFocused(f => ({ ...f, password: true }))} onBlur={() => setIsFocused(f => ({ ...f, password: false }))} placeholder="Minimum 6 characters" minLength={6} required style={{ width: '100%', padding: '0.85rem 1rem', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.9rem', color: '#1f2937' }} />
+                    <label className="login-label" style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.5rem' }}>New Password</label>
+                    <div className={`login-input-container ${isFocused.password ? 'focused' : ''}`}>
+                      <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} onFocus={() => setIsFocused(f => ({ ...f, password: true }))} onBlur={() => setIsFocused(f => ({ ...f, password: false }))} placeholder="Minimum 6 characters" minLength={6} required className="login-input" style={{ width: '100%', padding: '0.85rem 1rem', border: 'none', outline: 'none', background: 'transparent', fontSize: '0.9rem' }} />
                     </div>
                   </div>
                   {error && <div style={{ color: '#dc2626', fontSize: '0.82rem', marginBottom: '1rem', background: 'rgba(239,68,68,0.06)', padding: '0.75rem', borderRadius: '0.65rem', border: '1px solid rgba(239,68,68,0.2)' }}>⚠ {error}</div>}
@@ -376,8 +427,8 @@ const ForgotPassword = () => {
                   <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(96,191,113,0.1)', color: '#60bf71', marginBottom: '1rem' }}>
                     <CheckCircle2 size={32} />
                   </div>
-                  <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1f2937', marginBottom: '0.5rem' }}>All Done!</h3>
-                  <p style={{ color: '#6b7280', fontSize: '0.9rem', marginBottom: '1.5rem' }}>Your password has been securely reset.</p>
+                  <h3 className="success-title" style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '0.5rem' }}>All Done!</h3>
+                  <p className="success-p" style={{ fontSize: '0.9rem', marginBottom: '1.5rem' }}>Your password has been securely reset.</p>
                   
                   <motion.button onClick={() => navigate('/login')} whileTap={{ scale: 0.985 }} style={{ width: '100%', padding: '0.95rem', border: 'none', borderRadius: '0.75rem', background: '#1f2937', color: '#ffffff', fontSize: '0.95rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                     Go to Login <ArrowLeft size={16} style={{ transform: 'rotate(180deg)' }} />
@@ -391,7 +442,8 @@ const ForgotPassword = () => {
                 <button
                   type="button"
                   onClick={() => navigate('/login')}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#60bf71', fontWeight: 600, fontSize: '0.85rem', transition: 'color 0.2s', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                  className="back-btn"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: '0.85rem', transition: 'color 0.2s', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
                 >
                   <ArrowLeft size={16} /> Back to Login
                 </button>
@@ -400,8 +452,8 @@ const ForgotPassword = () => {
           </motion.div>
 
           {/* Footer */}
-          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }} style={{ textAlign: 'center', fontSize: '0.75rem', color: '#9ca3af', marginTop: '2rem' }}>
-            &copy; 2026 <span style={{ color: '#374151', fontWeight: 700 }}>INHYDRO</span>&ensp;·&ensp;All rights reserved
+          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.2 }} className="login-footer" style={{ textAlign: 'center', fontSize: '0.75rem', marginTop: '2rem' }}>
+            &copy; 2026 <span className="login-footer-brand">INHYDRO</span>&ensp;·&ensp;All rights reserved
           </motion.p>
         </motion.div>
       </div>
@@ -411,9 +463,142 @@ const ForgotPassword = () => {
         @keyframes floatOrb2 { 0%, 100% { transform: translate(0, 0) scale(1); } 33% { transform: translate(-40px, -20px) scale(1.08); } 66% { transform: translate(30px, 30px) scale(0.92); } }
         @keyframes floatOrb3 { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(25px, -35px) scale(1.12); } }
         @keyframes spin { to { transform: rotate(360deg); } }
-        @media (max-width: 900px) { .login-left-panel { display: none !important; } .login-right-panel { flex: 1 1 100% !important; background: linear-gradient(180deg, #0f2035 0%, #132a42 50%, #0a1628 100%) !important; } .login-right-panel h2 { color: #ffffff !important; } .login-right-panel p { color: rgba(255,255,255,0.55) !important; } .login-right-panel label { color: rgba(255,255,255,0.7) !important; } }
-        @media (max-width: 480px) { .login-right-panel { padding: 1.25rem !important; } }
-        input::placeholder { color: #b0b8c4 !important; } input:focus { outline: none; }
+
+        /* Desktop Styles */
+        .mobile-header {
+          display: none !important;
+        }
+        .login-card {
+          background: #ffffff;
+          border: 1px solid rgba(0,0,0,0.06);
+          box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 32px rgba(0,0,0,0.06);
+        }
+        .login-label {
+          color: #374151;
+        }
+        .login-input-container {
+          position: relative;
+          border-radius: 0.75rem;
+          border: 2px solid #e5e7eb;
+          background: #f9fafb;
+          display: flex;
+          align-items: center;
+          transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+        }
+        .login-input-container.focused {
+          border: 2px solid #60bf71;
+          background: rgba(96,191,113,0.02);
+          box-shadow: 0 0 0 4px rgba(96,191,113,0.08);
+        }
+        .login-input {
+          color: #1f2937;
+        }
+        input::placeholder {
+          color: #b0b8c4 !important;
+        }
+        .success-title {
+          color: #1f2937;
+        }
+        .success-p {
+          color: #6b7280;
+        }
+        .back-btn {
+          color: #60bf71;
+        }
+        .back-btn:hover {
+          color: #3d945a;
+        }
+        .login-footer {
+          color: #9ca3af;
+        }
+        .login-footer-brand {
+          color: #374151;
+          font-weight: 700;
+        }
+
+        /* Mobile Styles */
+        @media (max-width: 900px) {
+          .login-left-panel {
+            display: none !important;
+          }
+          .login-right-panel {
+            flex: 1 1 100% !important;
+            background: linear-gradient(180deg, #0f2035 0%, #132a42 50%, #0a1628 100%) !important;
+            overflow-y: auto !important;
+            padding: 2rem 1.5rem !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: flex-start !important;
+            align-items: center !important;
+          }
+          .login-right-content-wrapper {
+            margin: 2rem 0 !important;
+          }
+          .mobile-header {
+            display: flex !important;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+          }
+          .welcome-heading {
+            display: none !important;
+          }
+          .login-card {
+            background: rgba(30, 41, 59, 0.45) !important;
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25) !important;
+          }
+          .login-label {
+            color: rgba(255, 255, 255, 0.9) !important;
+          }
+          .login-input-container {
+            border: 2px solid rgba(255, 255, 255, 0.1) !important;
+            background: rgba(15, 23, 42, 0.5) !important;
+          }
+          .login-input-container.focused {
+            border: 2px solid #60bf71 !important;
+            background: rgba(96,191,113,0.04) !important;
+            box-shadow: 0 0 0 4px rgba(96,191,113,0.15) !important;
+          }
+          .login-input {
+            color: #ffffff !important;
+          }
+          input::placeholder {
+            color: #64748b !important;
+          }
+          .success-title {
+            color: #ffffff !important;
+          }
+          .success-p {
+            color: rgba(255, 255, 255, 0.6) !important;
+          }
+          .back-btn {
+            color: #60bf71 !important;
+          }
+          .back-btn:hover {
+            color: #8dd99b !important;
+          }
+          .login-footer {
+            color: rgba(255, 255, 255, 0.4) !important;
+          }
+          .login-footer-brand {
+            color: rgba(255, 255, 255, 0.7) !important;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .login-right-panel {
+            padding: 1.25rem !important;
+          }
+          .login-right-content-wrapper {
+            margin: 1rem 0 !important;
+          }
+        }
+
+        input:focus {
+          outline: none;
+        }
       `}</style>
     </div>
   );

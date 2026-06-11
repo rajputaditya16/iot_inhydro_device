@@ -1,0 +1,24 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+
+# Allow access to landing/login pages
+Allow: /$
+Allow: /login
+Allow: /forgot-password
+
+# Disallow access to dashboard and internal management routes
+Disallow: /dashboard
+Disallow: /user-dashboard
+Disallow: /superadmin-dashboard
+Disallow: /devices
+Disallow: /monitoring
+Disallow: /analytics
+Disallow: /cold-storage
+Disallow: /almora-settings
+Disallow: /almora2-settings
+Disallow: /settings
+Disallow: /users
+Disallow: /admins
+
+# Sitemap location
+Sitemap: https://inhydro.example.com/sitemap.xml

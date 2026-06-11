@@ -5,20 +5,93 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
-    <!-- SEO Meta -->
-    <title>InHydro - IoT Monitoring Platform</title>
-    <meta name="description" content="In Hydro is an advanced IoT monitoring platform for real-time data tracking, analytics, and smart device management." />
-    <meta name="keywords" content="IoT, Monitoring System, Smart Devices, Analytics, Dashboard, INHYDRO" />
-    <meta name="author" content="In Hydro Team" />
+    <!-- Primary SEO Metadata -->
+    <title>InHydro | Smart IoT Hydroponics Monitoring & Automated Dosing</title>
+    <meta name="title" content="InHydro | Smart IoT Hydroponics Monitoring & Automated Dosing" />
+    <meta name="description" content="InHydro is a professional, enterprise-grade IoT platform for hydroponics and precision agriculture. Monitor pH, EC, soil moisture, and temperature in real-time, configure remote dosing, and automate irrigation schedules." />
+    <meta name="keywords" content="InHydro, Hydroponics IoT, Smart Farming, Precision Agriculture, Soil Monitor, Automated Dosing, pH Control, EC Control, Raspberry Pi IoT, Smart Irrigation, Greenhouse Automation, ThingSpeak Telemetry, HiveMQ MQTT" />
+    <meta name="author" content="InHydro Team" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://inhydro.example.com/" />
 
-    <!-- Theme -->
-    <meta name="theme-color" content="#0f172a" />
-    <!-- Favicon -->
-    <link rel="icon" href="/logo.webp" />
-    <!-- Fonts -->
+    <!-- Performance Optimization: Preconnect & DNS-Prefetch to External APIs and Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://api.thingspeak.com" />
+    <link rel="preconnect" href="https://iot-device-inhydro-backend.onrender.com" crossorigin />
+    <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+    <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
+    <link rel="dns-prefetch" href="https://api.thingspeak.com" />
+    <link rel="dns-prefetch" href="https://iot-device-inhydro-backend.onrender.com" />
+
+    <!-- PWA & Mobile Optimization -->
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="InHydro" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Favicon & Touch Icons -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/webp" sizes="512x512" href="/logo.webp" />
+    <link rel="icon" type="image/jpeg" sizes="512x512" href="/logo.jpg" />
+    <link rel="apple-touch-icon" href="/logo.webp" />
+
+    <!-- Open Graph / Facebook Meta (Social Media Previews) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://inhydro.example.com/" />
+    <meta property="og:title" content="InHydro | Smart IoT Hydroponics Monitoring & Automated Dosing" />
+    <meta property="og:description" content="Empower your precision agriculture with InHydro. Live dashboard for real-time monitoring of pH, EC, soil parameters, automatic dosing controls, and remote configuration via MQTT." />
+    <meta property="og:image" content="https://inhydro.example.com/logo.webp" />
+    <meta property="og:site_name" content="InHydro" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter Card Meta (X Previews) -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://inhydro.example.com/" />
+    <meta name="twitter:title" content="InHydro | Smart IoT Hydroponics Monitoring & Automated Dosing" />
+    <meta name="twitter:description" content="Empower your precision agriculture with InHydro. Live dashboard for real-time monitoring of pH, EC, soil parameters, automatic dosing controls, and remote configuration via MQTT." />
+    <meta name="twitter:image" content="https://inhydro.example.com/logo.webp" />
+
+    <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+    <!-- Schema.org JSON-LD Structured Data (Rich Snippets) -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "InHydro",
+        "alternateName": "InHydro IoT Hydroponics System",
+        "description": "An advanced, enterprise-grade IoT platform designed for precision agriculture and hydroponics. Features real-time soil parameter tracking (pH, EC, moisture, temperature), automatic dosing controls, telemetry visualization, and scheduling.",
+        "url": "https://inhydro.example.com",
+        "applicationCategory": "BusinessApplication, DeveloperApplication, AgriculturalTechnology",
+        "operatingSystem": "All (Web-based with Raspberry Pi edge Integration)",
+        "browserRequirements": "Requires JavaScript and HTML5",
+        "image": "https://inhydro.example.com/logo.webp",
+        "author": {
+          "@type": "Organization",
+          "name": "InHydro Team",
+          "url": "https://inhydro.example.com"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0.00",
+          "priceCurrency": "USD"
+        },
+        "featureList": [
+          "Real-time sensor monitoring (pH, EC, Soil Moisture, Temperature)",
+          "Automated EC dosing with precision relays",
+          "Automated pH correction",
+          "Configurable cyclic irrigation timers",
+          "ThingSpeak cloud telemetry and Recharts analytics",
+          "HiveMQ MQTT remote setpoint sync and connection status",
+          "Role-based user management (Admin, Manager, Operator, Viewer)",
+          "Responsive design with Dark Mode UI"
+        ]
+      }
+    </script>
   </head>
 
   <body class="bg-slate-950 text-white font-sans antialiased">
