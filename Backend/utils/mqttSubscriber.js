@@ -90,12 +90,20 @@ const startMqttSubscriber = () => {
       }
 
       // Store in MongoDB
+      let packetTimestamp = new Date();
+      if (payloadData && payloadData.timestamp) {
+        const parsedDate = new Date(payloadData.timestamp);
+        if (!isNaN(parsedDate.getTime())) {
+          packetTimestamp = parsedDate;
+        }
+      }
+
       const packet = await MqttPacket.create({
         deviceId,
         mqttId,
         topic,
         data: payloadData,
-        timestamp: new Date()
+        timestamp: packetTimestamp
       });
 
       console.log(`[MQTT Subscriber] Saved live telemetry for "${mqttId}" on topic "${topic}" (ID: ${packet._id})`);

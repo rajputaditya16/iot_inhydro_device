@@ -381,22 +381,44 @@ def on_control_message(client, userdata, msg):
     except Exception as e:
         print(f"Control MQTT error: {e}")
 
+is_mqtt_connected = False
+
+def on_control_connect(client, userdata, flags, rc, properties=None):
+    global is_mqtt_connected
+    if rc == 0:
+        is_mqtt_connected = True
+        print("✅ Control MQTT (HiveMQ) connected/reconnected")
+        for room in [1, 2]:
+            client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/update")
+            client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/request_sync")
+            try:
+                client.publish(
+                    f"inhydro/{DEVICE_NAME}/room{room}/setpoints/current",
+                    json.dumps(setpoints[room]), retain=True)
+            except:
+                pass
+    else:
+        is_mqtt_connected = False
+        print(f"⚠️ Control MQTT connection failed with code {rc}")
+
+def on_control_disconnect(client, userdata, flags, rc, properties=None, *args, **kwargs):
+    global is_mqtt_connected
+    is_mqtt_connected = False
+    print("⚠️ Control MQTT (HiveMQ) disconnected")
+
 import uuid
 client_id = f"Inhydro_Dual_{DEVICE_NAME.strip()}_{uuid.uuid4().hex[:6]}"
 control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id)
 control_client.on_message = on_control_message
+control_client.on_connect = on_control_connect
+control_client.on_disconnect = on_control_disconnect
+
 try:
-    control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
-    for room in [1, 2]:
-        control_client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/update")
-        control_client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/request_sync")
-        control_client.publish(
-            f"inhydro/{DEVICE_NAME}/room{room}/setpoints/current",
-            json.dumps(setpoints[room]), retain=True)
     control_client.loop_start()
-    print("✅ Control MQTT (HiveMQ) connected")
-except:
-    print("⚠️  Control MQTT offline")
+    control_client.connect_async(CONTROL_BROKER, CONTROL_PORT, 10)
+    print("✅ Control MQTT (HiveMQ) loop started (connecting...)")
+except Exception as e:
+    print(f"⚠️  Control MQTT startup failed: {e}")
 
 
 
@@ -725,41 +747,52 @@ def auto_trust_devices():
         time.sleep(5)
 
 def start_bluetooth_server():
-    try:
-        os.system("sudo sdptool add SP >/dev/null 2>&1"); time.sleep(1)
-        srv = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        srv.bind((socket.BDADDR_ANY, 1)); srv.listen(1)
-        print("Bluetooth RFCOMM server listening")
-        while True:
-            try:
-                cli, info = srv.accept()
-                print(f"BT connected: {info}")
-                cli.send(b"\r\nInhydro Dual Room\r\nCmds: WIFI:WiFi_Name:PASS | SCAN: Scanning nearby WiFi Networks\r\n")
-                while True:
-                    data = cli.recv(1024)
-                    if not data: break
-                    cmd = data.decode('utf-8').strip()
-                    if cmd.startswith("WIFI:"):
-                        parts = cmd.split(":")
-                        cli.send(f"\r\n{set_wifi(parts[1],':'.join(parts[2:])) if len(parts)>=3 else 'ERROR: WIFI:SSID:PASS'}\r\n".encode())
-                    elif cmd.startswith("ID:"):
-                        new_id = cmd.split(":",1)[1].strip()
-                        if new_id:
-                            with open(ID_FILE,"w") as f: f.write(new_id)
-                            cli.send(f"\r\nID set to {new_id}. Restarting...\r\n".encode())
-                            root.after(2000, restart_program)
-                        else: cli.send(b"\r\nERROR: ID:NAME\r\n")
-                    elif cmd.upper() == "SCAN":
-                        cli.send(("\r\n"+scan_wifi()+"\r\n").encode())
-                    elif cmd.upper() == "PING":
-                        cli.send(b"\r\nPONG\r\n")
-                    else:
-                        cli.send(f"\r\nUnknown: {cmd}\r\n".encode())
-            except Exception as e: print(f"BT error: {e}")
-            finally:
-                try: cli.close()
+    while True:
+        srv = None
+        try:
+            os.system("sudo sdptool add --channel=3 SP >/dev/null 2>&1"); time.sleep(1)
+            srv = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
+            srv.bind((socket.BDADDR_ANY, 3)); srv.listen(1)
+            print("Bluetooth RFCOMM server listening")
+            while True:
+                cli = None
+                try:
+                    cli, info = srv.accept()
+                    print(f"BT connected: {info}")
+                    cli.send(b"\r\nInhydro Dual Room\r\nCmds: WIFI:WiFi_Name:PASS | SCAN: Scanning nearby WiFi Networks\r\n")
+                    while True:
+                        data = cli.recv(1024)
+                        if not data: break
+                        cmd = data.decode('utf-8').strip()
+                        if cmd.startswith("WIFI:"):
+                            parts = cmd.split(":")
+                            cli.send(f"\r\n{set_wifi(parts[1],':'.join(parts[2:])) if len(parts)>=3 else 'ERROR: WIFI:SSID:PASS'}\r\n".encode())
+                        elif cmd.startswith("ID:"):
+                            new_id = cmd.split(":",1)[1].strip()
+                            if new_id:
+                                with open(ID_FILE,"w") as f: f.write(new_id)
+                                cli.send(f"\r\nID set to {new_id}. Restarting...\r\n".encode())
+                                root.after(2000, restart_program)
+                            else: cli.send(b"\r\nERROR: ID:NAME\r\n")
+                        elif cmd.upper() == "SCAN":
+                            cli.send(("\r\n"+scan_wifi()+"\r\n").encode())
+                        elif cmd.upper() == "PING":
+                            cli.send(b"\r\nPONG\r\n")
+                        else:
+                            cli.send(f"\r\nUnknown: {cmd}\r\n".encode())
+                except Exception as e:
+                    print(f"BT connection error: {e}")
+                finally:
+                    if cli:
+                        try: cli.close()
+                        except: pass
+        except Exception as e:
+            print(f"BT server socket crashed, retrying in 5s: {e}")
+            time.sleep(5)
+        finally:
+            if srv:
+                try: srv.close()
                 except: pass
-    except Exception as e: print(f"BT server failed: {e}")
 
 
 root = tk.Tk()
@@ -1499,71 +1532,139 @@ def publish_live_telemetry(d1, d2):
     except Exception as e:
         pass
 
+local_log_lock = threading.Lock()
 last_local_save_time = 0
 LOCAL_LOG_FILE = os.path.join(BASE_DIR, "local_data_log.json")
 
 def save_local_telemetry(d1, d2):
     global last_local_save_time
+    try:
+        connected = is_mqtt_connected and control_client.is_connected()
+    except:
+        connected = False
+
+    # Store locally ONLY when device is not connected to internet/broker
+    if connected:
+        return
+
     current_time = time.time()
     if current_time - last_local_save_time < 45:
         return
-        
-    s1 = d1.get("soil"); s2 = d2.get("soil")
-    r1 = d1.get("room"); r2 = d2.get("room")
-    
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    def _v(v): return round(v, 2) if isinstance(v, (int, float)) else None
-    
-    record = {
-        "timestamp": timestamp,
-        "room1": {
-            "water_temp": _v(s1['soil_temp'] if s1 else None),
-            "moisture": _v(s1['moisture'] if s1 else None),
-            "ec": _v((s1['ec'] * 0.85)/1000 if s1 and s1.get('ec') is not None else None),
-            "ph": _v(s1['ph'] if s1 else None),
-            "room_temp": _v(r1['room_temp'] if r1 else None),
-            "room_humi": _v(r1['room_humi'] if r1 else None),
-            "orp": _v(d1.get('orp')),
-            "co2": _v(d1.get('co2'))
-        },
-        "room2": {
-            "water_temp": _v(s2['soil_temp'] if s2 else None),
-            "moisture": _v(s2['moisture'] if s2 else None),
-            "ec": _v((s2['ec'] * 0.85)/1000 if s2 and s2.get('ec') is not None else None),
-            "ph": _v(s2['ph'] if s2 else None),
-            "room_temp": _v(r2['room_temp'] if r2 else None),
-            "room_humi": _v(r2['room_humi'] if r2 else None),
-            "orp": _v(d2.get('orp')),
-            "co2": _v(d2.get('co2'))
+
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    ts_str = datetime.datetime.now(ist_tz).isoformat()
+
+    def build_payload(room, d):
+        soil_data = dict(d.get("soil")) if d.get("soil") else None
+        if soil_data and soil_data.get("ec") is not None:
+            soil_data["ec"] = round((soil_data["ec"] * 0.85) / 1000, 2)
+        return {
+            "timestamp": ts_str,
+            "soil": soil_data,
+            "room": d.get("room"),
+            "orp": d.get("orp"),
+            "co2": d.get("co2"),
+            "timer_state": timer_state[room],
+            "relay_status": {
+                "ec1": relay_is_on(ROOM_CHANNELS[room]["ec1"]),
+                "ec2": relay_is_on(ROOM_CHANNELS[room]["ec2"]),
+                "ph": relay_is_on(ROOM_CHANNELS[room]["ph"]),
+                "ac": relay_is_on(ROOM_CHANNELS[room]["ac"]),
+                "humi": relay_is_on(ROOM_CHANNELS[room]["humi"]),
+                "tmr1": relay_is_on(TIMER_CHANNELS[room][0]),
+                "tmr2": relay_is_on(TIMER_CHANNELS[room][1]),
+                "tmr3": relay_is_on(TIMER_CHANNELS[room][2])
+            }
         }
-    }
-    
+
+    records_to_append = [
+        {"room": 1, "payload": build_payload(1, d1)},
+        {"room": 2, "payload": build_payload(2, d2)}
+    ]
+
     def write_thread():
-        try:
-            buffer = []
-            if os.path.exists(LOCAL_LOG_FILE):
-                try:
-                    with open(LOCAL_LOG_FILE, "r") as f:
-                        buffer = json.load(f)
-                except:
-                    buffer = []
-                    
-            if not isinstance(buffer, list):
+        with local_log_lock:
+            try:
                 buffer = []
-                
-            buffer.append(record)
-            if len(buffer) > 20000:
-                buffer = buffer[-20000:]
-                
-            lines = ["  " + json.dumps(item) for item in buffer]
-            with open(LOCAL_LOG_FILE, "w") as f:
-                f.write("[\n" + ",\n".join(lines) + "\n]")
-        except Exception as e:
-            print(f"Local JSON save error: {e}")
-            
+                if os.path.exists(LOCAL_LOG_FILE):
+                    try:
+                        with open(LOCAL_LOG_FILE, "r") as f:
+                            buffer = json.load(f)
+                    except:
+                        buffer = []
+                if not isinstance(buffer, list):
+                    buffer = []
+                buffer.extend(records_to_append)
+                if len(buffer) > 20000:
+                    buffer = buffer[-20000:]
+                lines = ["  " + json.dumps(item) for item in buffer]
+                with open(LOCAL_LOG_FILE, "w") as f:
+                    f.write("[\n" + ",\n".join(lines) + "\n]")
+            except Exception as e:
+                print(f"Local JSON save error: {e}")
+
     threading.Thread(target=write_thread, daemon=True).start()
     last_local_save_time = current_time
+
+def sync_offline_data_worker():
+    while True:
+        try:
+            try:
+                connected = is_mqtt_connected and control_client.is_connected()
+            except:
+                connected = False
+
+            if connected and os.path.exists(LOCAL_LOG_FILE):
+                records = []
+                with local_log_lock:
+                    try:
+                        with open(LOCAL_LOG_FILE, "r") as f:
+                            records = json.load(f)
+                    except Exception as e:
+                        print(f"[OfflineSync] Error reading log file: {e}")
+                        records = []
+
+                if records and isinstance(records, list):
+                    print(f"[OfflineSync] Found {len(records)} offline records to sync.")
+                    remaining_records = list(records)
+                    for rec in records:
+                        try:
+                            conn = is_mqtt_connected and control_client.is_connected()
+                        except:
+                            conn = False
+                        if not conn:
+                            print("[OfflineSync] Lost connection during sync. Pausing.")
+                            break
+
+                        room = rec.get("room")
+                        payload = rec.get("payload")
+                        if room and payload:
+                            topic = f"inhydro/{DEVICE_NAME}/room{room}/telemetry/live"
+                            try:
+                                control_client.publish(topic, json.dumps(payload), qos=1)
+                                time.sleep(0.1)
+                            except Exception as pe:
+                                print(f"[OfflineSync] Publish failed: {pe}")
+                                break
+
+                        remaining_records.remove(rec)
+
+                    with local_log_lock:
+                        try:
+                            if remaining_records:
+                                lines = ["  " + json.dumps(item) for item in remaining_records]
+                                with open(LOCAL_LOG_FILE, "w") as f:
+                                    f.write("[\n" + ",\n".join(lines) + "\n]")
+                            else:
+                                if os.path.exists(LOCAL_LOG_FILE):
+                                    os.remove(LOCAL_LOG_FILE)
+                                print("[OfflineSync] Synchronization complete! Local log cleared.")
+                        except Exception as e:
+                            print(f"[OfflineSync] Error updating local log: {e}")
+        except Exception as e:
+            print(f"[OfflineSync] General error: {e}")
+
+        time.sleep(30)
 
 def update():
     """Main UI Thread: Handles Timers and Relay Control (Never blocks)."""
@@ -1592,6 +1693,7 @@ def main_loop():
     threading.Thread(target=auto_trust_devices,     daemon=True).start()
     threading.Thread(target=start_bluetooth_server, daemon=True).start()
     threading.Thread(target=sensor_polling_worker, daemon=True).start()
+    threading.Thread(target=sync_offline_data_worker, daemon=True).start()
 
     
     show(frame_home)

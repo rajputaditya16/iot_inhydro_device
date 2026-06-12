@@ -46,10 +46,6 @@ DEFAULT_CONFIG = {
     }
 }
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Relay Manager
-# ─────────────────────────────────────────────────────────────────────────────
 class RelayManager:
     def __init__(self, key_name, cfg):
         self.name = key_name
@@ -123,9 +119,6 @@ class RelayManager:
             self.timer_ref = current_time_sec
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Config helpers
-# ─────────────────────────────────────────────────────────────────────────────
 def load_config():
     try:
         with open(CONFIG_FILE, 'r') as f:
@@ -147,10 +140,6 @@ def save_config(cfg):
     except Exception as e:
         print("[CONFIG] Save error:", e)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Globals
-# ─────────────────────────────────────────────────────────────────────────────
 config        = load_config()
 managed_relays = {}
 for r_name in config['relays']:
@@ -160,18 +149,13 @@ ap  = network.WLAN(network.AP_IF)
 sta = network.WLAN(network.STA_IF)
 
 last_ntp_sync = 0
-ts_client     = None   # ThingSpeak MQTT
-hive_client   = None   # HiveMQ MQTT (web dashboard channel)
-UNIQUE_ID     = ''     # set in run()
+ts_client     = None   
+hive_client   = None   
+UNIQUE_ID     = ''     
 
-# Flags set by HiveMQ callback to trigger actions in main loop
 _wifi_reconnect_needed = False
 _ts_reconnect_needed   = False
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# HiveMQ — receive web-pushed config
-# ─────────────────────────────────────────────────────────────────────────────
 def on_web_config(topic, msg):
     """
     Unified HiveMQ callback for both subscribed topics:
@@ -180,16 +164,13 @@ def on_web_config(topic, msg):
     """
     global config, _wifi_reconnect_needed, _ts_reconnect_needed
 
-    # Decode topic to string for comparison
     topic_str = topic.decode('utf-8') if isinstance(topic, bytes) else topic
 
-    # ── Config request: web wants to read current device state ────────────────
     if topic_str.endswith('/config/request'):
         print("[WEB] Config sync requested by dashboard")
         _publish_current_config()
         return
 
-    # ── Config update: web is pushing new settings ────────────────────────────
     try:
         payload = json.loads(msg.decode('utf-8'))
         if not isinstance(payload, dict):
@@ -201,7 +182,6 @@ def on_web_config(topic, msg):
         wifi_changed = False
         ts_changed   = False
 
-        # ── Top-level keys (ssid, password, mqtt_*, ts_*, tz_offset …) ──
         top_keys = [
             'ssid', 'password', 'device_id', 'tz_offset',
             'mqtt_broker', 'mqtt_client_id', 'mqtt_user', 'mqtt_pass',
@@ -220,7 +200,6 @@ def on_web_config(topic, msg):
                     k, '***' if k in ('password', 'mqtt_pass') else payload[k]
                 ))
 
-        # ── Relay section ──
         if 'relays' in payload:
             for r_name in payload['relays']:
                 if r_name in managed_relays:
@@ -228,10 +207,8 @@ def on_web_config(topic, msg):
                     managed_relays[r_name].update_config(config['relays'][r_name])
                     print("  [RELAY] Updated:", r_name)
 
-        # Save to flash immediately
         save_config(config)
 
-        # Signal main loop to reconnect if credentials changed
         if wifi_changed:
             print("[WEB] WiFi credentials changed — will reconnect STA")
             _wifi_reconnect_needed = True
@@ -239,7 +216,6 @@ def on_web_config(topic, msg):
             print("[WEB] ThingSpeak config changed — will reconnect TS")
             _ts_reconnect_needed = True
 
-        # Echo updated config back so dashboard confirms receipt
         _publish_current_config()
 
     except Exception as e:
@@ -276,16 +252,13 @@ def connect_hivemq():
         hive_client.set_callback(on_web_config)
         hive_client.connect()
 
-        # Subscribe to the web-to-device config topic
         sub_topic = "inhydro/{}/config/update".format(UNIQUE_ID)
         hive_client.subscribe(sub_topic.encode())
         print("[HIVE] Connected. Listening on:", sub_topic)
 
-        # Also subscribe to request_sync so web can ask for current config
         sync_topic = "inhydro/{}/config/request".format(UNIQUE_ID)
         hive_client.subscribe(sync_topic.encode())
 
-        # Publish current config so dashboard shows real values on connect
         _publish_current_config()
         return True
     except Exception as e:
@@ -293,10 +266,6 @@ def connect_hivemq():
         hive_client = None
         return False
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ThingSpeak MQTT — telemetry publishing
-# ─────────────────────────────────────────────────────────────────────────────
 def on_ts_message(topic, msg):
     """Handle commands from ThingSpeak (relay-only, legacy support)."""
     try:
@@ -340,10 +309,6 @@ def connect_thingspeak():
         ts_client = None
         return False
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# WiFi helpers
-# ─────────────────────────────────────────────────────────────────────────────
 def connect_wifi():
     ssid = config.get('ssid', '')
     pw   = config.get('password', '')
@@ -365,10 +330,6 @@ def connect_wifi():
     print("[WIFI] Connection failed — will retry later")
     return False
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Main run loop
-# ─────────────────────────────────────────────────────────────────────────────
 def run():
     global last_ntp_sync, ts_client, hive_client, UNIQUE_ID
     global _wifi_reconnect_needed, _ts_reconnect_needed
@@ -376,7 +337,6 @@ def run():
     import ubinascii
     UNIQUE_ID = config.get('device_id') or ubinascii.hexlify(machine.unique_id()).decode().upper()
 
-    # AP mode — always active so device is reachable even without STA
     ap.active(True)
     ap.config(essid='ESP8266_{}'.format(UNIQUE_ID[-6:]))
     print("\n" + "="*32)
@@ -401,7 +361,6 @@ def run():
             tm  = time.localtime(lt)
             hour, minute, weekday = tm[3], tm[4], tm[6]
 
-            # ─── WiFi reconnect flag (set by web config callback) ──────────
             if _wifi_reconnect_needed:
                 _wifi_reconnect_needed = False
                 ts_client  = None   # drop TS — will reconnect after WiFi
@@ -410,12 +369,11 @@ def run():
                 time.sleep(1)
                 connect_wifi()
 
-            # ─── ThingSpeak reconnect flag ────────────────────────────────
             if _ts_reconnect_needed:
                 _ts_reconnect_needed = False
                 ts_client = None
 
-            # ─── 1. Status dashboard (every 5 s) ──────────────────────────
+            
             if cur - last_status_tick >= 5:
                 last_status_tick = cur
                 wifi_ok  = sta.isconnected()
@@ -464,9 +422,7 @@ def run():
                         print("[TS] Publish error:", e)
                         ts_client = None
 
-            # ─── 2. Network maintenance ───────────────────────────────────
             if sta.isconnected():
-                # Check HiveMQ messages (web config channel)
                 if hive_client:
                     try:
                         hive_client.check_msg()
@@ -477,7 +433,6 @@ def run():
                     last_hive_check = cur
                     connect_hivemq()
 
-                # Check ThingSpeak messages
                 if ts_client:
                     try:
                         ts_client.check_msg()
@@ -497,12 +452,10 @@ def run():
                     except:
                         pass
             else:
-                # WiFi dropped — try to reconnect every 60 s
                 if cur - last_wifi_retry > 60:
                     last_wifi_retry = cur
                     connect_wifi()
 
-            # ─── 3. Relay automation logic ────────────────────────────────
             for name in managed_relays:
                 managed_relays[name].process_logic(cur, weekday, hour * 60 + minute)
 
