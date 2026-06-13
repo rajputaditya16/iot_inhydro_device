@@ -1536,6 +1536,200 @@ local_log_lock = threading.Lock()
 last_local_save_time = 0
 LOCAL_LOG_FILE = os.path.join(BASE_DIR, "local_data_log.json")
 
+COLUMNS = [
+    "timestamp",
+    # Room 1 Sensors
+    "r1_soil_ec", "r1_soil_ph", "r1_soil_temp", "r1_soil_moisture",
+    "r1_room_temp", "r1_room_humi", "r1_orp", "r1_co2",
+    # Room 1 Relays
+    "r1_ec1", "r1_ec2", "r1_ph", "r1_ac", "r1_humi", "r1_tmr1", "r1_tmr2", "r1_tmr3",
+    # Room 1 Timers (4 timers: State, Last Execution Timestamp)
+    "r1_t1_state", "r1_t1_last",
+    "r1_t2_state", "r1_t2_last",
+    "r1_t3_state", "r1_t3_last",
+    "r1_t4_state", "r1_t4_last",
+    
+    # Room 2 Sensors
+    "r2_soil_ec", "r2_soil_ph", "r2_soil_temp", "r2_soil_moisture",
+    "r2_room_temp", "r2_room_humi", "r2_orp", "r2_co2",
+    # Room 2 Relays
+    "r2_ec1", "r2_ec2", "r2_ph", "r2_ac", "r2_humi", "r2_tmr1", "r2_tmr2", "r2_tmr3",
+    # Room 2 Timers (4 timers)
+    "r2_t1_state", "r2_t1_last",
+    "r2_t2_state", "r2_t2_last",
+    "r2_t3_state", "r2_t3_last",
+    "r2_t4_state", "r2_t4_last"
+]
+
+def pack_entry(ts, d1, d2):
+    row = [ts]
+    # Pack Room 1 Sensors
+    s1 = d1.get("soil") if d1 else None
+    s1_ec = None
+    if s1 and s1.get("ec") is not None:
+        s1_ec = round((s1["ec"] * 0.85) / 1000, 2)
+    s1_ph = s1.get("ph") if s1 else None
+    s1_temp = s1.get("soil_temp") if s1 else None
+    s1_moist = s1.get("moisture") if s1 else None
+    
+    r1 = d1.get("room") if d1 else None
+    r1_temp = r1.get("room_temp") if r1 else None
+    r1_humi = r1.get("room_humi") if r1 else None
+    
+    row.extend([
+        s1_ec, s1_ph, s1_temp, s1_moist,
+        r1_temp, r1_humi,
+        d1.get("orp") if d1 else None,
+        d1.get("co2") if d1 else None
+    ])
+    
+    # Pack Room 1 Relays
+    row.extend([
+        1 if relay_is_on(ROOM_CHANNELS[1]["ec1"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[1]["ec2"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[1]["ph"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[1]["ac"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[1]["humi"]) else 0,
+        1 if relay_is_on(TIMER_CHANNELS[1][0]) else 0,
+        1 if relay_is_on(TIMER_CHANNELS[1][1]) else 0,
+        1 if relay_is_on(TIMER_CHANNELS[1][2]) else 0
+    ])
+    
+    # Pack Room 1 Timers (4 timers)
+    for i in range(4):
+        state_val = timer_state[1][i]["state"] if len(timer_state[1]) > i else "OFF"
+        last_val = timer_state[1][i]["last"] if len(timer_state[1]) > i else 0.0
+        row.extend([1 if state_val == "ON" else 0, last_val])
+        
+    # Pack Room 2 Sensors
+    s2 = d2.get("soil") if d2 else None
+    s2_ec = None
+    if s2 and s2.get("ec") is not None:
+        s2_ec = round((s2["ec"] * 0.85) / 1000, 2)
+    s2_ph = s2.get("ph") if s2 else None
+    s2_temp = s2.get("soil_temp") if s2 else None
+    s2_moist = s2.get("moisture") if s2 else None
+    
+    r2 = d2.get("room") if d2 else None
+    r2_temp = r2.get("room_temp") if r2 else None
+    r2_humi = r2.get("room_humi") if r2 else None
+    
+    row.extend([
+        s2_ec, s2_ph, s2_temp, s2_moist,
+        r2_temp, r2_humi,
+        d2.get("orp") if d2 else None,
+        d2.get("co2") if d2 else None
+    ])
+    
+    # Pack Room 2 Relays
+    row.extend([
+        1 if relay_is_on(ROOM_CHANNELS[2]["ec1"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[2]["ec2"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[2]["ph"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[2]["ac"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[2]["humi"]) else 0,
+        1 if relay_is_on(TIMER_CHANNELS[2][0]) else 0,
+        1 if relay_is_on(TIMER_CHANNELS[2][1]) else 0,
+        1 if relay_is_on(TIMER_CHANNELS[2][2]) else 0
+    ])
+    
+    # Pack Room 2 Timers (4 timers)
+    for i in range(4):
+        state_val = timer_state[2][i]["state"] if len(timer_state[2]) > i else "OFF"
+        last_val = timer_state[2][i]["last"] if len(timer_state[2]) > i else 0.0
+        row.extend([1 if state_val == "ON" else 0, last_val])
+        
+    return row
+
+def unpack_row(row):
+    if not isinstance(row, list) or len(row) < 49:
+        return None, None
+    ts = row[0]
+    
+    # Unpack Room 1 Sensors
+    s1 = None
+    if any(row[i] is not None for i in [1, 2, 3, 4]):
+        s1 = {
+            "ec": row[1],
+            "ph": row[2],
+            "soil_temp": row[3],
+            "moisture": row[4]
+        }
+    rm1 = None
+    if any(row[i] is not None for i in [5, 6]):
+        rm1 = {
+            "room_temp": row[5],
+            "room_humi": row[6]
+        }
+    r1_timers = []
+    for i in range(4):
+        t_state = "ON" if row[17 + i*2] == 1 else "OFF"
+        t_last = row[18 + i*2]
+        r1_timers.append({"state": t_state, "last": t_last})
+        
+    p1 = {
+        "timestamp": ts,
+        "soil": s1,
+        "room": rm1,
+        "orp": row[7],
+        "co2": row[8],
+        "timer_state": r1_timers,
+        "relay_status": {
+            "ec1": bool(row[9]),
+            "ec2": bool(row[10]),
+            "ph": bool(row[11]),
+            "ac": bool(row[12]),
+            "humi": bool(row[13]),
+            "tmr1": bool(row[14]),
+            "tmr2": bool(row[15]),
+            "tmr3": bool(row[16])
+        }
+    }
+    
+    # Unpack Room 2 Sensors
+    s2 = None
+    if any(row[i] is not None for i in [25, 26, 27, 28]):
+        s2 = {
+            "ec": row[25],
+            "ph": row[26],
+            "soil_temp": row[27],
+            "moisture": row[28]
+        }
+    rm2 = None
+    if any(row[i] is not None for i in [29, 30]):
+        rm2 = {
+            "room_temp": row[29],
+            "room_humi": row[30]
+        }
+    r2_timers = []
+    for i in range(4):
+        t_state = "ON" if row[41 + i*2] == 1 else "OFF"
+        t_last = row[42 + i*2]
+        r2_timers.append({"state": t_state, "last": t_last})
+        
+    p2 = {
+        "timestamp": ts,
+        "soil": s2,
+        "room": rm2,
+        "orp": row[31],
+        "co2": row[32],
+        "timer_state": r2_timers,
+        "relay_status": {
+            "ec1": bool(row[33]),
+            "ec2": bool(row[34]),
+            "ph": bool(row[35]),
+            "ac": bool(row[36]),
+            "humi": bool(row[37]),
+            "tmr1": bool(row[38]),
+            "tmr2": bool(row[39]),
+            "tmr3": bool(row[40])
+        }
+    }
+    return p1, p2
+
+LOG_DIR = os.path.join(BASE_DIR, "local_logs")
+ACTIVE_LOG_FILE = os.path.join(LOG_DIR, "active.jsonl")
+
 def save_local_telemetry(d1, d2):
     global last_local_save_time
     try:
@@ -1554,52 +1748,30 @@ def save_local_telemetry(d1, d2):
     ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
     ts_str = datetime.datetime.now(ist_tz).isoformat()
 
-    def build_payload(room, d):
-        soil_data = dict(d.get("soil")) if d.get("soil") else None
-        if soil_data and soil_data.get("ec") is not None:
-            soil_data["ec"] = round((soil_data["ec"] * 0.85) / 1000, 2)
-        return {
-            "timestamp": ts_str,
-            "soil": soil_data,
-            "room": d.get("room"),
-            "orp": d.get("orp"),
-            "co2": d.get("co2"),
-            "timer_state": timer_state[room],
-            "relay_status": {
-                "ec1": relay_is_on(ROOM_CHANNELS[room]["ec1"]),
-                "ec2": relay_is_on(ROOM_CHANNELS[room]["ec2"]),
-                "ph": relay_is_on(ROOM_CHANNELS[room]["ph"]),
-                "ac": relay_is_on(ROOM_CHANNELS[room]["ac"]),
-                "humi": relay_is_on(ROOM_CHANNELS[room]["humi"]),
-                "tmr1": relay_is_on(TIMER_CHANNELS[room][0]),
-                "tmr2": relay_is_on(TIMER_CHANNELS[room][1]),
-                "tmr3": relay_is_on(TIMER_CHANNELS[room][2])
-            }
-        }
+    try:
+        new_row = pack_entry(ts_str, d1, d2)
+    except Exception as e:
+        print(f"⚠️ Error packing local telemetry entry: {e}")
+        last_local_save_time = current_time
+        return
 
-    records_to_append = [
-        {"room": 1, "payload": build_payload(1, d1)},
-        {"room": 2, "payload": build_payload(2, d2)}
-    ]
+    print(f"📝 Saving local telemetry offline: {ts_str}")
 
     def write_thread():
         with local_log_lock:
             try:
-                buffer = []
-                if os.path.exists(LOCAL_LOG_FILE):
-                    try:
-                        with open(LOCAL_LOG_FILE, "r") as f:
-                            buffer = json.load(f)
-                    except:
-                        buffer = []
-                if not isinstance(buffer, list):
-                    buffer = []
-                buffer.extend(records_to_append)
-                if len(buffer) > 20000:
-                    buffer = buffer[-20000:]
-                lines = ["  " + json.dumps(item) for item in buffer]
-                with open(LOCAL_LOG_FILE, "w") as f:
-                    f.write("[\n" + ",\n".join(lines) + "\n]")
+                os.makedirs(LOG_DIR, exist_ok=True)
+                write_header = not os.path.exists(ACTIVE_LOG_FILE) or os.path.getsize(ACTIVE_LOG_FILE) == 0
+                with open(ACTIVE_LOG_FILE, "a") as f:
+                    if write_header:
+                        f.write(json.dumps(COLUMNS) + "\n")
+                    f.write(json.dumps(new_row) + "\n")
+                
+                # Check if active log exceeds 10,000 entries (approx 1.5MB)
+                if os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 1500000:
+                    rot_name = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
+                    os.rename(ACTIVE_LOG_FILE, rot_name)
+                print(f"✅ Offline telemetry written successfully to {ACTIVE_LOG_FILE}")
             except Exception as e:
                 print(f"Local JSON save error: {e}")
 
@@ -1614,57 +1786,107 @@ def sync_offline_data_worker():
             except:
                 connected = False
 
-            if connected and os.path.exists(LOCAL_LOG_FILE):
-                records = []
-                with local_log_lock:
-                    try:
-                        with open(LOCAL_LOG_FILE, "r") as f:
-                            records = json.load(f)
-                    except Exception as e:
-                        print(f"[OfflineSync] Error reading log file: {e}")
-                        records = []
+            if connected and os.path.exists(LOG_DIR):
+                files = [f for f in os.listdir(LOG_DIR) if f.endswith(".jsonl") or f == "active.jsonl"]
+                if "active.jsonl" in files and os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 0:
+                    with local_log_lock:
+                        rot_name = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
+                        try:
+                            os.rename(ACTIVE_LOG_FILE, rot_name)
+                        except:
+                            pass
+                    # Re-list files after rename
+                    files = [f for f in os.listdir(LOG_DIR) if f.endswith(".jsonl")]
+                
+                # Filter out active.jsonl just in case, and sort chronologically
+                files = [f for f in files if f != "active.jsonl"]
+                files.sort()
+                
+                for fname in files:
+                    fpath = os.path.join(LOG_DIR, fname)
+                    rows = []
+                    with local_log_lock:
+                        if os.path.exists(fpath):
+                            try:
+                                with open(fpath, "r") as f:
+                                    first_line = True
+                                    for line in f:
+                                        line = line.strip()
+                                        if line:
+                                            parsed = json.loads(line)
+                                            if first_line and isinstance(parsed, list) and len(parsed) > 0 and parsed[0] == "timestamp":
+                                                first_line = False
+                                                continue
+                                            rows.append(parsed)
+                                            first_line = False
+                            except Exception as re:
+                                print(f"[OfflineSync] Error reading {fname}: {re}")
 
-                if records and isinstance(records, list):
-                    print(f"[OfflineSync] Found {len(records)} offline records to sync.")
-                    remaining_records = list(records)
-                    for rec in records:
+                    if not rows:
+                        try: os.remove(fpath)
+                        except: pass
+                        continue
+
+                    print(f"[OfflineSync] Syncing segment {fname} with {len(rows)} entries...")
+                    remaining_rows = list(rows)
+                    success = True
+
+                    batch_size = 500
+                    for idx in range(0, len(rows), batch_size):
+                        batch = rows[idx:idx+batch_size]
+
                         try:
                             conn = is_mqtt_connected and control_client.is_connected()
                         except:
                             conn = False
                         if not conn:
                             print("[OfflineSync] Lost connection during sync. Pausing.")
+                            success = False
                             break
 
-                        room = rec.get("room")
-                        payload = rec.get("payload")
-                        if room and payload:
-                            topic = f"inhydro/{DEVICE_NAME}/room{room}/telemetry/live"
-                            try:
-                                control_client.publish(topic, json.dumps(payload), qos=1)
-                                time.sleep(0.1)
-                            except Exception as pe:
-                                print(f"[OfflineSync] Publish failed: {pe}")
-                                break
+                        p1_batch = []
+                        p2_batch = []
+                        for row in batch:
+                            p1, p2 = unpack_row(row)
+                            if p1: p1_batch.append(p1)
+                            if p2: p2_batch.append(p2)
 
-                        remaining_records.remove(rec)
+                        try:
+                            if p1_batch:
+                                control_client.publish(f"inhydro/{DEVICE_NAME}/room1/telemetry/live", json.dumps(p1_batch), qos=1)
+                            if p2_batch:
+                                control_client.publish(f"inhydro/{DEVICE_NAME}/room2/telemetry/live", json.dumps(p2_batch), qos=1)
+                            # Small sleep to prevent network choke
+                            time.sleep(0.05)
+                        except Exception as pe:
+                            print(f"[OfflineSync] Publish batch failed: {pe}")
+                            success = False
+                            break
 
+                        remaining_rows = remaining_rows[len(batch):]
+
+                    # Update the segment file
                     with local_log_lock:
                         try:
-                            if remaining_records:
-                                lines = ["  " + json.dumps(item) for item in remaining_records]
-                                with open(LOCAL_LOG_FILE, "w") as f:
-                                    f.write("[\n" + ",\n".join(lines) + "\n]")
+                            if remaining_rows:
+                                with open(fpath, "w") as f:
+                                    f.write(json.dumps(COLUMNS) + "\n")
+                                    for r in remaining_rows:
+                                        f.write(json.dumps(r) + "\n")
                             else:
-                                if os.path.exists(LOCAL_LOG_FILE):
-                                    os.remove(LOCAL_LOG_FILE)
-                                print("[OfflineSync] Synchronization complete! Local log cleared.")
-                        except Exception as e:
-                            print(f"[OfflineSync] Error updating local log: {e}")
+                                if os.path.exists(fpath):
+                                    os.remove(fpath)
+                                print(f"[OfflineSync] Finished and removed log segment: {fname}")
+                        except Exception as we:
+                            print(f"[OfflineSync] Error updating log segment {fname}: {we}")
+                            success = False
+
+                    if not success:
+                        break
         except Exception as e:
             print(f"[OfflineSync] General error: {e}")
 
-        time.sleep(30)
+        time.sleep(15)
 
 def update():
     """Main UI Thread: Handles Timers and Relay Control (Never blocks)."""

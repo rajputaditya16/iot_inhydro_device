@@ -89,27 +89,49 @@ const startMqttSubscriber = () => {
         payloadData = { raw: payloadString };
       }
 
-      // Store in MongoDB
-      let packetTimestamp = new Date();
-      if (payloadData && payloadData.timestamp) {
-        const parsedDate = new Date(payloadData.timestamp);
-        if (!isNaN(parsedDate.getTime())) {
-          packetTimestamp = parsedDate;
-        }
-      }
-
       // Get the correct dynamic model for this device's collection
       const TelemetryModel = getTelemetryModel(mqttId);
 
-      // Save telemetry directly to the dynamic collection
-      const packet = await TelemetryModel.create({
-        deviceId,
-        mqttId,
-        topic,
-        data: payloadData,
-        timestamp: packetTimestamp
-      });
-      console.log(`[MQTT Subscriber] Saved live telemetry for "${mqttId}" on topic "${topic}" in collection ${TelemetryModel.collection.name}`);
+      if (Array.isArray(payloadData)) {
+        // Bulk insertion for synced offline array
+        const documents = payloadData.map(item => {
+          let packetTimestamp = new Date();
+          if (item && item.timestamp) {
+            const parsedDate = new Date(item.timestamp);
+            if (!isNaN(parsedDate.getTime())) {
+              packetTimestamp = parsedDate;
+            }
+          }
+          return {
+            deviceId,
+            mqttId,
+            topic,
+            data: item,
+            timestamp: packetTimestamp
+          };
+        });
+
+        await TelemetryModel.insertMany(documents);
+        console.log(`[MQTT Subscriber] Saved ${documents.length} bulk telemetry packets for "${mqttId}" on topic "${topic}" in collection ${TelemetryModel.collection.name}`);
+      } else {
+        // Single packet insertion
+        let packetTimestamp = new Date();
+        if (payloadData && payloadData.timestamp) {
+          const parsedDate = new Date(payloadData.timestamp);
+          if (!isNaN(parsedDate.getTime())) {
+            packetTimestamp = parsedDate;
+          }
+        }
+
+        await TelemetryModel.create({
+          deviceId,
+          mqttId,
+          topic,
+          data: payloadData,
+          timestamp: packetTimestamp
+        });
+        console.log(`[MQTT Subscriber] Saved live telemetry for "${mqttId}" on topic "${topic}" in collection ${TelemetryModel.collection.name}`);
+      }
     } catch (err) {
       console.error(`[MQTT Subscriber] Error processing incoming MQTT packet on "${topic}":`, err.message);
     }
