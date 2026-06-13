@@ -1,7 +1,7 @@
 const mqtt = require('mqtt');
 const mongoose = require('mongoose');
 const Device = require('../models/Device');
-const MqttPacket = require('../models/MqttPacket');
+const { getTelemetryModel } = require('../models/TelemetryLog');
 
 const BROKER_URL = 'mqtt://broker.hivemq.com:1883';
 const deviceCache = new Map(); // Caches mqttId -> deviceId to prevent redundant DB queries
@@ -98,15 +98,18 @@ const startMqttSubscriber = () => {
         }
       }
 
-      const packet = await MqttPacket.create({
+      // Get the correct dynamic model for this device's collection
+      const TelemetryModel = getTelemetryModel(mqttId);
+
+      // Save telemetry directly to the dynamic collection
+      const packet = await TelemetryModel.create({
         deviceId,
         mqttId,
         topic,
         data: payloadData,
         timestamp: packetTimestamp
       });
-
-      console.log(`[MQTT Subscriber] Saved live telemetry for "${mqttId}" on topic "${topic}" (ID: ${packet._id})`);
+      console.log(`[MQTT Subscriber] Saved live telemetry for "${mqttId}" on topic "${topic}" in collection ${TelemetryModel.collection.name}`);
     } catch (err) {
       console.error(`[MQTT Subscriber] Error processing incoming MQTT packet on "${topic}":`, err.message);
     }

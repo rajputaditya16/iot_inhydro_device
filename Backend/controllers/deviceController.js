@@ -1,6 +1,7 @@
 const Device = require('../models/Device');
 const SensorPacket = require('../models/SensorPacket');
 const MqttPacket = require('../models/MqttPacket');
+const { getTelemetryModel } = require('../models/TelemetryLog');
 const { publishToDevice } = require('../utils/mqttPublisher');
 
 // @route   GET /api/devices
@@ -172,39 +173,101 @@ exports.getDeviceAnalytics = async (req, res) => {
     let feeds = [];
 
     if (device.deviceType === 'office_control' || device.deviceType === 'multi_sensor') {
+      const mqttId = device.mqttId || device._id.toString();
+      const TelemetryModel = getTelemetryModel(mqttId);
+
       const query = {
         deviceId: device._id,
         timestamp: { $gte: start, $lte: end },
       };
 
-      if (device.deviceType === 'office_control') {
-        // Filter by topic containing selected room to avoid mixed graph lines
-        const room = req.query.room === 'room2' ? 'room2' : 'room1';
-        query.topic = { $regex: room, $options: 'i' };
+      const room = req.query.room || 'room1'; // 'room1', 'room2' or 'both'
+      if (device.deviceType === 'office_control' && room !== 'both') {
+        const targetRoom = room === 'room2' ? 'room2' : 'room1';
+        query.$or = [
+          { topic: { $regex: targetRoom, $options: 'i' } },
+          { topic: { $regex: 'rooms', $options: 'i' } }
+        ];
       }
 
-      const packets = await MqttPacket.find(query).sort({ timestamp: 1 });
+      let packets = await TelemetryModel.find(query).sort({ timestamp: 1 });
 
-      feeds = packets.map((p, idx) => {
+      // Fallback: If no packets exist in the dynamic telemetry collection, query the legacy MqttPacket collection
+      if (packets.length === 0) {
+        const oldQuery = {
+          deviceId: device._id,
+          timestamp: { $gte: start, $lte: end },
+        };
+        if (device.deviceType === 'office_control' && room !== 'both') {
+          const targetRoom = room === 'room2' ? 'room2' : 'room1';
+          oldQuery.topic = { $regex: targetRoom, $options: 'i' };
+        }
+        packets = await MqttPacket.find(oldQuery).sort({ timestamp: 1 });
+      }
+
+      const mappedFeeds = [];
+      packets.forEach((p) => {
         const d = p.data || {};
         if (device.deviceType === 'office_control') {
-          return {
-            created_at: p.timestamp.toISOString(),
-            entry_id: idx + 1,
-            field1: d.soil?.soil_temp !== undefined && d.soil?.soil_temp !== null ? String(d.soil.soil_temp) : null,
-            field2: d.soil?.moisture !== undefined && d.soil?.moisture !== null ? String(d.soil.moisture) : null,
-            field3: d.soil?.ec !== undefined && d.soil?.ec !== null ? String(d.soil.ec) : null,
-            field4: d.soil?.ph !== undefined && d.soil?.ph !== null ? String(d.soil.ph) : null,
-            field5: d.room?.room_temp !== undefined && d.room?.room_temp !== null ? String(d.room.room_temp) : null,
-            field6: d.room?.room_humi !== undefined && d.room?.room_humi !== null ? String(d.room.room_humi) : null,
-            field7: d.orp !== undefined && d.orp !== null ? String(d.orp) : null,
-            field8: d.co2 !== undefined && d.co2 !== null ? String(d.co2) : null,
-          };
+          const isMerged = (d.room1 !== undefined || d.room2 !== undefined);
+
+          if (isMerged) {
+            if (room === 'both') {
+              ['room1', 'room2'].forEach((rName) => {
+                const roomData = d[rName] || {};
+                mappedFeeds.push({
+                  created_at: p.timestamp.toISOString(),
+                  entry_id: mappedFeeds.length + 1,
+                  room: rName,
+                  field1: roomData.soil?.soil_temp !== undefined && roomData.soil?.soil_temp !== null ? String(roomData.soil.soil_temp) : null,
+                  field2: roomData.soil?.moisture !== undefined && roomData.soil?.moisture !== null ? String(roomData.soil.moisture) : null,
+                  field3: roomData.soil?.ec !== undefined && roomData.soil?.ec !== null ? String(roomData.soil.ec) : null,
+                  field4: roomData.soil?.ph !== undefined && roomData.soil?.ph !== null ? String(roomData.soil.ph) : null,
+                  field5: roomData.room?.room_temp !== undefined && roomData.room?.room_temp !== null ? String(roomData.room.room_temp) : null,
+                  field6: roomData.room?.room_humi !== undefined && roomData.room?.room_humi !== null ? String(roomData.room.room_humi) : null,
+                  field7: roomData.orp !== undefined && roomData.orp !== null ? String(roomData.orp) : null,
+                  field8: roomData.co2 !== undefined && roomData.co2 !== null ? String(roomData.co2) : null,
+                });
+              });
+            } else {
+              const roomData = d[room] || {};
+              mappedFeeds.push({
+                created_at: p.timestamp.toISOString(),
+                entry_id: mappedFeeds.length + 1,
+                room: room,
+                field1: roomData.soil?.soil_temp !== undefined && roomData.soil?.soil_temp !== null ? String(roomData.soil.soil_temp) : null,
+                field2: roomData.soil?.moisture !== undefined && roomData.soil?.moisture !== null ? String(roomData.soil.moisture) : null,
+                field3: roomData.soil?.ec !== undefined && roomData.soil?.ec !== null ? String(roomData.soil.ec) : null,
+                field4: roomData.soil?.ph !== undefined && roomData.soil?.ph !== null ? String(roomData.soil.ph) : null,
+                field5: roomData.room?.room_temp !== undefined && roomData.room?.room_temp !== null ? String(roomData.room.room_temp) : null,
+                field6: roomData.room?.room_humi !== undefined && roomData.room?.room_humi !== null ? String(roomData.room.room_humi) : null,
+                field7: roomData.orp !== undefined && roomData.orp !== null ? String(roomData.orp) : null,
+                field8: roomData.co2 !== undefined && roomData.co2 !== null ? String(roomData.co2) : null,
+              });
+            }
+          } else {
+            const packetRoom = p.topic && p.topic.toLowerCase().includes('room2') ? 'room2' : 'room1';
+            if (room === 'both' || packetRoom === room) {
+              mappedFeeds.push({
+                created_at: p.timestamp.toISOString(),
+                entry_id: mappedFeeds.length + 1,
+                room: packetRoom,
+                field1: d.soil?.soil_temp !== undefined && d.soil?.soil_temp !== null ? String(d.soil.soil_temp) : null,
+                field2: d.soil?.moisture !== undefined && d.soil?.moisture !== null ? String(d.soil.moisture) : null,
+                field3: d.soil?.ec !== undefined && d.soil?.ec !== null ? String(d.soil.ec) : null,
+                field4: d.soil?.ph !== undefined && d.soil?.ph !== null ? String(d.soil.ph) : null,
+                field5: d.room?.room_temp !== undefined && d.room?.room_temp !== null ? String(d.room.room_temp) : null,
+                field6: d.room?.room_humi !== undefined && d.room?.room_humi !== null ? String(d.room.room_humi) : null,
+                field7: d.orp !== undefined && d.orp !== null ? String(d.orp) : null,
+                field8: d.co2 !== undefined && d.co2 !== null ? String(d.co2) : null,
+              });
+            }
+          }
         } else {
           // multi_sensor mapping
-          return {
+          mappedFeeds.push({
             created_at: p.timestamp.toISOString(),
-            entry_id: idx + 1,
+            entry_id: mappedFeeds.length + 1,
             field1: d.s1?.t !== undefined && d.s1?.t !== null ? String(d.s1.t) : null,
             field2: d.s2?.t !== undefined && d.s2?.t !== null ? String(d.s2.t) : null,
             field3: d.s3?.t !== undefined && d.s3?.t !== null ? String(d.s3.t) : null,
@@ -213,9 +276,11 @@ exports.getDeviceAnalytics = async (req, res) => {
             field6: d.s6?.t !== undefined && d.s6?.t !== null ? String(d.s6.t) : null,
             field7: d.s7?.t !== undefined && d.s7?.t !== null ? String(d.s7.t) : null,
             field8: null,
-          };
+          });
         }
       });
+
+      feeds = mappedFeeds;
     } else {
       const packets = await SensorPacket.find({
         deviceId: device._id,

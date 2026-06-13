@@ -36,3 +36,5 @@ const mqttPacketSchema = new mongoose.Schema(
 mqttPacketSchema.index({ deviceId: 1, timestamp: -1 });
 
 module.exports = mongoose.model('MqttPacket', mqttPacketSchema);
+
+

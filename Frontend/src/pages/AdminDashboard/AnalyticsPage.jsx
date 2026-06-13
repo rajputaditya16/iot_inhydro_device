@@ -84,30 +84,86 @@ const parseRobustFloat = (val) => {
 };
 
 // Format feeds into chart-ready data dynamically based on available channel fields
-const mapFeedsToCharts = (feeds, filter, channelFields) => {
+const mapFeedsToCharts = (feeds, filter, channelFields, isBothRooms = false) => {
   const validFeeds = Array.isArray(feeds) ? feeds : [];
   const timeFormat = filter === 'today' || filter === 'custom'
     ? { hour: '2-digit', minute: '2-digit' }
     : { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
 
-  const mappedData = {};
-  channelFields.forEach(field => {
-    mappedData[field.key] = validFeeds.map((f) => ({
-      time: new Date(f.created_at).toLocaleTimeString('en-US', timeFormat),
-      value: parseRobustFloat(f[field.key]),
-    }));
-  });
-  return mappedData;
+  if (!isBothRooms) {
+    const mappedData = {};
+    channelFields.forEach(field => {
+      mappedData[field.key] = validFeeds.map((f) => ({
+        time: new Date(f.created_at).toLocaleTimeString('en-US', timeFormat),
+        value: parseRobustFloat(f[field.key]),
+      }));
+    });
+    return mappedData;
+  } else {
+    // Both rooms: group by rounded timestamp
+    const timeGroupsMap = new Map();
+    validFeeds.forEach(f => {
+      const timeObj = new Date(f.created_at);
+      const roundedMs = Math.round(timeObj.getTime() / 15000) * 15000;
+      
+      if (!timeGroupsMap.has(roundedMs)) {
+        timeGroupsMap.set(roundedMs, {
+          time: new Date(roundedMs).toLocaleTimeString('en-US', timeFormat),
+          rawTimestamp: roundedMs
+        });
+      }
+      
+      const group = timeGroupsMap.get(roundedMs);
+      const isRoom2 = f.room === 'room2';
+      const suffix = isRoom2 ? 'Room2' : 'Room1';
+      
+      channelFields.forEach(field => {
+        group[`${field.key}${suffix}`] = parseRobustFloat(f[field.key]);
+      });
+    });
+
+    const sortedGroups = Array.from(timeGroupsMap.values()).sort((a, b) => a.rawTimestamp - b.rawTimestamp);
+
+    const mappedData = {};
+    channelFields.forEach(field => {
+      mappedData[field.key] = sortedGroups.map(g => ({
+        time: g.time,
+        room1Value: g[`${field.key}Room1`] !== undefined ? g[`${field.key}Room1`] : null,
+        room2Value: g[`${field.key}Room2`] !== undefined ? g[`${field.key}Room2`] : null,
+        isBoth: true
+      }));
+    });
+
+    return mappedData;
+  }
 };
 
 // Download helpers
-const downloadCSV = (feeds, channelFields, filterLabel) => {
+const downloadCSV = (feeds, channelFields, filterLabel, isBoth = false) => {
   if (!feeds || feeds.length === 0) return;
-  const header = ['Timestamp', ...channelFields.map(f => `${f.name} (${getFieldMeta(f.name).unit})`)].join(',') + '\n';
-  const rows = feeds.map((f) =>
-    [f.created_at, ...channelFields.map(cfg => f[cfg.key] || '')].join(',')
-  ).join('\n');
-  const blob = new Blob([header + rows], { type: 'text/csv' });
+  
+  const headers = ['Timestamp'];
+  if (isBoth) {
+    headers.push('Room');
+  }
+  channelFields.forEach(f => {
+    headers.push(`${f.name} (${getFieldMeta(f.name).unit || ''})`);
+  });
+  
+  const headerLine = headers.join(',') + '\n';
+  
+  const rows = feeds.map((f) => {
+    const rowCells = [f.created_at];
+    if (isBoth) {
+      rowCells.push(f.room || 'room1');
+    }
+    channelFields.forEach(cfg => {
+      rowCells.push(f[cfg.key] !== undefined && f[cfg.key] !== null ? f[cfg.key] : '');
+    });
+    return rowCells.join(',');
+  }).join('\n');
+
+  const blob = new Blob([headerLine + rows], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   const date = new Date().toISOString().split('T')[0];
@@ -117,10 +173,13 @@ const downloadCSV = (feeds, channelFields, filterLabel) => {
   URL.revokeObjectURL(url);
 };
 
-const downloadJSON = (feeds, channelFields, filterLabel) => {
+const downloadJSON = (feeds, channelFields, filterLabel, isBoth = false) => {
   if (!feeds || feeds.length === 0) return;
   const data = feeds.map((f) => {
     const obj = { timestamp: f.created_at };
+    if (isBoth) {
+      obj.room = f.room || 'room1';
+    }
     channelFields.forEach(cfg => {
       obj[cfg.name] = parseRobustFloat(f[cfg.key]);
     });
@@ -246,20 +305,44 @@ const AnalyticsPage = () => {
   }, [fetchData]);
 
   // Build chart data from raw feeds
-  const chartData = useMemo(() => mapFeedsToCharts(rawFeeds, filter, channelFields), [rawFeeds, filter, channelFields]);
+  const chartData = useMemo(() => mapFeedsToCharts(rawFeeds, filter, channelFields, selectedRoom === 'both'), [rawFeeds, filter, channelFields, selectedRoom]);
 
   // Statistical helpers
   const calcAvg = (data) => {
     if (!data || data.length === 0) return '--';
-    return (data.reduce((s, d) => s + d.value, 0) / data.length).toFixed(1);
+    const values = data.map(d => {
+      if (d.isBoth) {
+        const vals = [d.room1Value, d.room2Value].filter(v => v !== null && v !== undefined);
+        return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+      }
+      return d.value;
+    }).filter(v => v !== null && v !== undefined);
+    if (values.length === 0) return '--';
+    return (values.reduce((s, v) => s + v, 0) / values.length).toFixed(1);
   };
   const calcMax = (data) => {
     if (!data || data.length === 0) return '--';
-    return Math.max(...data.map((d) => d.value)).toFixed(1);
+    const values = data.map(d => {
+      if (d.isBoth) {
+        const vals = [d.room1Value, d.room2Value].filter(v => v !== null && v !== undefined);
+        return vals.length > 0 ? Math.max(...vals) : null;
+      }
+      return d.value;
+    }).filter(v => v !== null && v !== undefined);
+    if (values.length === 0) return '--';
+    return Math.max(...values).toFixed(1);
   };
   const calcMin = (data) => {
     if (!data || data.length === 0) return '--';
-    return Math.min(...data.map((d) => d.value)).toFixed(1);
+    const values = data.map(d => {
+      if (d.isBoth) {
+        const vals = [d.room1Value, d.room2Value].filter(v => v !== null && v !== undefined);
+        return vals.length > 0 ? Math.min(...vals) : null;
+      }
+      return d.value;
+    }).filter(v => v !== null && v !== undefined);
+    if (values.length === 0) return '--';
+    return Math.min(...values).toFixed(1);
   };
 
   const summaryMetrics = channelFields.map(f => {
@@ -347,6 +430,7 @@ const AnalyticsPage = () => {
             >
               <option value="room1">Room 1</option>
               <option value="room2">Room 2</option>
+              <option value="both">Both Rooms</option>
             </select>
           )}
 
@@ -421,13 +505,13 @@ const AnalyticsPage = () => {
                 className="absolute right-0 top-full z-20 mt-2 w-48 rounded-xl border border-slate-700 bg-slate-800 p-1 shadow-2xl"
               >
                 <button
-                  onClick={() => { downloadCSV(rawFeeds, channelFields, filterLabel); setShowDownloadMenu(false); }}
+                  onClick={() => { downloadCSV(rawFeeds, channelFields, filterLabel, selectedRoom === 'both'); setShowDownloadMenu(false); }}
                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
                 >
                   <Download className="h-3.5 w-3.5" /> Download CSV
                 </button>
                 <button
-                  onClick={() => { downloadJSON(rawFeeds, channelFields, filterLabel); setShowDownloadMenu(false); }}
+                  onClick={() => { downloadJSON(rawFeeds, channelFields, filterLabel, selectedRoom === 'both'); setShowDownloadMenu(false); }}
                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
                 >
                   <Download className="h-3.5 w-3.5" /> Download JSON
