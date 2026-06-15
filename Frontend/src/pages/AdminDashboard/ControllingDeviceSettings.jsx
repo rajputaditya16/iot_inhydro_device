@@ -113,7 +113,7 @@ const ControllingDeviceSettings = () => {
   const [status, setStatus] = useState('disconnected');
   const [client, setClient] = useState(null);
   const [liveData, setLiveData] = useState(null);
-  const [configSubTab, setConfigSubTab] = useState('env'); // 'env', 'cyclic', 'daynight', 'thingspeak'
+  const [configSubTab, setConfigSubTab] = useState('env'); // 'env', 'cyclic', 'daynight', 'advanced'
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
   // ── Device selector state ──────────────────────────────────────────────────
@@ -450,18 +450,16 @@ const ControllingDeviceSettings = () => {
         >
           Day/Night Timers (4, 8-10)
         </button>
-        {isSuperadmin && (
-          <button
-            onClick={() => setConfigSubTab('thingspeak')}
-            className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all ${
-              configSubTab === 'thingspeak'
-                ? 'border-blue-500 text-blue-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Cloud Setup
-          </button>
-        )}
+        <button
+          onClick={() => setConfigSubTab('advanced')}
+          className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all ${
+            configSubTab === 'advanced'
+              ? 'border-orange-500 text-orange-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          Advanced Control
+        </button>
       </div>
 
       {/* Configuration Forms */}
@@ -494,7 +492,7 @@ const ControllingDeviceSettings = () => {
         )}
 
         {configSubTab === 'cyclic' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
             {/* Left Column: Timers 1, 2, 3 */}
             <div className="space-y-6">
               {[1, 2, 3].map((num) => (
@@ -510,7 +508,7 @@ const ControllingDeviceSettings = () => {
               ))}
             </div>
 
-            {/* Middle Column: Timers 5, 6, 7 */}
+            {/* Right Column: Timers 5, 6, 7 */}
             <div className="space-y-6">
               {[5, 6, 7].map((num) => (
                 <div key={num} className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4 shadow-md shadow-black/10">
@@ -523,21 +521,6 @@ const ControllingDeviceSettings = () => {
                   </div>
                 </div>
               ))}
-            </div>
-
-            {/* Right Column: Advanced Control Card */}
-            <div className="space-y-6">
-              <div className="rounded-xl border border-orange-500/20 bg-gradient-to-b from-slate-800/40 to-slate-800/20 p-5 space-y-4 shadow-lg shadow-orange-500/5">
-                <h4 className="text-sm font-semibold text-orange-400 uppercase tracking-wider flex items-center gap-2">
-                  <Cpu className="h-4 w-4 text-orange-400" /> Advanced Control
-                </h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <InputRow data={setpoints} onChange={handleChange} label="CO2 Target (PPM)" objKey="CO2 TARGET" />
-                  <InputRow data={setpoints} onChange={handleChange} label="System PIN / Password" objKey="SYSTEM PASSWORD" type="text" />
-                  <InputRow data={setpoints} onChange={handleChange} label="H2O Temp Max (°C)" objKey="WATER TEMP MAX" />
-                  <InputRow data={setpoints} onChange={handleChange} label="H2O Temp Min (°C)" objKey="WATER TEMP MIN" />
-                </div>
-              </div>
             </div>
           </div>
         )}
@@ -576,23 +559,18 @@ const ControllingDeviceSettings = () => {
           </div>
         )}
 
-        {configSubTab === 'thingspeak' && isSuperadmin && (
-          <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 shadow-lg shadow-blue-500/5">
-            <h4 className="mb-4 flex items-center gap-2 text-sm font-semibold text-blue-400">
-              <Radio className="h-4 w-4 animate-pulse" /> ThingSpeak Integration Setup
+        {configSubTab === 'advanced' && (
+          <div className="rounded-xl border border-orange-500/20 bg-gradient-to-b from-slate-800/40 to-slate-800/20 p-5 space-y-4 shadow-lg shadow-orange-500/5">
+            <h4 className="text-sm font-semibold text-orange-400 uppercase tracking-wider flex items-center gap-2">
+              <Cpu className="h-4 w-4 text-orange-400" /> Advanced Control
             </h4>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-              <InputRow data={setpoints} onChange={handleChange} label="MQTT Client ID" objKey="CLIENT ID" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="MQTT Username" objKey="USERNAME" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="MQTT Password" objKey="PASSWORD" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="Channel ID" objKey="CHANNEL ID" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="Read API Key" objKey="READ API KEY" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="Write API Key" objKey="WRITE API KEY" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="MQTT Port" objKey="PORT" />
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+              <InputRow data={setpoints} onChange={handleChange} label="CO2 Target (PPM)" objKey="CO2 TARGET" />
+              <InputRow data={setpoints} onChange={handleChange} label="System PIN / Password" objKey="SYSTEM PASSWORD" type="text" />
+              <InputRow data={setpoints} onChange={handleChange} label="H2O Temp Max (°C)" objKey="WATER TEMP MAX" />
+              <InputRow data={setpoints} onChange={handleChange} label="H2O Temp Min (°C)" objKey="WATER TEMP MIN" />
+              {isSuperadmin && <InputRow data={setpoints} onChange={handleChange} label="MQTT Port" objKey="PORT" />}
             </div>
-            <p className="mt-4 text-[11px] text-slate-500">
-              Configuring these values will activate backup ThingSpeak uploads on the controller script.
-            </p>
           </div>
         )}
       </div>

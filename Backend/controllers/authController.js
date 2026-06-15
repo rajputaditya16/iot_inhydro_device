@@ -305,3 +305,84 @@ exports.resetPassword = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// @route   PUT /api/auth/update-profile
+// @desc    Update currently authenticated user's profile/password
+// @access  Private
+// ─────────────────────────────────────────────────────────────────────────────
+exports.updateProfile = async (req, res) => {
+  try {
+    const { name, email, password, currentPassword } = req.body;
+    
+    // Find user or admin by id depending on the collection
+    const id = req.user._id;
+    let user = await Admin.findById(id).select('+password');
+    let accountType = 'admin';
+    
+    if (user && user.role === 'superadmin') {
+      accountType = 'superadmin';
+    } else if (!user) {
+      user = await User.findById(id).select('+password');
+      accountType = 'user';
+    }
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Require current password for security verification
+    if (!currentPassword) {
+      return res.status(400).json({ success: false, message: 'Current password is required to save changes' });
+    }
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Incorrect current password' });
+    }
+
+    // Update profile info
+    if (name) user.name = name;
+    if (email) {
+      const normalizedEmail = email.toLowerCase();
+      
+      // Check if email is already taken by another account
+      const emailExistsAdmin = await Admin.findOne({ email: normalizedEmail, _id: { $ne: id } });
+      const emailExistsUser = await User.findOne({ email: normalizedEmail, _id: { $ne: id } });
+      
+      if (emailExistsAdmin || emailExistsUser) {
+        return res.status(400).json({ success: false, message: 'Email is already in use by another account' });
+      }
+      user.email = normalizedEmail;
+    }
+
+    // Update password if provided
+    if (password) {
+      if (password.length < 6) {
+        return res.status(400).json({ success: false, message: 'New password must be at least 6 characters' });
+      }
+      user.password = password;
+    }
+
+    await user.save();
+
+    // Remove password from response
+    user.password = undefined;
+
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isActive: user.isActive,
+        createdAt: user.createdAt,
+        accountType
+      }
+    });
+  } catch (err) {
+    console.error('[Update Profile Error]', err.message);
+    res.status(500).json({ success: false, message: 'Server error updating profile' });
+  }
+};

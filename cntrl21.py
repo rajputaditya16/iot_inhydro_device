@@ -865,7 +865,7 @@ def make_home_box(room):
         tk.Label(row_f, text=display[k], font=SML, fg="#333",
                  bg="#e0e0e0", width=12, anchor="w").pack(side="left")
         # EC: auto-width (0) so full "X.XX mS/cm (YYY ppm)" fits without clipping
-        val_width = 0 if k == "ec" else 15
+        val_width = 25 if k == "ec" else 15
         lbl = tk.Label(row_f, text="---", font=("Arial", 16, "bold"),
                        fg="#0d47a1", bg="#e0e0e0", width=val_width, anchor="e")
         lbl.pack(side="right")
@@ -925,8 +925,9 @@ def build_room_screen(room):
         f = tk.Frame(parent, bg="#e0e0e0"); f.pack(fill="x", pady=2)
         tk.Label(f, text=lbl_text, font=SML, fg="#333", bg="#e0e0e0",
                  width=12, anchor="w").pack(side="left")
+        val_width = 25 if key == "ec" else 15
         lbl = tk.Label(f, text="---", font=("Arial",13,"bold"),
-                       fg="#0d47a1", bg="#e0e0e0", anchor="e")
+                       fg="#0d47a1", bg="#e0e0e0", width=val_width, anchor="e")
         lbl.pack(side="right")
         labels_d[key] = lbl
 

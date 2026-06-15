@@ -52,4 +52,7 @@ router.post('/verify-otp', authController.verifyOtp);
 // POST /api/auth/reset-password
 router.post('/reset-password', authController.resetPassword);
 
+// PUT /api/auth/update-profile
+router.put('/update-profile', protect, authController.updateProfile);
+
 module.exports = router;

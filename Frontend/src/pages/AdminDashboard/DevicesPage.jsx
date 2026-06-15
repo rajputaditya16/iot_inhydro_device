@@ -572,22 +572,13 @@ const DevicesPage = () => {
 
             <div className="border-t border-slate-700/50" />
 
-            {/* ThingSpeak Section */}
+            {/* MQTT Configuration Section */}
             <div className="space-y-4">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-2">
-                <Radio className="h-3.5 w-3.5 text-blue-400" /> ThingSpeak Configuration (Optional / Legacy)
+                <Radio className="h-3.5 w-3.5 text-blue-400" /> MQTT Configuration
               </h4>
               <div className="space-y-3 pl-1">
-                <InputGroup label="Channel ID" value={formData.thingspeak.channelId} onChange={(v) => updateThingspeak('channelId', v)} />
-                <InputGroup label="Username" value={formData.thingspeak.username} onChange={(v) => updateThingspeak('username', v)} />
-                <InputGroup label="Password" value={formData.thingspeak.password} onChange={(v) => updateThingspeak('password', v)} type="password" />
-                <InputGroup label="Client ID" value={formData.thingspeak.clientId} onChange={(v) => updateThingspeak('clientId', v)} />
-                <div className="grid grid-cols-2 gap-4">
-                  <InputGroup label="Read API Key" value={formData.thingspeak.readApiKey} onChange={(v) => updateThingspeak('readApiKey', v)} type="password" />
-                  <InputGroup label="Write API Key" value={formData.thingspeak.writeApiKey} onChange={(v) => updateThingspeak('writeApiKey', v)} type="password" />
-                </div>
-
-                <div className="w-24">
+                <div className="w-32">
                   <InputGroup label="MQTT Port" value={formData.thingspeak.port} onChange={(v) => updateThingspeak('port', Number(v))} type="number" />
                 </div>
               </div>
@@ -771,102 +762,17 @@ const DevicesPage = () => {
 
               </div>
 
-              {/* ThingSpeak Configuration Section */}
+              {/* MQTT Configuration Section */}
               <div className="rounded-xl border border-slate-700/30 bg-slate-900/10 p-5 space-y-4">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700/50 pb-2 flex items-center gap-1.5">
-                  <Radio className="h-4 w-4 text-blue-400" /> ThingSpeak Configuration
+                  <Radio className="h-4 w-4 text-blue-400" /> MQTT Configuration
                 </h4>
-
-                {selectedDeviceDetails.thingspeak && (selectedDeviceDetails.thingspeak.channelId || selectedDeviceDetails.thingspeak.tempChannelId) ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm">
-                    <div className="flex justify-between items-center py-1">
-                      <span className="text-slate-400 font-medium">Channel ID</span>
-                      <span className="text-white font-mono font-semibold">{selectedDeviceDetails.thingspeak.channelId || selectedDeviceDetails.thingspeak.tempChannelId}</span>
-                    </div>
-
-                    <div className="flex justify-between items-center py-1 md:border-l md:border-slate-800/60 md:pl-6">
-                      <span className="text-slate-400 font-medium">MQTT Port</span>
-                      <span className="text-white font-mono">{selectedDeviceDetails.thingspeak.port || 1883}</span>
-                    </div>
-
-                    <div className="flex justify-between items-center py-1 border-t border-slate-800/60 pt-2 md:border-t-0 md:pt-0">
-                      <span className="text-slate-400 font-medium">Username</span>
-                      <span className="text-white font-mono">{selectedDeviceDetails.thingspeak.username || selectedDeviceDetails.thingspeak.tempUsername || 'Not set'}</span>
-                    </div>
-
-                    <div className="flex justify-between items-center py-1 border-t border-slate-800/60 pt-2 md:border-l md:border-slate-800/60 md:pl-6 md:border-t-0 md:pt-0">
-                      <span className="text-slate-400 font-medium">Client ID</span>
-                      <span className="text-white font-mono truncate max-w-[180px]" title={selectedDeviceDetails.thingspeak.clientId || selectedDeviceDetails.thingspeak.tempClientId || ''}>
-                        {selectedDeviceDetails.thingspeak.clientId || selectedDeviceDetails.thingspeak.tempClientId || 'Not set'}
-                      </span>
-                    </div>
-
-                    {/* Sensitive Fields */}
-                    <div className="flex justify-between items-center py-1 border-t border-slate-800/60 pt-2 col-span-1 md:col-span-2 grid grid-cols-2 gap-4">
-
-                      <div className="flex flex-col gap-1">
-                        <span className="text-xs text-slate-400 font-medium">Read API Key</span>
-                        <div className="relative flex items-center bg-slate-900/60 rounded border border-slate-700/50 px-2 py-1 font-mono text-xs h-8">
-                          <input
-                            type={showDetailsReadKey ? 'text' : 'password'}
-                            value={selectedDeviceDetails.thingspeak.readApiKey || selectedDeviceDetails.thingspeak.tempReadApiKey || ''}
-                            readOnly
-                            className="bg-transparent text-slate-300 outline-none w-full pr-6"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowDetailsReadKey(!showDetailsReadKey)}
-                            className="absolute right-2 text-slate-500 hover:text-slate-300"
-                          >
-                            {showDetailsReadKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <span className="text-xs text-slate-400 font-medium">Write API Key</span>
-                        <div className="relative flex items-center bg-slate-900/60 rounded border border-slate-700/50 px-2 py-1 font-mono text-xs h-8">
-                          <input
-                            type={showDetailsWriteKey ? 'text' : 'password'}
-                            value={selectedDeviceDetails.thingspeak.writeApiKey || selectedDeviceDetails.thingspeak.tempWriteApiKey || ''}
-                            readOnly
-                            className="bg-transparent text-slate-300 outline-none w-full pr-6"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowDetailsWriteKey(!showDetailsWriteKey)}
-                            className="absolute right-2 text-slate-500 hover:text-slate-300"
-                          >
-                            {showDetailsWriteKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                          </button>
-                        </div>
-                      </div>
-
-                    </div>
-
-                    <div className="flex flex-col gap-1 border-t border-slate-800/60 pt-2 col-span-1 md:col-span-2">
-                      <span className="text-xs text-slate-400 font-medium">Password</span>
-                      <div className="relative flex items-center bg-slate-900/60 rounded border border-slate-700/50 px-2.5 py-1 font-mono text-xs h-8">
-                        <input
-                          type={showDetailsPassword ? 'text' : 'password'}
-                          value={selectedDeviceDetails.thingspeak.password || selectedDeviceDetails.thingspeak.tempPassword || ''}
-                          readOnly
-                          className="bg-transparent text-slate-300 outline-none w-full pr-6"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowDetailsPassword(!showDetailsPassword)}
-                          className="absolute right-2.5 text-slate-500 hover:text-slate-300"
-                        >
-                          {showDetailsPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        </button>
-                      </div>
-                    </div>
-
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm">
+                  <div className="flex justify-between items-center py-1">
+                    <span className="text-slate-400 font-medium">MQTT Port</span>
+                    <span className="text-white font-mono font-semibold">{selectedDeviceDetails.thingspeak?.port || 1883}</span>
                   </div>
-                ) : (
-                  <p className="text-xs text-slate-500 italic py-2">ThingSpeak has not been configured for this device.</p>
-                )}
+                </div>
               </div>
 
             </div>
