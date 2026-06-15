@@ -136,21 +136,35 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/iot_project';
 
-mongoose
-  .connect(MONGO_URI)
-  .then(async () => {
-    console.log(`✅  MongoDB connected: ${MONGO_URI}`);
+const connectWithRetry = (uri, attempt = 1) => {
+  console.log(`Connecting to MongoDB (Attempt ${attempt})...`);
+  mongoose
+    .connect(uri)
+    .then(async () => {
+      console.log(`✅  MongoDB connected successfully to: ${uri}`);
 
-    await ensureDefaultAdmin();
-    await ensureDefaultSuperAdmin();
+      await ensureDefaultAdmin();
+      await ensureDefaultSuperAdmin();
 
-    app.listen(PORT, () => {
-      console.log(`🚀  Server running on http://localhost:${PORT}`);
-      // Start the MQTT Subscriber daemon to store real-time telemetry
-      startMqttSubscriber();
+      app.listen(PORT, () => {
+        console.log(`🚀  Server running on http://localhost:${PORT}`);
+        // Start the MQTT Subscriber daemon to store real-time telemetry
+        startMqttSubscriber();
+      });
+    })
+    .catch(async (err) => {
+      console.error(`❌  MongoDB connection error (Attempt ${attempt}):`, err.message);
+      if (attempt < 3) {
+        console.log('Retrying connection in 5 seconds...');
+        setTimeout(() => connectWithRetry(uri, attempt + 1), 5000);
+      } else if (uri !== 'mongodb://localhost:27017/iot_project') {
+        console.log('⚠️  Atlas connection failed. Falling back to local MongoDB: mongodb://localhost:27017/iot_project');
+        connectWithRetry('mongodb://localhost:27017/iot_project', 1);
+      } else {
+        console.error('💥  Could not connect to any MongoDB instance. Exiting...');
+        process.exit(1);
+      }
     });
-  })
-  .catch((err) => {
-    console.error('❌  MongoDB connection error:', err.message);
-    process.exit(1);
-  });
+};
+
+connectWithRetry(MONGO_URI);

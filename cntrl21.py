@@ -1506,6 +1506,9 @@ def sensor_polling_worker():
 def publish_live_telemetry(d1, d2):
     try:
         # We assume control_client is globally available as it is defined at the module level.
+        ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+        ts_str = datetime.datetime.now(ist_tz).isoformat()
+        
         for room, d in [(1, d1), (2, d2)]:
             soil_data = dict(d.get("soil")) if d.get("soil") else None
             if soil_data and soil_data.get("ec") is not None:
@@ -1526,7 +1529,9 @@ def publish_live_telemetry(d1, d2):
                     "tmr1": relay_is_on(TIMER_CHANNELS[room][0]),
                     "tmr2": relay_is_on(TIMER_CHANNELS[room][1]),
                     "tmr3": relay_is_on(TIMER_CHANNELS[room][2])
-                }
+                },
+                "device": DEVICE_NAME,
+                "timestamp": ts_str
             }
             control_client.publish(f"inhydro/{DEVICE_NAME}/room{room}/telemetry/live", json.dumps(payload))
     except Exception as e:

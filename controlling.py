@@ -27,7 +27,8 @@ def get_device_id():
 
 DEVICE_NAME = get_device_id()
 SP_FILE = os.path.join(BASE_DIR, f"setpoints_{DEVICE_NAME}_monitor.json")
-LOCAL_LOG_FILE = os.path.join(BASE_DIR, "local_data_log_monitor.json")
+LOG_DIR = os.path.join(BASE_DIR, "local_logs")
+ACTIVE_LOG_FILE = os.path.join(LOG_DIR, "active.jsonl")
 
 setpoints = {
     "CLIENT ID": "",
@@ -113,6 +114,10 @@ setpoints = {
     "Timer10 N_Stop": "09:55",
     "Timer10 N_ON Min": 15,
     "Timer10 N_OFF Min": 30,
+    "CO2 TARGET": 1000,
+    "WATER TEMP MAX": 21.0,
+    "WATER TEMP MIN": 18.0,
+    "SYSTEM PASSWORD": "1234",
 }
 
 if os.path.exists(SP_FILE):
@@ -259,18 +264,40 @@ def on_control_message(client, userdata, msg):
     except Exception:
         pass
 
+is_mqtt_connected = False
+
+def on_control_connect(client, userdata, flags, rc, properties=None):
+    global is_mqtt_connected
+    if rc == 0:
+        is_mqtt_connected = True
+        print("✅ Control MQTT (HiveMQ) connected/reconnected")
+        try:
+            client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/update")
+            client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/request_sync")
+            client.publish(f"inhydro/{DEVICE_NAME}/monitor/setpoints/current", json.dumps(setpoints), retain=True)
+        except Exception as e:
+            print(f"⚠️ Error during control MQTT sub/pub: {e}")
+    else:
+        is_mqtt_connected = False
+        print(f"⚠️ Control MQTT connection failed with code {rc}")
+
+def on_control_disconnect(client, userdata, flags, rc, properties=None, *args, **kwargs):
+    global is_mqtt_connected
+    is_mqtt_connected = False
+    print("⚠️ Control MQTT (HiveMQ) disconnected")
+
 client_id = f"Inhydro_Mon_{DEVICE_NAME.strip()}_{uuid.uuid4().hex[:6]}"
 control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id)
 control_client.on_message = on_control_message
+control_client.on_connect = on_control_connect
+control_client.on_disconnect = on_control_disconnect
 
 try:
-    control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
-    control_client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/update")
-    control_client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/request_sync")
-    control_client.publish(f"inhydro/{DEVICE_NAME}/monitor/setpoints/current", json.dumps(setpoints), retain=True)
     control_client.loop_start()
-except Exception:
-    pass
+    control_client.connect_async(CONTROL_BROKER, CONTROL_PORT, 10)
+    print("✅ Control MQTT (HiveMQ) loop started (connecting...)")
+except Exception as e:
+    print(f"⚠️ Control MQTT startup failed: {e}")
 
 
 # --- Modbus RTU Relay Setup ---
@@ -324,11 +351,12 @@ def relay_is_on(ch):
 # --- Cyclic Timers & Control Logic ---
 state = {
     1: {"ec_active": False, "ph_active": False, "ac_active": False,
-        "humi_active": False, "last_ec": 0.0, "last_ph": 0.0}
+        "humi_active": False, "co2_active": False, "chiller_active": False,
+        "last_ec": 0.0, "last_ph": 0.0}
 }
 
 ROOM_CHANNELS = {
-    1: {"ec1": 1, "ec2": 2, "ph": 3, "ac": 4, "humi": 5}
+    1: {"ec1": 1, "ec2": 2, "ph": 3, "ac": 4, "humi": 5, "co2": 15, "chiller": 16}
 }
 
 timer_state = {
@@ -458,13 +486,33 @@ def control_room(room, data):
             elif now - st["last_ph"] >= 10:
                 relay_on(ch["ph"])
                 st["last_ph"] = now
+
+        # Water Chiller control
+        water_temp = soil.get("temp")
+        if water_temp is not None:
+            if not st["chiller_active"] and water_temp >= sp.get("WATER TEMP MAX", 21.0):
+                st["chiller_active"] = True
+                relay_on(ch["chiller"])
+                warnings.append("⚠ WATER TEMP HIGH — CHILLER ON")
+                print(f"Room{room} Chiller ON — {water_temp}°C >= {sp.get('WATER TEMP MAX', 21.0)}°C")
+                
+            if st["chiller_active"] and water_temp <= sp.get("WATER TEMP MIN", 18.0):
+                st["chiller_active"] = False
+                relay_off(ch["chiller"])
+                print(f"Room{room} Chiller OFF — {water_temp}°C <= {sp.get('WATER TEMP MIN', 18.0)}°C")
+        else:
+            if st["chiller_active"] or relay_is_on(ch["chiller"]):
+                st["chiller_active"] = False
+                relay_off(ch["chiller"])
     else:
-        if st["ec_active"] or st["ph_active"] or relay_is_on(ch["ec1"]) or relay_is_on(ch["ph"]):
+        if st["ec_active"] or st["ph_active"] or st["chiller_active"] or relay_is_on(ch["ec1"]) or relay_is_on(ch["ph"]) or relay_is_on(ch["chiller"]):
             relay_off(ch["ec1"])
             relay_off(ch["ec2"])
             relay_off(ch["ph"])
+            relay_off(ch["chiller"])
             st["ec_active"] = False
             st["ph_active"] = False
+            st["chiller_active"] = False
         warnings.append(" WATER SENSOR ERROR")
 
     if room_env:
@@ -517,12 +565,41 @@ def control_room(room, data):
             st["humi_active"] = False
             relay_off(ch["humi"])
             print(f"Room{room} Humidifier OFF — {rh}% <= {sp.get('H Min', 30.0)}%")
+
+        # CO2 Dosing control
+        co2 = room_env.get("co2")
+        ppfd = room_env.get("ppfd")
+        if co2 is not None:
+            # Only dose CO2 if grow lights are actively on (PPFD > 50)
+            lights_on = (ppfd is not None and ppfd > 50)
+            if lights_on:
+                if not st["co2_active"] and co2 < (sp.get("CO2 TARGET", 1000) - 100):
+                    st["co2_active"] = True
+                    relay_on(ch["co2"])
+                    warnings.append("⚠ CO2 LOW — DOSING")
+                    print(f"Room{room} CO2 Dosing ON — {co2}ppm < {sp.get('CO2 TARGET', 1000) - 100}ppm")
+                    
+                if st["co2_active"] and co2 >= sp.get("CO2 TARGET", 1000):
+                    st["co2_active"] = False
+                    relay_off(ch["co2"])
+                    print(f"Room{room} CO2 Dosing OFF — {co2}ppm >= {sp.get('CO2 TARGET', 1000)}ppm")
+            else:
+                if st["co2_active"] or relay_is_on(ch["co2"]):
+                    st["co2_active"] = False
+                    relay_off(ch["co2"])
+                    print(f"Room{room} CO2 Dosing OFF — Lights are OFF (PPFD: {ppfd})")
+        else:
+            if st["co2_active"] or relay_is_on(ch["co2"]):
+                st["co2_active"] = False
+                relay_off(ch["co2"])
     else:
-        if st["ac_active"] or st["humi_active"] or relay_is_on(ch["ac"]) or relay_is_on(ch["humi"]):
+        if st["ac_active"] or st["humi_active"] or st["co2_active"] or relay_is_on(ch["ac"]) or relay_is_on(ch["humi"]) or relay_is_on(ch["co2"]):
             relay_off(ch["ac"])
             relay_off(ch["humi"])
+            relay_off(ch["co2"])
             st["ac_active"] = False
             st["humi_active"] = False
+            st["co2_active"] = False
         warnings.append(" ROOM SENSOR ERROR")
         
     return warnings
@@ -757,7 +834,20 @@ def auto_trust_devices():
         bt.stdin.flush()
     except Exception as e:
         print("BT agent error:", e)
+    
+    last_discoverable_check = 0
     while True:
+        now = time.time()
+        # Re-enforce discoverable/pairable modes every 60 seconds to bypass OS timeout
+        if now - last_discoverable_check >= 60:
+            try:
+                subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "agent", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                last_discoverable_check = now
+            except Exception:
+                pass
+            
         try:
             out = subprocess.check_output(['bluetoothctl', 'paired-devices'], text=True)
             for line in out.split('\n'):
@@ -768,50 +858,55 @@ def auto_trust_devices():
         time.sleep(5)
 
 def start_bluetooth_server():
-    try:
-        os.system("sudo sdptool add SP >/dev/null 2>&1")
-        time.sleep(1)
-        srv = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        srv.bind((socket.BDADDR_ANY, 1))
-        srv.listen(1)
-        print("Bluetooth RFCOMM server listening")
-        while True:
-            cli = None
-            try:
-                cli, info = srv.accept()
-                print(f"BT connected: {info}")
-                cli.send(b"\r\nInhydro Sensor Monitor\r\nCmds: WIFI:WiFi_Name:PASS | SCAN: Scanning nearby WiFi Networks\r\n")
-                while True:
-                    data = cli.recv(1024)
-                    if not data:
-                        break
-                    cmd = data.decode('utf-8').strip()
-                    if cmd.startswith("WIFI:"):
-                        parts = cmd.split(":")
-                        if len(parts) >= 3:
-                            ssid = parts[1]
-                            password = ':'.join(parts[2:])
-                            cli.send(f"\r\n{set_wifi(ssid, password)}\r\n".encode())
+    while True:
+        srv = None
+        try:
+            os.system("sudo sdptool add --channel=3 SP >/dev/null 2>&1")
+            time.sleep(1)
+            srv = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
+            srv.bind((socket.BDADDR_ANY, 3))
+            srv.listen(1)
+            print("Bluetooth RFCOMM server listening on channel 3")
+            while True:
+                cli = None
+                try:
+                    cli, info = srv.accept()
+                    print(f"BT connected: {info}")
+                    cli.send(b"\r\nInhydro Sensor Monitor\r\nCmds: WIFI:WiFi_Name:PASS | SCAN: Scanning nearby WiFi Networks\r\n")
+                    while True:
+                        data = cli.recv(1024)
+                        if not data:
+                            break
+                        cmd = data.decode('utf-8').strip()
+                        if cmd.startswith("WIFI:"):
+                            parts = cmd.split(":")
+                            if len(parts) >= 3:
+                                ssid = parts[1]
+                                password = ':'.join(parts[2:])
+                                cli.send(f"\r\n{set_wifi(ssid, password)}\r\n".encode())
+                            else:
+                                cli.send(b"\r\nERROR: WIFI:SSID:PASS\r\n")
+                        elif cmd.upper() == "SCAN":
+                            cli.send(("\r\n" + scan_wifi() + "\r\n").encode())
                         else:
-                            cli.send(b"\r\nERROR: WIFI:SSID:PASS\r\n")
-                    elif cmd.upper() == "SCAN":
-                        cli.send(("\r\n" + scan_wifi() + "\r\n").encode())
-                    else:
-                        cli.send(f"\r\nUnknown: {cmd}\r\n".encode())
-            except Exception as e:
-                print(f"BT error: {e}")
-            finally:
-                if cli:
-                    try:
-                        cli.close()
-                    except Exception:
-                        pass
-    except Exception as e:
-        print(f"BT server failed: {e}")
-
-threading.Thread(target=auto_trust_devices, daemon=True).start()
-threading.Thread(target=start_bluetooth_server, daemon=True).start()
-
+                            cli.send(f"\r\nUnknown: {cmd}\r\n".encode())
+                except Exception as e:
+                    print(f"BT connection error: {e}")
+                finally:
+                    if cli:
+                        try:
+                            cli.close()
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"BT server socket crashed, retrying in 5s: {e}")
+            time.sleep(5)
+        finally:
+            if srv:
+                try:
+                    srv.close()
+                except Exception:
+                    pass
 
 # --- Publishing and Logging Logic ---
 last_cloud_publish_time = 0
@@ -851,56 +946,275 @@ def publish_telemetry():
 def publish_live_telemetry():
     try:
         if control_client and control_client.is_connected() and latest_raw:
+            ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+            ts_str = datetime.datetime.now(ist_tz).isoformat()
             payload = {
                 "telemetry": latest_raw,
-                "device": DEVICE_NAME
+                "device": DEVICE_NAME,
+                "timestamp": ts_str
             }
             control_client.publish(f"inhydro/{DEVICE_NAME}/monitor/telemetry/live", json.dumps(payload))
     except Exception:
         pass
 
+local_log_lock = threading.Lock()
+
+COLUMNS = [
+    "timestamp",
+    "water_temp", "moisture", "ec", "ph",
+    "room_temp", "room_humi", "orp", "co2",
+    "vpd", "dli", "wind_speed", "wind_dir", "do", "ppfd", "n", "p", "k",
+    "r_ec1", "r_ec2", "r_ph", "r_ac", "r_humi",
+    "r_tmr1", "r_tmr2", "r_tmr3", "r_tmr5", "r_tmr6", "r_tmr7", "r_tmr8", "r_tmr9", "r_tmr10"
+]
+
+def pack_entry(ts, raw):
+    row = [ts]
+    row.extend([
+        raw.get("water_temp"),
+        raw.get("moisture"),
+        raw.get("ec"),
+        raw.get("ph"),
+        raw.get("room_temp"),
+        raw.get("room_humi"),
+        raw.get("orp"),
+        raw.get("co2"),
+        raw.get("vpd"),
+        raw.get("dli"),
+        raw.get("wind_speed"),
+        raw.get("wind_dir"),
+        raw.get("do"),
+        raw.get("ppfd"),
+        raw.get("n"),
+        raw.get("p"),
+        raw.get("k")
+    ])
+    row.extend([
+        1 if relay_is_on(1) else 0,
+        1 if relay_is_on(2) else 0,
+        1 if relay_is_on(3) else 0,
+        1 if relay_is_on(4) else 0,
+        1 if relay_is_on(5) else 0,
+        1 if relay_is_on(6) else 0,
+        1 if relay_is_on(7) else 0,
+        1 if relay_is_on(8) else 0,
+        1 if relay_is_on(9) else 0,
+        1 if relay_is_on(10) else 0,
+        1 if relay_is_on(11) else 0,
+        1 if relay_is_on(12) else 0,
+        1 if relay_is_on(13) else 0,
+        1 if relay_is_on(14) else 0
+    ])
+    return row
+
+def unpack_row(row):
+    if not isinstance(row, list) or len(row) < 32:
+        return None
+    ts = row[0]
+    raw = {
+        "water_temp": row[1],
+        "moisture": row[2],
+        "ec": row[3],
+        "ph": row[4],
+        "room_temp": row[5],
+        "room_humi": row[6],
+        "orp": row[7],
+        "co2": row[8],
+        "vpd": row[9],
+        "dli": row[10],
+        "wind_speed": row[11],
+        "wind_dir": row[12],
+        "do": row[13],
+        "ppfd": row[14],
+        "n": row[15],
+        "p": row[16],
+        "k": row[17]
+    }
+    payload = {
+        "telemetry": raw,
+        "device": DEVICE_NAME,
+        "timestamp": ts,
+        "relay_status": {
+            "ec1": bool(row[18]),
+            "ec2": bool(row[19]),
+            "ph": bool(row[20]),
+            "ac": bool(row[21]),
+            "humi": bool(row[22]),
+            "tmr1": bool(row[23]),
+            "tmr2": bool(row[24]),
+            "tmr3": bool(row[25]),
+            "tmr5": bool(row[26]),
+            "tmr6": bool(row[27]),
+            "tmr7": bool(row[28]),
+            "tmr8": bool(row[29]),
+            "tmr9": bool(row[30]),
+            "tmr10": bool(row[31])
+        }
+    }
+    return payload
+
 def save_local_telemetry():
     global last_local_save_time
+    try:
+        connected = is_mqtt_connected and control_client.is_connected()
+    except Exception:
+        connected = False
+
+    # Store locally ONLY when device is not connected to internet/broker
+    if connected:
+        return
+
     current_time = time.time()
-    
     if current_time - last_local_save_time < 45:
         return
-    
-    if not latest_raw:
+
+    # Use Indian Standard Time (+05:30) offset for timestamping
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    ts_str = datetime.datetime.now(ist_tz).isoformat()
+
+    raw_data = latest_raw if latest_raw is not None else {}
+    try:
+        new_row = pack_entry(ts_str, raw_data)
+    except Exception as e:
+        print(f"⚠️ Error packing local telemetry entry: {e}")
+        last_local_save_time = current_time
         return
-        
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    record = {
-        "timestamp": timestamp,
-        "data": latest_raw
-    }
+
+    print(f"📝 Saving local telemetry offline: {ts_str}")
 
     def write_thread():
-        try:
-            buffer = []
-            if os.path.exists(LOCAL_LOG_FILE):
-                try:
-                    with open(LOCAL_LOG_FILE, "r") as f:
-                        buffer = json.load(f)
-                except Exception:
-                    buffer = []
-                    
-            if not isinstance(buffer, list):
-                buffer = []
-            
-            buffer.append(record)
-            if len(buffer) > 20000:
-                buffer = buffer[-20000:]
-            
-            lines = ["  " + json.dumps(item) for item in buffer]
-            
-            with open(LOCAL_LOG_FILE, "w") as f:
-                f.write("[\n" + ",\n".join(lines) + "\n]")
-        except Exception:
-            pass
+        with local_log_lock:
+            try:
+                os.makedirs(LOG_DIR, exist_ok=True)
+                write_header = not os.path.exists(ACTIVE_LOG_FILE) or os.path.getsize(ACTIVE_LOG_FILE) == 0
+                with open(ACTIVE_LOG_FILE, "a") as f:
+                    if write_header:
+                        f.write(json.dumps(COLUMNS) + "\n")
+                    f.write(json.dumps(new_row) + "\n")
+                
+                # Check if active log exceeds 10,000 entries (approx 1.5MB)
+                if os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 1500000:
+                    rot_name = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
+                    os.rename(ACTIVE_LOG_FILE, rot_name)
+                print(f"✅ Offline telemetry written successfully to {ACTIVE_LOG_FILE}")
+            except Exception as e:
+                print(f"Local JSON save error: {e}")
 
     threading.Thread(target=write_thread, daemon=True).start()
     last_local_save_time = current_time
+
+def sync_offline_data_worker():
+    while True:
+        try:
+            try:
+                connected = is_mqtt_connected and control_client.is_connected()
+            except Exception:
+                connected = False
+
+            if connected and os.path.exists(LOG_DIR):
+                files = [f for f in os.listdir(LOG_DIR) if f.endswith(".jsonl") or f == "active.jsonl"]
+                if "active.jsonl" in files and os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 0:
+                    with local_log_lock:
+                        rot_name = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
+                        try:
+                            os.rename(ACTIVE_LOG_FILE, rot_name)
+                        except Exception:
+                            pass
+                    # Re-list files after rename
+                    files = [f for f in os.listdir(LOG_DIR) if f.endswith(".jsonl")]
+                
+                # Filter out active.jsonl just in case, and sort chronologically
+                files = [f for f in files if f != "active.jsonl"]
+                files.sort()
+                
+                for fname in files:
+                    fpath = os.path.join(LOG_DIR, fname)
+                    rows = []
+                    with local_log_lock:
+                        if os.path.exists(fpath):
+                            try:
+                                with open(fpath, "r") as f:
+                                    first_line = True
+                                    for line in f:
+                                        line = line.strip()
+                                        if line:
+                                            parsed = json.loads(line)
+                                            if first_line and isinstance(parsed, list) and len(parsed) > 0 and parsed[0] == "timestamp":
+                                                first_line = False
+                                                continue
+                                            rows.append(parsed)
+                                            first_line = False
+                            except Exception as re:
+                                print(f"[OfflineSync] Error reading {fname}: {re}")
+
+                    if not rows:
+                        try:
+                            os.remove(fpath)
+                        except Exception:
+                            pass
+                        continue
+
+                    print(f"[OfflineSync] Syncing segment {fname} with {len(rows)} entries...")
+                    remaining_rows = list(rows)
+                    success = True
+
+                    batch_size = 500
+                    for idx in range(0, len(rows), batch_size):
+                        batch = rows[idx:idx+batch_size]
+
+                        try:
+                            conn = is_mqtt_connected and control_client.is_connected()
+                        except Exception:
+                            conn = False
+                        if not conn:
+                            print("[OfflineSync] Lost connection during sync. Pausing.")
+                            success = False
+                            break
+
+                        batch_payload = []
+                        for row in batch:
+                            payload = unpack_row(row)
+                            if payload:
+                                batch_payload.append(payload)
+
+                        try:
+                            if batch_payload:
+                                control_client.publish(f"inhydro/{DEVICE_NAME}/monitor/telemetry/live", json.dumps(batch_payload), qos=1)
+                            # Small sleep to prevent network choke
+                            time.sleep(0.05)
+                        except Exception as pe:
+                            print(f"[OfflineSync] Publish batch failed: {pe}")
+                            success = False
+                            break
+
+                        remaining_rows = remaining_rows[len(batch):]
+
+                    # Update the segment file
+                    with local_log_lock:
+                        try:
+                            if remaining_rows:
+                                with open(fpath, "w") as f:
+                                    f.write(json.dumps(COLUMNS) + "\n")
+                                    for r in remaining_rows:
+                                        f.write(json.dumps(r) + "\n")
+                            else:
+                                if os.path.exists(fpath):
+                                    os.remove(fpath)
+                                print(f"[OfflineSync] Finished and removed log segment: {fname}")
+                        except Exception as we:
+                            print(f"[OfflineSync] Error updating log segment {fname}: {we}")
+                            success = False
+
+                    if not success:
+                        break
+        except Exception as e:
+            print(f"[OfflineSync] General error: {e}")
+
+        time.sleep(15)
+
+threading.Thread(target=auto_trust_devices, daemon=True).start()
+threading.Thread(target=start_bluetooth_server, daemon=True).start()
+threading.Thread(target=sync_offline_data_worker, daemon=True).start()
 
 def restart_program():
     for inst in sensors.values():
@@ -951,6 +1265,106 @@ def get_logo_image():
     except Exception as e:
         print("Logo loading error:", e)
         return None
+
+def request_setpoints_access(parent_to_close=None):
+    win = tk.Toplevel()
+    win.title("Security Authentication")
+    win.geometry("400x450")
+    win.configure(bg="#f8fafc")
+    win.resizable(False, False)
+    
+    # Center the Toplevel window
+    win.update_idletasks()
+    x = (win.winfo_screenwidth() - 400) // 2
+    y = (win.winfo_screenheight() - 450) // 2
+    win.geometry(f"+{x}+{y}")
+    
+    # Grab focus so they can't click main window behind it
+    win.transient(root)
+    win.grab_set()
+    
+    password_entered = ""
+    correct_password = str(setpoints.get("SYSTEM PASSWORD", "1234"))
+
+    # Header
+    tk.Label(win, text="SECURITY LOCK", font=("Arial", 14, "bold"), fg="#1e293b", bg="#f8fafc").pack(pady=(20, 5))
+    tk.Label(win, text="Please enter your authorization PIN to access settings:", font=("Arial", 9), fg="#64748b", bg="#f8fafc").pack(pady=2)
+
+    # Display entry for password (shows bullets/asterisks)
+    display_lbl = tk.Label(win, text="", font=("Arial", 20, "bold"), fg="#0f172a", bg="white", width=12, relief="sunken", bd=2, anchor="center")
+    display_lbl.pack(pady=15)
+
+    error_lbl = tk.Label(win, text="", font=("Arial", 10, "bold"), fg="#dc2626", bg="#f8fafc")
+    error_lbl.pack(pady=2)
+
+    def kp_press(char):
+        nonlocal password_entered
+        if len(password_entered) < 12:
+            password_entered += str(char)
+            display_lbl.config(text="●" * len(password_entered))
+            error_lbl.config(text="")
+
+    def kp_back():
+        nonlocal password_entered
+        password_entered = password_entered[:-1]
+        display_lbl.config(text="●" * len(password_entered))
+        error_lbl.config(text="")
+
+    def kp_clear():
+        nonlocal password_entered
+        password_entered = ""
+        display_lbl.config(text="")
+        error_lbl.config(text="")
+
+    def kp_confirm():
+        nonlocal password_entered
+        if password_entered == correct_password:
+            win.destroy()
+            if parent_to_close:
+                try:
+                    parent_to_close.destroy()
+                except Exception:
+                    pass
+            open_setpoints_window()
+        else:
+            error_lbl.config(text="❌ Incorrect PIN/Password!")
+            kp_clear()
+
+    # Keypad Grid
+    kp_frame = tk.Frame(win, bg="#f8fafc")
+    kp_frame.pack(pady=10)
+
+    buttons = [
+        ('1', 0, 0), ('2', 0, 1), ('3', 0, 2),
+        ('4', 1, 0), ('5', 1, 1), ('6', 1, 2),
+        ('7', 2, 0), ('8', 2, 1), ('9', 2, 2),
+        ('CLR', 3, 0), ('0', 3, 1), ('DEL', 3, 2)
+    ]
+
+    for text, r, c in buttons:
+        if text == 'DEL':
+            cmd = kp_back
+            bg, fg = "#f87171", "white"
+        elif text == 'CLR':
+            cmd = kp_clear
+            bg, fg = "#94a3b8", "white"
+        else:
+            cmd = lambda x=text: kp_press(x)
+            bg, fg = "#ffffff", "#1e293b"
+            
+        btn = tk.Button(kp_frame, text=text, font=("Arial", 12, "bold"), width=6, height=2,
+                        bg=bg, fg=fg, bd=1, relief="raised", command=cmd)
+        btn.grid(row=r, column=c, padx=4, pady=4)
+
+    # Confirm & Cancel
+    action_frame = tk.Frame(win, bg="#f8fafc")
+    action_frame.pack(fill="x", side="bottom", pady=15, padx=20)
+
+    tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#cbd5e1", fg="#1e293b", width=12, height=2, bd=0,
+              command=win.destroy).pack(side="left")
+
+    tk.Button(action_frame, text="AUTHENTICATE", font=("Arial", 10, "bold"), bg="#0284c7", fg="white", width=16, height=2, bd=0,
+              command=kp_confirm).pack(side="right")
 
 def open_setpoints_window():
     win = tk.Toplevel()
@@ -1049,7 +1463,8 @@ def open_setpoints_window():
         val_w = 12 if is_name else 6
         val_fg = "#333" if is_name else "#e65100"
         
-        val_lbl = tk.Label(cell, text=str(setpoints[key]),
+        display_val = "●" * len(str(setpoints[key])) if key == "SYSTEM PASSWORD" else str(setpoints[key])
+        val_lbl = tk.Label(cell, text=display_val,
                            font=("Arial", 9, "bold"), fg=val_fg, bg="white", width=val_w, anchor="center")
         val_lbl.pack(side="left", padx=2)
         
@@ -1131,6 +1546,8 @@ def open_setpoints_window():
     make_cell(grid_climate, "N T Min", "Night T Min:").grid(row=1, column=1, padx=10, pady=4)
     make_cell(grid_climate, "H Max", "Humid Max:").grid(row=2, column=0, padx=10, pady=4)
     make_cell(grid_climate, "H Min", "Humid Min:").grid(row=2, column=1, padx=10, pady=4)
+
+
 
     # Day/Night Timer 4 (AC) (Left Pane)
     make_dn_timer_card(left_pane, 4, "TIMER 4 / AC").pack(fill="x", pady=8, padx=5)
@@ -1220,6 +1637,18 @@ def open_setpoints_window():
                                 command=lambda k=full_key: open_keypad(k))
                 btn.pack(side="right", padx=1)
                 labels_s[full_key] = val_lbl
+
+    # Advanced Control Card (Right Pane, below Timers 5-7)
+    card_adv = tk.LabelFrame(right_pane, text=" ADVANCED CONTROL ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
+    card_adv.pack(fill="x", pady=5, padx=5)
+    
+    grid_adv = tk.Frame(card_adv, bg="white")
+    grid_adv.pack(pady=4, padx=5)
+    
+    make_cell(grid_adv, "CO2 TARGET", "CO2 Target:", width_lbl=13).grid(row=0, column=0, padx=10, pady=4)
+    make_cell(grid_adv, "SYSTEM PASSWORD", "Sys PIN/Pass:", width_lbl=13).grid(row=0, column=1, padx=10, pady=4)
+    make_cell(grid_adv, "WATER TEMP MAX", "H2O Temp Max:", width_lbl=13).grid(row=1, column=0, padx=10, pady=4)
+    make_cell(grid_adv, "WATER TEMP MIN", "H2O Temp Min:", width_lbl=13).grid(row=1, column=1, padx=10, pady=4)
 
     # Bottom container for Day/Night cyclic timers 8-10 side-by-side
     bottom_container = tk.Frame(scrollable_frame, bg="white")
@@ -1323,7 +1752,10 @@ def open_setpoints_window():
     def kp_press(v):
         nonlocal sp_entered_value
         sp_entered_value += str(v)
-        kp_display.config(text=sp_entered_value)
+        if sp_selected_key == "SYSTEM PASSWORD":
+            kp_display.config(text="●" * len(sp_entered_value))
+        else:
+            kp_display.config(text=sp_entered_value)
 
     def kp_clear():
         nonlocal sp_entered_value
@@ -1333,14 +1765,23 @@ def open_setpoints_window():
     def kp_back():
         nonlocal sp_entered_value
         sp_entered_value = sp_entered_value[:-1]
-        kp_display.config(text=sp_entered_value)
+        if sp_selected_key == "SYSTEM PASSWORD":
+            kp_display.config(text="●" * len(sp_entered_value))
+        else:
+            kp_display.config(text=sp_entered_value)
 
     def kp_confirm():
         nonlocal sp_entered_value, sp_selected_key
         try:
-            val = (str(sp_entered_value)
-                   if sp_selected_key.endswith("Name") or ":" in sp_entered_value
-                   else float(sp_entered_value))
+            if sp_selected_key == "SYSTEM PASSWORD":
+                if not sp_entered_value:
+                    kp_display.config(text="CANNOT BE EMPTY")
+                    return
+                val = str(sp_entered_value)
+            else:
+                val = (str(sp_entered_value)
+                       if sp_selected_key.endswith("Name") or ":" in sp_entered_value
+                       else float(sp_entered_value))
             
             # Format validation for times
             if ":" in str(val) and not sp_selected_key.endswith("Name"):
@@ -1378,7 +1819,10 @@ def open_setpoints_window():
 
             setpoints[sp_selected_key] = val
             if sp_selected_key in labels_s:
-                labels_s[sp_selected_key].config(text=str(val))
+                if sp_selected_key == "SYSTEM PASSWORD":
+                    labels_s[sp_selected_key].config(text="●" * len(str(val)))
+                else:
+                    labels_s[sp_selected_key].config(text=str(val))
             kp_frame.pack_forget()
             canvas_container.pack(fill="both", expand=True, padx=10, pady=5)
         except Exception:
@@ -1710,7 +2154,7 @@ def open_timers_status_window():
               command=win.destroy).pack(side="right", padx=15, pady=10)
     
     tk.Button(foot, text="SETPOINTS", font=("Arial", 10, "bold"), bg="#1e90ff", fg="white", width=12,
-              command=lambda: (win.destroy(), open_setpoints_window())).pack(side="left", padx=15, pady=10)
+              command=lambda: request_setpoints_access(parent_to_close=win)).pack(side="left", padx=15, pady=10)
 
     update_live_timers_ui()
 
@@ -1799,7 +2243,7 @@ btn_setpoints = tk.Button(
     activeforeground="white",
     bd=0,
     highlightthickness=0,
-    command=open_setpoints_window,
+    command=lambda: request_setpoints_access(),
     padx=20,
     pady=8,
     cursor="hand2"
@@ -1959,8 +2403,10 @@ def update_ui():
 
     room_data = {
         "room_temp": latest_raw.get("room_temp"),
-        "room_humi": latest_raw.get("room_humi")
-    } if any(latest_raw.get(k) is not None for k in ["room_temp", "room_humi"]) else None
+        "room_humi": latest_raw.get("room_humi"),
+        "co2": latest_raw.get("co2"),
+        "ppfd": latest_raw.get("ppfd")
+    } if any(latest_raw.get(k) is not None for k in ["room_temp", "room_humi", "co2", "ppfd"]) else None
 
     sensor_data_1 = {
         "soil": soil_data,

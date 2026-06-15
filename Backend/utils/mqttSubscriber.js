@@ -9,23 +9,51 @@ const deviceCache = new Map(); // Caches mqttId -> deviceId to prevent redundant
 /**
  * Resolves the device ID for a given MQTT ID, using memory cache or DB query.
  * @param {string} mqttId - The MQTT client ID from the topic
+ * @param {string} topic - The MQTT topic to check device type criteria
  * @returns {Promise<mongoose.Types.ObjectId|null>}
  */
-const resolveDeviceId = async (mqttId) => {
-  if (deviceCache.has(mqttId)) {
-    return deviceCache.get(mqttId);
+const resolveDeviceId = async (mqttId, topic) => {
+  const cacheKey = `${mqttId}_${topic}`;
+  if (deviceCache.has(cacheKey)) {
+    return deviceCache.get(cacheKey);
   }
 
-  // Look up device in database
-  const device = await Device.findOne({
-    $or: [
-      { mqttId: mqttId },
-      { _id: mongoose.Types.ObjectId.isValid(mqttId) ? mqttId : null }
+  // Determine device type criteria based on the topic structure
+  let typeCriteria = {};
+  if (topic.includes('/monitor/')) {
+    typeCriteria = { deviceType: 'controlling' };
+  } else if (topic.includes('/room1/') || topic.includes('/room2/')) {
+    typeCriteria = { deviceType: { $in: ['office_control', 'system2'] } };
+  } else {
+    // default/multi_sensor
+    typeCriteria = { deviceType: { $nin: ['controlling', 'office_control', 'system2'] } };
+  }
+
+  // Look up device in database using both MQTT ID and topic device type criteria
+  let device = await Device.findOne({
+    $and: [
+      {
+        $or: [
+          { mqttId: mqttId },
+          { _id: mongoose.Types.ObjectId.isValid(mqttId) ? mqttId : null }
+        ]
+      },
+      typeCriteria
     ]
   });
 
+  // Fallback to match by ID/mqttId only if no matching type found
+  if (!device) {
+    device = await Device.findOne({
+      $or: [
+        { mqttId: mqttId },
+        { _id: mongoose.Types.ObjectId.isValid(mqttId) ? mqttId : null }
+      ]
+    });
+  }
+
   if (device) {
-    deviceCache.set(mqttId, device._id);
+    deviceCache.set(cacheKey, device._id);
     return device._id;
   }
 
@@ -72,11 +100,21 @@ const startMqttSubscriber = () => {
         return;
       }
 
-      // Resolve device from DB/cache
-      const deviceId = await resolveDeviceId(mqttId);
+      // Resolve device from DB/cache using mqttId and the topic
+      const deviceId = await resolveDeviceId(mqttId, topic);
       if (!deviceId) {
         // Device not registered in our dashboard, skip saving
         return;
+      }
+
+      // Update status to online and lastUpdated to now
+      try {
+        await Device.findByIdAndUpdate(deviceId, {
+          status: 'online',
+          lastUpdated: new Date()
+        });
+      } catch (err) {
+        console.error(`[MQTT Subscriber] Failed to update device online status: ${err.message}`);
       }
 
       // Parse payload

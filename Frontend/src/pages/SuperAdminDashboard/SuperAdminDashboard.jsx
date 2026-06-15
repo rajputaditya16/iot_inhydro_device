@@ -58,81 +58,28 @@ const SuperAdminDashboard = () => {
 
         const dbDevices = data.data || [];
 
-        // Step 2: For each device that has ThingSpeak config, fetch latest data
-        const thingspeakDevices = dbDevices.filter(
-          (d) => d.thingspeak?.channelId && d.thingspeak?.readApiKey
-        );
-
-        if (thingspeakDevices.length === 0) {
-          // Show DB devices without live data
-          const offlineDevices = dbDevices.map((d) => ({
+        // Step 2: Map the backend devices containing MongoDB-backed live metrics directly
+        const mappedDevices = dbDevices.map((d) => {
+          const stats = d.liveStats || { temp: 0, moisture: 0, ph: 0, ec: 0 };
+          return {
             id: d._id,
             name: d.name,
             location: d.location,
             status: d.status || 'offline',
-            temp: 0,
-            moisture: 0,
-            ph: 0,
-            ec: 0,
-            lastUpdated: d.lastUpdated || d.updatedAt,
-          }));
-          setDevices(offlineDevices);
-          setHasNewData(false);
-          setLoading(false);
-          return;
-        }
-
-        // Fetch ThingSpeak data for each device in parallel
-        const liveDevicePromises = thingspeakDevices.map(async (dbDevice) => {
-          try {
-            const { channelId, readApiKey } = dbDevice.thingspeak; 
-            const tsRes = await fetch(
-              `https://api.thingspeak.com/channels/${channelId}/feeds.json?api_key=${readApiKey}&results=1`
-            );
-            const tsResult = await tsRes.json();
-            const latestFeed = tsResult?.feeds?.[0];
-            const liveDevice = transformApiData(latestFeed, dbDevice);
-            return liveDevice || {
-              id: dbDevice._id,
-              name: dbDevice.name,
-              location: dbDevice.location,
-              status: 'offline',
-              temp: 0, moisture: 0, ph: 0, ec: 0,
-              lastUpdated: dbDevice.lastUpdated || dbDevice.updatedAt,
-            };
-          } catch {
-            return {
-              id: dbDevice._id,
-              name: dbDevice.name,
-              location: dbDevice.location,
-              status: 'offline',
-              temp: 0, moisture: 0, ph: 0, ec: 0,
-              lastUpdated: dbDevice.lastUpdated || dbDevice.updatedAt,
-            };
-          }
+            temp: stats.temp,
+            moisture: stats.moisture,
+            ph: stats.ph,
+            ec: stats.ec,
+            lastUpdated: d.latestPacketTime || d.lastUpdated || d.updatedAt,
+          };
         });
 
-        // Include devices without ThingSpeak as offline
-        const devicesWithoutTS = dbDevices
-          .filter((d) => !d.thingspeak?.channelId || !d.thingspeak?.readApiKey)
-          .map((d) => ({
-            id: d._id,
-            name: d.name,
-            location: d.location,
-            status: d.status || 'offline',
-            temp: 0, moisture: 0, ph: 0, ec: 0,
-            lastUpdated: d.lastUpdated || d.updatedAt,
-          }));
-
-        const liveDevices = await Promise.all(liveDevicePromises);
-        const allDevices = [...liveDevices, ...devicesWithoutTS];
-
         // Check if data changed (for animation indicator only)
-        const currentKey = JSON.stringify(allDevices.map((d) => ({ t: d.temp, m: d.moisture, e: d.ec, p: d.ph })));
+        const currentKey = JSON.stringify(mappedDevices.map((d) => ({ t: d.temp, m: d.moisture, e: d.ec, p: d.ph })));
         const changed = previousMetricsRef.current !== currentKey;
         setHasNewData(changed);
         previousMetricsRef.current = currentKey;
-        setDevices(allDevices); // Always update devices so stats always reflect latest API data
+        setDevices(mappedDevices);
 
         setLoading(false);
       } catch (err) {

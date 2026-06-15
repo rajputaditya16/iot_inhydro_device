@@ -27,7 +27,8 @@ def get_device_id():
 
 DEVICE_NAME = get_device_id()
 SP_FILE = os.path.join(BASE_DIR, f"setpoints_{DEVICE_NAME}_monitor.json")
-LOCAL_LOG_FILE = os.path.join(BASE_DIR, "local_data_log_monitor.json")
+LOG_DIR = os.path.join(BASE_DIR, "local_logs_monitor")
+ACTIVE_LOG_FILE = os.path.join(LOG_DIR, "active.jsonl")
 
 setpoints = {
     "CLIENT ID": "",
@@ -102,6 +103,28 @@ init_mqtt_client()
 CONTROL_BROKER = "broker.hivemq.com"
 CONTROL_PORT = 1883
 
+is_mqtt_connected = False
+
+def on_control_connect(client, userdata, flags, rc, properties=None):
+    global is_mqtt_connected
+    if rc == 0:
+        is_mqtt_connected = True
+        print("✅ Control MQTT (HiveMQ) connected/reconnected")
+        try:
+            client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/update")
+            client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/request_sync")
+            client.publish(f"inhydro/{DEVICE_NAME}/monitor/setpoints/current", json.dumps(setpoints), retain=True)
+        except Exception as e:
+            print(f"⚠️ Error during control MQTT sub/pub: {e}")
+    else:
+        is_mqtt_connected = False
+        print(f"⚠️ Control MQTT connection failed with code {rc}")
+
+def on_control_disconnect(client, userdata, flags, rc, properties=None, *args, **kwargs):
+    global is_mqtt_connected
+    is_mqtt_connected = False
+    print("⚠️ Control MQTT (HiveMQ) disconnected")
+
 def on_control_message(client, userdata, msg):
     try:
         if "request_sync" in msg.topic:
@@ -141,15 +164,15 @@ def on_control_message(client, userdata, msg):
 client_id = f"Inhydro_Mon_{DEVICE_NAME.strip()}_{uuid.uuid4().hex[:6]}"
 control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id)
 control_client.on_message = on_control_message
+control_client.on_connect = on_control_connect
+control_client.on_disconnect = on_control_disconnect
 
 try:
-    control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
-    control_client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/update")
-    control_client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/request_sync")
-    control_client.publish(f"inhydro/{DEVICE_NAME}/monitor/setpoints/current", json.dumps(setpoints), retain=True)
     control_client.loop_start()
-except Exception:
-    pass
+    control_client.connect_async(CONTROL_BROKER, CONTROL_PORT, 10)
+    print("✅ Control MQTT (HiveMQ) loop started (connecting...)")
+except Exception as e:
+    print(f"⚠️ Error starting control MQTT client: {e}")
 
 
 # --- Sensor Setup ---
@@ -380,7 +403,20 @@ def auto_trust_devices():
         bt.stdin.flush()
     except Exception as e:
         print("BT agent error:", e)
+    
+    last_discoverable_check = 0
     while True:
+        now = time.time()
+        # Re-enforce discoverable/pairable modes every 60 seconds to bypass OS timeout
+        if now - last_discoverable_check >= 60:
+            try:
+                subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "agent", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                last_discoverable_check = now
+            except Exception:
+                pass
+            
         try:
             out = subprocess.check_output(['bluetoothctl', 'paired-devices'], text=True)
             for line in out.split('\n'):
@@ -391,49 +427,57 @@ def auto_trust_devices():
         time.sleep(5)
 
 def start_bluetooth_server():
-    try:
-        os.system("sudo sdptool add SP >/dev/null 2>&1")
-        time.sleep(1)
-        srv = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        srv.bind((socket.BDADDR_ANY, 1))
-        srv.listen(1)
-        print("Bluetooth RFCOMM server listening")
-        while True:
-            cli = None
-            try:
-                cli, info = srv.accept()
-                print(f"BT connected: {info}")
-                cli.send(b"\r\nInhydro Sensor Monitor\r\nCmds: WIFI:WiFi_Name:PASS | SCAN: Scanning nearby WiFi Networks\r\n")
-                while True:
-                    data = cli.recv(1024)
-                    if not data:
-                        break
-                    cmd = data.decode('utf-8').strip()
-                    if cmd.startswith("WIFI:"):
-                        parts = cmd.split(":")
-                        if len(parts) >= 3:
-                            ssid = parts[1]
-                            password = ':'.join(parts[2:])
-                            cli.send(f"\r\n{set_wifi(ssid, password)}\r\n".encode())
+    while True:
+        srv = None
+        try:
+            os.system("sudo sdptool add --channel=3 SP >/dev/null 2>&1")
+            time.sleep(1)
+            srv = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
+            srv.bind((socket.BDADDR_ANY, 3))
+            srv.listen(1)
+            print("Bluetooth RFCOMM server listening on channel 3")
+            while True:
+                cli = None
+                try:
+                    cli, info = srv.accept()
+                    print(f"BT connected: {info}")
+                    cli.send(b"\r\nInhydro Sensor Monitor\r\nCmds: WIFI:WiFi_Name:PASS | SCAN: Scanning nearby WiFi Networks\r\n")
+                    while True:
+                        data = cli.recv(1024)
+                        if not data:
+                            break
+                        cmd = data.decode('utf-8').strip()
+                        if cmd.startswith("WIFI:"):
+                            parts = cmd.split(":")
+                            if len(parts) >= 3:
+                                ssid = parts[1]
+                                password = ':'.join(parts[2:])
+                                cli.send(f"\r\n{set_wifi(ssid, password)}\r\n".encode())
+                            else:
+                                cli.send(b"\r\nERROR: WIFI:SSID:PASS\r\n")
+                        elif cmd.upper() == "SCAN":
+                            cli.send(("\r\n" + scan_wifi() + "\r\n").encode())
                         else:
-                            cli.send(b"\r\nERROR: WIFI:SSID:PASS\r\n")
-                    elif cmd.upper() == "SCAN":
-                        cli.send(("\r\n" + scan_wifi() + "\r\n").encode())
-                    else:
-                        cli.send(f"\r\nUnknown: {cmd}\r\n".encode())
-            except Exception as e:
-                print(f"BT error: {e}")
-            finally:
-                if cli:
-                    try:
-                        cli.close()
-                    except Exception:
-                        pass
-    except Exception as e:
-        print(f"BT server failed: {e}")
+                            cli.send(f"\r\nUnknown: {cmd}\r\n".encode())
+                except Exception as e:
+                    print(f"BT connection error: {e}")
+                finally:
+                    if cli:
+                        try:
+                            cli.close()
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"BT server socket crashed, retrying in 5s: {e}")
+            time.sleep(5)
+        finally:
+            if srv:
+                try:
+                    srv.close()
+                except Exception:
+                    pass
 
-threading.Thread(target=auto_trust_devices, daemon=True).start()
-threading.Thread(target=start_bluetooth_server, daemon=True).start()
+# Threads are started at the end of the file after all target functions are defined
 
 
 # --- Publishing and Logging Logic ---
@@ -474,56 +518,237 @@ def publish_telemetry():
 def publish_live_telemetry():
     try:
         if control_client and control_client.is_connected() and latest_raw:
+            ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+            ts_str = datetime.datetime.now(ist_tz).isoformat()
             payload = {
                 "telemetry": latest_raw,
-                "device": DEVICE_NAME
+                "device": DEVICE_NAME,
+                "timestamp": ts_str
             }
             control_client.publish(f"inhydro/{DEVICE_NAME}/monitor/telemetry/live", json.dumps(payload))
     except Exception:
         pass
 
+local_log_lock = threading.Lock()
+
+COLUMNS = [
+    "timestamp",
+    "water_temp", "moisture", "ec", "ph",
+    "room_temp", "room_humi", "orp", "co2",
+    "vpd", "dli", "wind_speed", "wind_dir", "do", "ppfd", "n", "p", "k"
+]
+
+def pack_entry(ts, raw):
+    row = [ts]
+    row.extend([
+        raw.get("water_temp"),
+        raw.get("moisture"),
+        raw.get("ec"),
+        raw.get("ph"),
+        raw.get("room_temp"),
+        raw.get("room_humi"),
+        raw.get("orp"),
+        raw.get("co2"),
+        raw.get("vpd"),
+        raw.get("dli"),
+        raw.get("wind_speed"),
+        raw.get("wind_dir"),
+        raw.get("do"),
+        raw.get("ppfd"),
+        raw.get("n"),
+        raw.get("p"),
+        raw.get("k")
+    ])
+    return row
+
+def unpack_row(row):
+    if not isinstance(row, list) or len(row) < 18:
+        return None
+    ts = row[0]
+    raw = {
+        "water_temp": row[1],
+        "moisture": row[2],
+        "ec": row[3],
+        "ph": row[4],
+        "room_temp": row[5],
+        "room_humi": row[6],
+        "orp": row[7],
+        "co2": row[8],
+        "vpd": row[9],
+        "dli": row[10],
+        "wind_speed": row[11],
+        "wind_dir": row[12],
+        "do": row[13],
+        "ppfd": row[14],
+        "n": row[15],
+        "p": row[16],
+        "k": row[17]
+    }
+    payload = {
+        "telemetry": raw,
+        "device": DEVICE_NAME,
+        "timestamp": ts
+    }
+    return payload
+
 def save_local_telemetry():
     global last_local_save_time
+    try:
+        connected = is_mqtt_connected and control_client.is_connected()
+    except Exception:
+        connected = False
+
+    # Store locally ONLY when device is not connected to internet/broker
+    if connected:
+        return
+
     current_time = time.time()
-    
     if current_time - last_local_save_time < 45:
         return
-    
-    if not latest_raw:
+
+    # Use Indian Standard Time (+05:30) offset for timestamping
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    ts_str = datetime.datetime.now(ist_tz).isoformat()
+
+    raw_data = latest_raw if latest_raw is not None else {}
+    try:
+        new_row = pack_entry(ts_str, raw_data)
+    except Exception as e:
+        print(f"⚠️ Error packing local telemetry entry: {e}")
+        last_local_save_time = current_time
         return
-        
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    record = {
-        "timestamp": timestamp,
-        "data": latest_raw
-    }
+
+    print(f"📝 Saving local telemetry offline: {ts_str}")
 
     def write_thread():
-        try:
-            buffer = []
-            if os.path.exists(LOCAL_LOG_FILE):
-                try:
-                    with open(LOCAL_LOG_FILE, "r") as f:
-                        buffer = json.load(f)
-                except Exception:
-                    buffer = []
-                    
-            if not isinstance(buffer, list):
-                buffer = []
-            
-            buffer.append(record)
-            if len(buffer) > 20000:
-                buffer = buffer[-20000:]
-            
-            lines = ["  " + json.dumps(item) for item in buffer]
-            
-            with open(LOCAL_LOG_FILE, "w") as f:
-                f.write("[\n" + ",\n".join(lines) + "\n]")
-        except Exception:
-            pass
+        with local_log_lock:
+            try:
+                os.makedirs(LOG_DIR, exist_ok=True)
+                write_header = not os.path.exists(ACTIVE_LOG_FILE) or os.path.getsize(ACTIVE_LOG_FILE) == 0
+                with open(ACTIVE_LOG_FILE, "a") as f:
+                    if write_header:
+                        f.write(json.dumps(COLUMNS) + "\n")
+                    f.write(json.dumps(new_row) + "\n")
+                
+                # Check if active log exceeds 10,000 entries (approx 1.5MB)
+                if os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 1500000:
+                    rot_name = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
+                    os.rename(ACTIVE_LOG_FILE, rot_name)
+                print(f"✅ Offline telemetry written successfully to {ACTIVE_LOG_FILE}")
+            except Exception as e:
+                print(f"Local JSON save error: {e}")
 
     threading.Thread(target=write_thread, daemon=True).start()
     last_local_save_time = current_time
+
+def sync_offline_data_worker():
+    while True:
+        try:
+            try:
+                connected = is_mqtt_connected and control_client.is_connected()
+            except Exception:
+                connected = False
+
+            if connected and os.path.exists(LOG_DIR):
+                files = [f for f in os.listdir(LOG_DIR) if f.endswith(".jsonl") or f == "active.jsonl"]
+                if "active.jsonl" in files and os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 0:
+                    with local_log_lock:
+                        rot_name = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
+                        try:
+                            os.rename(ACTIVE_LOG_FILE, rot_name)
+                        except Exception:
+                            pass
+                    # Re-list files after rename
+                    files = [f for f in os.listdir(LOG_DIR) if f.endswith(".jsonl")]
+                
+                # Filter out active.jsonl just in case, and sort chronologically
+                files = [f for f in files if f != "active.jsonl"]
+                files.sort()
+                
+                for fname in files:
+                    fpath = os.path.join(LOG_DIR, fname)
+                    rows = []
+                    with local_log_lock:
+                        if os.path.exists(fpath):
+                            try:
+                                with open(fpath, "r") as f:
+                                    first_line = True
+                                    for line in f:
+                                        line = line.strip()
+                                        if line:
+                                            parsed = json.loads(line)
+                                            if first_line and isinstance(parsed, list) and len(parsed) > 0 and parsed[0] == "timestamp":
+                                                first_line = False
+                                                continue
+                                            rows.append(parsed)
+                                            first_line = False
+                            except Exception as re:
+                                print(f"[OfflineSync] Error reading {fname}: {re}")
+
+                    if not rows:
+                        try:
+                            os.remove(fpath)
+                        except Exception:
+                            pass
+                        continue
+
+                    print(f"[OfflineSync] Syncing segment {fname} with {len(rows)} entries...")
+                    remaining_rows = list(rows)
+                    success = True
+
+                    batch_size = 500
+                    for idx in range(0, len(rows), batch_size):
+                        batch = rows[idx:idx+batch_size]
+
+                        try:
+                            conn = is_mqtt_connected and control_client.is_connected()
+                        except Exception:
+                            conn = False
+                        if not conn:
+                            print("[OfflineSync] Lost connection during sync. Pausing.")
+                            success = False
+                            break
+
+                        batch_payload = []
+                        for row in batch:
+                            payload = unpack_row(row)
+                            if payload:
+                                batch_payload.append(payload)
+
+                        try:
+                            if batch_payload:
+                                control_client.publish(f"inhydro/{DEVICE_NAME}/monitor/telemetry/live", json.dumps(batch_payload), qos=1)
+                            # Small sleep to prevent network choke
+                            time.sleep(0.05)
+                        except Exception as pe:
+                            print(f"[OfflineSync] Publish batch failed: {pe}")
+                            success = False
+                            break
+
+                        remaining_rows = remaining_rows[len(batch):]
+
+                    # Update the segment file
+                    with local_log_lock:
+                        try:
+                            if remaining_rows:
+                                with open(fpath, "w") as f:
+                                    f.write(json.dumps(COLUMNS) + "\n")
+                                    for r in remaining_rows:
+                                        f.write(json.dumps(r) + "\n")
+                            else:
+                                if os.path.exists(fpath):
+                                    os.remove(fpath)
+                                print(f"[OfflineSync] Finished and removed log segment: {fname}")
+                        except Exception as we:
+                            print(f"[OfflineSync] Error updating log segment {fname}: {we}")
+                            success = False
+
+                    if not success:
+                        break
+        except Exception as e:
+            print(f"[OfflineSync] General error: {e}")
+
+        time.sleep(15)
 
 def restart_program():
     for inst in sensors.values():
@@ -741,6 +966,10 @@ def update_ui():
     save_local_telemetry()
     
     root.after(1000, update_ui)
+
+threading.Thread(target=auto_trust_devices, daemon=True).start()
+threading.Thread(target=start_bluetooth_server, daemon=True).start()
+threading.Thread(target=sync_offline_data_worker, daemon=True).start()
 
 root.bind("<Escape>", lambda e: root.destroy())
 root.after(1000, update_ui)

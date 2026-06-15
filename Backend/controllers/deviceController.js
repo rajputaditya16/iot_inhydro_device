@@ -24,8 +24,78 @@ exports.getDevices = async (req, res) => {
     }
 
     const devices = await Device.find(query).sort({ createdAt: -1 });
-    res.status(200).json({ success: true, count: devices.length, data: devices });
+    const now = new Date();
+
+    const updatedDevices = await Promise.all(
+      devices.map(async (device) => {
+        let status = device.status;
+        
+        // If device is online but hasn't sent telemetry in 2 minutes, mark as offline
+        if (
+          status === 'online' &&
+          device.lastUpdated &&
+          now - new Date(device.lastUpdated) > 120000
+        ) {
+          status = 'offline';
+          device.status = 'offline';
+          await device.save();
+        }
+
+        // Fetch latest telemetry packet from the dynamic collection
+        const mqttId = device.mqttId || device._id.toString();
+        let latestPacket = null;
+        try {
+          const TelemetryModel = getTelemetryModel(mqttId);
+          latestPacket = await TelemetryModel.findOne({ deviceId: device._id }).sort({ timestamp: -1 });
+        } catch (e) {
+          console.warn(`[DeviceController] Could not fetch latest packet for ${mqttId}: ${e.message}`);
+        }
+
+        let latestData = {};
+        if (latestPacket && latestPacket.data) {
+          latestData = latestPacket.data;
+        }
+
+        // Map live stats based on device type
+        let liveStats = { temp: 0, moisture: 0, ph: 0, ec: 0 };
+        if (device.deviceType === 'office_control' || device.deviceType === 'system2') {
+          // Handle room1 structure or root structure
+          const room1 = latestData.room1 || latestData || {};
+          liveStats.temp = parseFloat(room1.room?.room_temp || room1.temp || 0);
+          liveStats.moisture = parseFloat(room1.soil?.moisture || room1.humidity || 0);
+          liveStats.ph = parseFloat(room1.soil?.ph || room1.ph || 0);
+          liveStats.ec = parseFloat(room1.soil?.ec || room1.ec || 0);
+        } else if (device.deviceType === 'controlling') {
+          const tel = latestData.telemetry || latestData || {};
+          liveStats.temp = parseFloat(tel.water_temp || tel.room_temp || 0);
+          liveStats.moisture = parseFloat(tel.moisture || tel.room_humi || 0);
+          liveStats.ph = parseFloat(tel.ph || 0);
+          liveStats.ec = parseFloat(tel.ec || 0);
+        } else if (device.deviceType === 'multi_sensor') {
+          liveStats.temp = parseFloat(latestData.s1?.t || 0);
+          liveStats.moisture = parseFloat(latestData.s2?.t || 0);
+          liveStats.ph = parseFloat(latestData.s3?.t || 0);
+          liveStats.ec = parseFloat(latestData.s4?.t || 0);
+        } else {
+          // Fallback for general devices
+          liveStats.temp = parseFloat(latestData.field1 || latestData.temp || 0);
+          liveStats.moisture = parseFloat(latestData.field2 || latestData.humidity || 0);
+          liveStats.ph = parseFloat(latestData.field3 || latestData.ph || 0);
+          liveStats.ec = parseFloat(latestData.field4 || latestData.ec || 0);
+        }
+
+        return {
+          ...device.toObject(),
+          status,
+          liveStats,
+          latestPacketTime: latestPacket ? latestPacket.timestamp : null
+        };
+      })
+    );
+
+    res.status(200).json({ success: true, count: updatedDevices.length, data: updatedDevices });
   } catch (err) {
+    console.error('[DeviceController] getDevices error:', err);
     res.status(500).json({ success: false, message: 'Server Error' });
   }
 };
@@ -108,8 +178,9 @@ exports.pushThingspeakConfig = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Device not found' });
     }
 
+    const isControlling = device.deviceType === 'controlling';
     const { channelId, readApiKey, writeApiKey, port, username, password, clientId } = device.thingspeak || {};
-    if (!channelId || !readApiKey || !writeApiKey || !port || !username || !password || !clientId) {
+    if (!isControlling && (!channelId || !readApiKey || !writeApiKey || !port || !username || !password || !clientId)) {
       return res.status(400).json({
         success: false,
         message: 'Device does not have complete ThingSpeak configuration (all fields required)',
@@ -120,13 +191,13 @@ exports.pushThingspeakConfig = async (req, res) => {
     // We prioritize the custom mqttId set by the user (e.g. device1, almora1)
     const deviceRoot = device.mqttId || device._id;
     const payload = {
-      channelId,
-      readApiKey,
-      writeApiKey,
-      port,
-      username,
-      password,
-      clientId,
+      channelId: channelId || '',
+      readApiKey: readApiKey || '',
+      writeApiKey: writeApiKey || '',
+      port: port || 1883,
+      username: username || '',
+      password: password || '',
+      clientId: clientId || '',
       deviceName: device.name,
       pushedAt: new Date().toISOString(),
     };
@@ -134,6 +205,8 @@ exports.pushThingspeakConfig = async (req, res) => {
     if (device.deviceType === 'office_control' || device.deviceType === 'system2') {
       await publishToDevice(`inhydro/${deviceRoot}/room1/setpoints/update`, payload);
       await publishToDevice(`inhydro/${deviceRoot}/room2/setpoints/update`, payload);
+    } else if (device.deviceType === 'controlling') {
+      await publishToDevice(`inhydro/${deviceRoot}/monitor/setpoints/update`, payload);
     } else {
       await publishToDevice(`inhydro/${deviceRoot}/setpoints/update`, payload);
     }
@@ -172,7 +245,7 @@ exports.getDeviceAnalytics = async (req, res) => {
     // Map Mongoose documents to standard ThingSpeak feeds format
     let feeds = [];
 
-    if (device.deviceType === 'office_control' || device.deviceType === 'multi_sensor') {
+    if (true) {
       const mqttId = device.mqttId || device._id.toString();
       const TelemetryModel = getTelemetryModel(mqttId);
 
@@ -263,7 +336,7 @@ exports.getDeviceAnalytics = async (req, res) => {
               });
             }
           }
-        } else {
+        } else if (device.deviceType === 'multi_sensor') {
           // multi_sensor mapping
           mappedFeeds.push({
             created_at: p.timestamp.toISOString(),
@@ -277,28 +350,48 @@ exports.getDeviceAnalytics = async (req, res) => {
             field7: d.s7?.t !== undefined && d.s7?.t !== null ? String(d.s7.t) : null,
             field8: null,
           });
+        } else if (device.deviceType === 'controlling') {
+          const tel = d.telemetry || d || {};
+          mappedFeeds.push({
+            created_at: p.timestamp.toISOString(),
+            entry_id: mappedFeeds.length + 1,
+            field1: tel.water_temp !== undefined && tel.water_temp !== null ? String(tel.water_temp) : null,
+            field2: tel.moisture !== undefined && tel.moisture !== null ? String(tel.moisture) : null,
+            field3: tel.ec !== undefined && tel.ec !== null ? String(tel.ec) : null,
+            field4: tel.ph !== undefined && tel.ph !== null ? String(tel.ph) : null,
+            field5: tel.room_temp !== undefined && tel.room_temp !== null ? String(tel.room_temp) : null,
+            field6: tel.room_humi !== undefined && tel.room_humi !== null ? String(tel.room_humi) : null,
+            field7: tel.orp !== undefined && tel.orp !== null ? String(tel.orp) : null,
+            field8: tel.co2 !== undefined && tel.co2 !== null ? String(tel.co2) : null,
+            field9: tel.vpd !== undefined && tel.vpd !== null ? String(tel.vpd) : null,
+            field10: tel.dli !== undefined && tel.dli !== null ? String(tel.dli) : null,
+            field11: tel.wind_speed !== undefined && tel.wind_speed !== null ? String(tel.wind_speed) : null,
+            field12: tel.wind_dir !== undefined && tel.wind_dir !== null ? String(tel.wind_dir) : null,
+            field13: tel.do !== undefined && tel.do !== null ? String(tel.do) : null,
+            field14: tel.ppfd !== undefined && tel.ppfd !== null ? String(tel.ppfd) : null,
+            field15: tel.n !== undefined && tel.n !== null ? String(tel.n) : null,
+            field16: tel.p !== undefined && tel.p !== null ? String(tel.p) : null,
+            field17: tel.k !== undefined && tel.k !== null ? String(tel.k) : null,
+          });
+        } else {
+          // Standard / system2 / almora mapping
+          const tel = d.telemetry || d || {};
+          mappedFeeds.push({
+            created_at: p.timestamp.toISOString(),
+            entry_id: mappedFeeds.length + 1,
+            field1: tel.water_temp !== undefined && tel.water_temp !== null ? String(tel.water_temp) : null,
+            field2: tel.moisture !== undefined && tel.moisture !== null ? String(tel.moisture) : null,
+            field3: tel.ec !== undefined && tel.ec !== null ? String(tel.ec) : null,
+            field4: tel.ph !== undefined && tel.ph !== null ? String(tel.ph) : null,
+            field5: tel.room_temp !== undefined && tel.room_temp !== null ? String(tel.room_temp) : null,
+            field6: tel.room_humi !== undefined && tel.room_humi !== null ? String(tel.room_humi) : null,
+            field7: tel.orp !== undefined && tel.orp !== null ? String(tel.orp) : null,
+            field8: tel.co2 !== undefined && tel.co2 !== null ? String(tel.co2) : null,
+          });
         }
       });
 
       feeds = mappedFeeds;
-    } else {
-      const packets = await SensorPacket.find({
-        deviceId: device._id,
-        timestamp: { $gte: start, $lte: end },
-      }).sort({ timestamp: 1 });
-
-      feeds = packets.map((p) => ({
-        created_at: p.timestamp.toISOString(),
-        entry_id: p.entryId,
-        field1: p.field1,
-        field2: p.field2,
-        field3: p.field3,
-        field4: p.field4,
-        field5: p.field5,
-        field6: p.field6,
-        field7: p.field7,
-        field8: p.field8,
-      }));
     }
 
     // Try to fetch channel metadata from ThingSpeak to retain custom field names if configured
@@ -316,7 +409,25 @@ exports.getDeviceAnalytics = async (req, res) => {
     };
 
     // Apply default deviceType-based labels
-    if (device.deviceType === 'office_control') {
+    if (device.deviceType === 'controlling') {
+      channelData.field1 = 'Water Temp';
+      channelData.field2 = 'Water Moisture';
+      channelData.field3 = 'Water EC';
+      channelData.field4 = 'Water pH';
+      channelData.field5 = 'Room Temp';
+      channelData.field6 = 'Room Humidity';
+      channelData.field7 = 'ORP';
+      channelData.field8 = 'CO2';
+      channelData.field9 = 'VPD';
+      channelData.field10 = 'DLI';
+      channelData.field11 = 'Wind Speed';
+      channelData.field12 = 'Wind Direction';
+      channelData.field13 = 'Dissolved Oxygen (DO)';
+      channelData.field14 = 'PPFD';
+      channelData.field15 = 'Nitrogen (N)';
+      channelData.field16 = 'Phosphorus (P)';
+      channelData.field17 = 'Potassium (K)';
+    } else if (device.deviceType === 'office_control') {
       channelData.field1 = 'Avg Water Temperature';
       channelData.field2 = 'Avg Water Moisture';
       channelData.field3 = 'Avg EC';
@@ -334,6 +445,15 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field6 = 'Cold Room 6 Temp';
       channelData.field7 = 'Cold Room 7 Temp';
       channelData.field8 = 'Field 8';
+    } else {
+      channelData.field1 = 'Water Temp';
+      channelData.field2 = 'Water Moisture';
+      channelData.field3 = 'Water EC';
+      channelData.field4 = 'Water pH';
+      channelData.field5 = 'Room Temp';
+      channelData.field6 = 'Room Humidity';
+      channelData.field7 = 'ORP';
+      channelData.field8 = 'CO2';
     }
 
     if (channelId && readApiKey) {

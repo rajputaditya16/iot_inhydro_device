@@ -79,6 +79,13 @@ const LiveMonitoring = () => {
   });
   const [activeRoomTab, setActiveRoomTab] = useState(1);
 
+  // ── InHydro Controller Live States ──────────────────────────────────────────
+  const [controllingData, setControllingData] = useState(null);
+  const [controllingHistory, setControllingHistory] = useState({
+    water_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [],
+    vpd: [], dli: [], wind_speed: [], wind_dir: [], do: [], ppfd: [], n: [], p: [], k: []
+  });
+
   const token = localStorage.getItem('token');
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -138,6 +145,12 @@ const LiveMonitoring = () => {
     setOfficeControlHistory({
       1: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
       2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
+    });
+
+    // Clear controlling MQTT states
+    setControllingData(null);
+    setControllingHistory({
+      water_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: []
     });
   };
 
@@ -237,7 +250,8 @@ const LiveMonitoring = () => {
 
   useEffect(() => {
     const isOfficeControl = deviceMeta?.deviceType === 'office_control';
-    if (isOfficeControl) {
+    const isControlling = deviceMeta?.deviceType === 'controlling';
+    if (isOfficeControl || isControlling) {
       return;
     }
 
@@ -254,10 +268,11 @@ const LiveMonitoring = () => {
     }
   }, [hasThingspeak, fetchLiveData, deviceMeta]);
 
-  // ── Step 3: MQTT Subscription for Multi-Sensor & Office Control Devices ──────
+  // ── Step 3: MQTT Subscription for Multi-Sensor, Office Control & Controlling Devices ──────
   useEffect(() => {
     const isMultiSensor = deviceMeta?.deviceType === 'multi_sensor';
     const isOfficeControl = deviceMeta?.deviceType === 'office_control';
+    const isControlling = deviceMeta?.deviceType === 'controlling';
 
     let mqttId = deviceMeta?.mqttId;
     if (!mqttId && isOfficeControl) {
@@ -267,7 +282,7 @@ const LiveMonitoring = () => {
       mqttId = deviceMeta?.id || deviceMeta?._id;
     }
 
-    if ((!isMultiSensor && !isOfficeControl) || !mqttId) {
+    if ((!isMultiSensor && !isOfficeControl && !isControlling) || !mqttId) {
       if (mqttClientRef.current) {
         mqttClientRef.current.end();
         mqttClientRef.current = null;
@@ -286,6 +301,8 @@ const LiveMonitoring = () => {
       } else if (isOfficeControl) {
         client.subscribe(`inhydro/${mqttId}/room1/telemetry/live`);
         client.subscribe(`inhydro/${mqttId}/room2/telemetry/live`);
+      } else if (isControlling) {
+        client.subscribe(`inhydro/${mqttId}/monitor/telemetry/live`);
       }
     });
 
@@ -334,6 +351,39 @@ const LiveMonitoring = () => {
               roomHist[key] = [...(roomHist[key] || []), { time: timeStr, value: val }].slice(-24);
             });
             return { ...prev, [room]: roomHist };
+          });
+        } else if (isControlling) {
+          const tel = payload.telemetry || payload || {};
+          setControllingData(tel);
+
+          // Update history for graphs
+          const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          setControllingHistory(prev => {
+            const nextHist = { ...prev };
+            const metrics = {
+              water_temp: tel.water_temp,
+              moisture: tel.moisture,
+              ec: tel.ec,
+              ph: tel.ph,
+              room_temp: tel.room_temp,
+              room_humi: tel.room_humi,
+              orp: tel.orp,
+              co2: tel.co2,
+              vpd: tel.vpd,
+              dli: tel.dli,
+              wind_speed: tel.wind_speed,
+              wind_dir: tel.wind_dir,
+              do: tel.do,
+              ppfd: tel.ppfd,
+              n: tel.n,
+              p: tel.p,
+              k: tel.k
+            };
+            Object.keys(metrics).forEach(key => {
+              const val = metrics[key] !== undefined && metrics[key] !== null ? parseFloat(metrics[key]) : 0;
+              nextHist[key] = [...(nextHist[key] || []), { time: timeStr, value: val }].slice(-24);
+            });
+            return nextHist;
           });
         }
 
@@ -460,7 +510,7 @@ const LiveMonitoring = () => {
       </div>
 
       {/* ── ThingSpeak Not Configured Warning ─────────────────────────────── */}
-      {selectedDeviceId && !hasThingspeak && deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && (
+      {selectedDeviceId && !hasThingspeak && deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && deviceMeta?.deviceType !== 'controlling' && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -688,6 +738,141 @@ const LiveMonitoring = () => {
         </div>
       )}
 
+      {/* ── InHydro Controller (controlling.py) Live View ───────────────────────────── */}
+      {deviceMeta?.deviceType === 'controlling' && (() => {
+        const controllingMetricsConfig = [
+          { key: 'water_temp', label: 'Water Temperature', unit: '°C', icon: Thermometer, type: 'temperature' },
+          { key: 'moisture', label: 'Moisture / Humidity', unit: '%', icon: Droplets, type: 'moisture' },
+          { key: 'ph', label: 'pH Level', unit: 'pH', icon: FlaskConical, type: 'ph' },
+          { key: 'room_temp', label: 'Room Temperature', unit: '°C', icon: Thermometer, type: 'temperature' },
+          { key: 'room_humi', label: 'Room Humidity', unit: '%', icon: Droplets, type: 'moisture' },
+          { key: 'orp', label: 'ORP Level', unit: 'mV', icon: Activity, type: 'default' },
+          { key: 'co2', label: 'CO2 Level', unit: 'ppm', icon: Activity, type: 'co2' },
+          { key: 'vpd', label: 'VPD', unit: 'kPa', icon: Activity, type: 'default' },
+          { key: 'dli', label: 'DLI', unit: 'mol/m²/d', icon: Activity, type: 'default' },
+          { key: 'wind_speed', label: 'Wind Speed', unit: 'm/s', icon: Activity, type: 'default' },
+          { key: 'wind_dir', label: 'Wind Direction', unit: '°', icon: Activity, type: 'default' },
+          { key: 'do', label: 'Dissolved Oxygen (DO)', unit: 'mg/L', icon: Activity, type: 'default' },
+          { key: 'ppfd', label: 'PPFD', unit: 'µmol/m²/s', icon: Activity, type: 'default' },
+          { key: 'n', label: 'Nitrogen (N)', unit: 'mg/kg', icon: Activity, type: 'default' },
+          { key: 'p', label: 'Phosphorus (P)', unit: 'mg/kg', icon: Activity, type: 'default' },
+          { key: 'k', label: 'Potassium (K)', unit: 'mg/kg', icon: Activity, type: 'default' }
+        ];
+
+        return (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+              {/* Left: Sensor Grid Boxes */}
+              <div className="space-y-4 xl:col-span-1">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Live Readings</h3>
+                
+                {!controllingData && loading ? (
+                  <div className="space-y-4">
+                    {[...Array(17)].map((_, i) => (
+                      <SkeletonCard key={i} />
+                    ))}
+                  </div>
+                ) : !controllingData ? (
+                  <div className="rounded-2xl border border-dashed border-slate-700/50 p-6 text-sm text-slate-400 text-center">
+                    <div className="animate-pulse mb-2 text-green-500 font-medium">Waiting for Live Device Stream...</div>
+                    <div className="text-xs text-slate-500">Please start controlling.py on your device to stream real-time data.</div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 xl:grid-cols-1">
+                    {/* EC card — shows mS/cm + TDS in one line */}
+                    {(() => {
+                      const ecVal = controllingData.ec;
+                      const tdsVal = ecVal != null ? Math.round(ecVal * 500) : null;
+                      const ecStatus = getMetricStatus('ec', ecVal ?? 0);
+                      const ecColor = getMetricColor(ecStatus);
+                      const bgMap = {
+                        'text-emerald-400': 'bg-emerald-500/10 border-emerald-500/20',
+                        'text-yellow-400':  'bg-yellow-500/10 border-yellow-500/20',
+                        'text-red-400':     'bg-red-500/10 border-red-500/20',
+                        'text-slate-500':   'bg-slate-500/10 border-slate-500/20',
+                      };
+                      return (
+                        <motion.div
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className={`rounded-2xl border p-4 ${bgMap[ecColor] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className={`rounded-lg p-1.5 ${ecColor} bg-white/5`}>
+                              <Zap className="h-4 w-4" />
+                            </div>
+                            <span className="text-sm font-medium text-slate-400">Electrical Conductivity (EC)</span>
+                          </div>
+                          <div className="mt-3 flex items-baseline gap-1.5 flex-wrap">
+                            <span className={`text-2xl font-bold tabular-nums ${ecColor}`}>
+                              {ecVal != null ? ecVal.toFixed(2) : '--'}
+                            </span>
+                            <span className="text-sm text-slate-500">mS/cm</span>
+                            {tdsVal != null && (
+                              <span className="text-sm text-slate-400 font-semibold font-mono">
+                                ({tdsVal} ppm)
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-1.5 flex items-center gap-1.5">
+                            <div className={`h-1.5 w-1.5 rounded-full ${ecStatus === 'normal' ? 'bg-emerald-400' : ecStatus === 'warning' ? 'bg-yellow-400' : ecStatus === 'critical' ? 'bg-red-400' : 'bg-slate-500'}`} />
+                            <span className="text-xs text-slate-500 capitalize">{ecStatus}</span>
+                          </div>
+                        </motion.div>
+                      );
+                    })()}
+
+                    {controllingMetricsConfig.map(m => (
+                      <BigMetric
+                        key={m.key}
+                        label={m.label}
+                        value={controllingData[m.key]}
+                        unit={m.unit}
+                        icon={m.icon}
+                        type={m.type}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Right: Real-time Charts */}
+              <div className="space-y-4 xl:col-span-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Trend Charts</h3>
+                {!controllingData && loading ? (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {[...Array(17)].map((_, i) => (
+                      <div key={i} className="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-4">
+                        <div className="skeleton mb-4 h-4 w-32 rounded" />
+                        <div className="skeleton h-48 w-full rounded-xl" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <LiveChart
+                      data={controllingHistory.ec}
+                      type="ec"
+                      title="EC Trend"
+                      unit="mS/cm"
+                    />
+                    {controllingMetricsConfig.map(m => (
+                      <LiveChart
+                        key={m.key}
+                        data={controllingHistory[m.key]}
+                        type={m.type}
+                        title={`${m.label} Trend`}
+                        unit={m.unit}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {deviceMeta?.deviceType === 'multi_sensor' && (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
@@ -825,7 +1010,7 @@ const LiveMonitoring = () => {
       )}
 
       {/* ── Standard Single-Device Content Grid ───────────────────────────────── */}
-      {hasThingspeak && deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && (
+      {hasThingspeak && deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && deviceMeta?.deviceType !== 'controlling' && (
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
           {/* Left: Big Metrics */}
           <div className="space-y-4 xl:col-span-1">

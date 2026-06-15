@@ -99,52 +99,7 @@ const DevicesPage = () => {
       }
       const data = await res.json();
       if (data.success) {
-        const dbDevices = data.data;
-        // Initialize all non-blocked devices as offline to remove stale status display
-        const initialDevices = dbDevices.map(device => {
-          if (device.status === 'blocked') return device;
-          return { ...device, status: 'offline' };
-        });
-        setDevices(initialDevices);
-
-        // Fetch live status from ThingSpeak in background for each non-blocked device
-        const checkLiveStatuses = async () => {
-          const updatedDevices = await Promise.all(
-            initialDevices.map(async (device) => {
-              if (device.status === 'blocked') return device;
-
-              const channelId = device.thingspeak?.channelId || device.thingspeak?.tempChannelId;
-              const readApiKey = device.thingspeak?.readApiKey || device.thingspeak?.tempReadApiKey;
-
-              if (!channelId || !readApiKey) {
-                return device; // Remains offline
-              }
-
-              try {
-                const tsRes = await fetch(
-                  `https://api.thingspeak.com/channels/${channelId}/feeds.json?api_key=${readApiKey}&results=1`
-                );
-                if (tsRes.ok) {
-                  const tsData = await tsRes.json();
-                  const latestFeed = tsData && tsData.feeds && tsData.feeds[0];
-                  if (latestFeed) {
-                    const lastUpdatedTime = new Date(latestFeed.created_at);
-                    const diffMs = Date.now() - lastUpdatedTime.getTime();
-                    // 5 minutes threshold
-                    const isOnline = diffMs < 5 * 60 * 1000;
-                    return { ...device, status: isOnline ? 'online' : 'offline' };
-                  }
-                }
-              } catch (err) {
-                console.error(`Error checking status for device ${device.name}:`, err);
-              }
-              return { ...device, status: 'offline' };
-            })
-          );
-          setDevices(updatedDevices);
-        };
-
-        checkLiveStatuses();
+        setDevices(data.data);
       }
     } catch (error) {
       console.error('Failed to fetch devices', error);
@@ -364,7 +319,7 @@ const DevicesPage = () => {
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Device</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Location</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Status</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">ThingSpeak</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Device ID / MQTT ID</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Last Updated</th>
                 <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">Actions</th>
               </tr>
@@ -400,14 +355,10 @@ const DevicesPage = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      {hasThingspeak ? (
-                        <div className="flex items-center gap-1.5">
-                          <Radio className="h-3.5 w-3.5 text-blue-400" />
-                          <span className="text-xs text-blue-400 font-mono">{device.thingspeak.channelId || device.thingspeak.tempChannelId}</span>
-                        </div>
-                      ) : (
-                        <span className="text-[10px] text-slate-500 italic">Not configured</span>
-                      )}
+                      <div className="flex items-center gap-1.5 font-mono text-xs text-blue-400">
+                        <Radio className="h-3.5 w-3.5" />
+                        <span>{device.mqttId || deviceId}</span>
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-slate-400 text-xs">{formatTimestamp(device.lastUpdated)}</td>
                     <td className="px-6 py-4">
@@ -459,7 +410,7 @@ const DevicesPage = () => {
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
-                            {hasThingspeak && (
+                            {(hasThingspeak || device.deviceType === 'controlling') && (
                               <>
                                 <div className="w-px h-4 bg-slate-700/50 mx-1"></div>
                                 <button
@@ -469,7 +420,7 @@ const DevicesPage = () => {
                                       ? 'text-purple-300 bg-purple-500/10 cursor-wait'
                                       : 'text-purple-400 hover:bg-purple-500/10 hover:text-purple-300'
                                     }`}
-                                  title="Push ThingSpeak Config to Device (MQTT)"
+                                  title="Push Config to Device (MQTT)"
                                 >
                                   <Send className={`h-4 w-4 ${pushingId === deviceId ? 'animate-pulse' : ''}`} />
                                 </button>
@@ -539,6 +490,7 @@ const DevicesPage = () => {
                     className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
                   >
                     <option value="system2">Standard System (system2.py)</option>
+                    <option value="controlling">InHydro Controller (controlling.py)</option>
                     <option value="almora">Almora Machine (almora1.py)</option>
                     <option value="almora2">Almora Machine 2 (CO2/Temp/Hum)</option>
                     <option value="multi_sensor">Cold Storage (Multi-Sensor)</option>
@@ -548,13 +500,14 @@ const DevicesPage = () => {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-300">MQTT Topic ID (e.g. almora1)</label>
+                  <label className="mb-1 block text-sm font-medium text-slate-300">Device ID / MQTT Topic ID (e.g. almora1) *Required*</label>
                   <input
                     type="text"
+                    required
                     value={formData.mqttId}
                     onChange={(e) => setFormData({ ...formData, mqttId: e.target.value })}
                     className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
-                    placeholder="Must match device script topic"
+                    placeholder="Must match device_id.txt on Raspberry Pi"
                   />
                 </div>
 
@@ -622,7 +575,7 @@ const DevicesPage = () => {
             {/* ThingSpeak Section */}
             <div className="space-y-4">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-2">
-                <Radio className="h-3.5 w-3.5 text-blue-400" /> ThingSpeak Configuration
+                <Radio className="h-3.5 w-3.5 text-blue-400" /> ThingSpeak Configuration (Optional / Legacy)
               </h4>
               <div className="space-y-3 pl-1">
                 <InputGroup label="Channel ID" value={formData.thingspeak.channelId} onChange={(v) => updateThingspeak('channelId', v)} />
@@ -687,12 +640,13 @@ const DevicesPage = () => {
                     <p className="text-xs text-slate-400 mt-1 font-mono">
                       Type: <span className="text-slate-300 font-semibold">{
                         selectedDeviceDetails.deviceType === 'system2' ? 'Standard System' :
-                          selectedDeviceDetails.deviceType === 'almora' ? 'Almora Machine' :
-                            selectedDeviceDetails.deviceType === 'almora2' ? 'Almora Machine 2' :
-                              selectedDeviceDetails.deviceType === 'multi_sensor' ? 'Cold Storage (Multi)' :
-                                selectedDeviceDetails.deviceType === 'light_motor_pump' ? 'Light Motor Pump' :
-                                  selectedDeviceDetails.deviceType === 'office_control' ? 'Office Control' :
-                                    selectedDeviceDetails.deviceType || 'Unknown'
+                          selectedDeviceDetails.deviceType === 'controlling' ? 'InHydro Controller' :
+                            selectedDeviceDetails.deviceType === 'almora' ? 'Almora Machine' :
+                              selectedDeviceDetails.deviceType === 'almora2' ? 'Almora Machine 2' :
+                                selectedDeviceDetails.deviceType === 'multi_sensor' ? 'Cold Storage (Multi)' :
+                                  selectedDeviceDetails.deviceType === 'light_motor_pump' ? 'Light Motor Pump' :
+                                    selectedDeviceDetails.deviceType === 'office_control' ? 'Office Control' :
+                                      selectedDeviceDetails.deviceType || 'Unknown'
                       }</span>
                     </p>
                   </div>
@@ -931,7 +885,7 @@ const DevicesPage = () => {
                   <Activity className="h-3.5 w-3.5" /> Live Monitoring
                 </button>
 
-                {isAdmin && (selectedDeviceDetails.thingspeak?.channelId || selectedDeviceDetails.thingspeak?.tempChannelId) && (
+                {isAdmin && (selectedDeviceDetails.thingspeak?.channelId || selectedDeviceDetails.thingspeak?.tempChannelId || selectedDeviceDetails.deviceType === 'controlling') && (
                   <button
                     type="button"
                     onClick={() => {

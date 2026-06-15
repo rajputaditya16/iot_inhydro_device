@@ -340,14 +340,25 @@ def on_control_message(client, userdata, msg):
     except Exception as e:
         print(f"[MQTT ERROR] {e}")
 
+is_mqtt_connected = False
+
 def on_control_connect(client, userdata, flags, rc, properties=None):
+    global is_mqtt_connected
     if rc == 0:
+        is_mqtt_connected = True
         client.subscribe(CONTROL_TOPIC)
         client.subscribe(CONTROL_SYNC_TOPIC)
         print(f"[MQTT] Connected and subscribed to HiveMQ sync.")
+    else:
+        is_mqtt_connected = False
+
+def on_control_disconnect(client, userdata, rc, properties=None):
+    global is_mqtt_connected
+    is_mqtt_connected = False
 
 control_client.on_message = on_control_message
 control_client.on_connect = on_control_connect
+control_client.on_disconnect = on_control_disconnect
 try:
     control_client.connect_async("broker.hivemq.com", 1883, 60)
     control_client.loop_start()
@@ -538,6 +549,183 @@ def rebuild_grid():
         # Remove sticky="nsew" so buttons stay their defined width/height
         sensor_widgets[p]['frame'].grid(row=r, column=c, padx=10, pady=10)
 
+LOG_DIR = os.path.join(BASE_DIR, "local_logs")
+ACTIVE_LOG_FILE = os.path.join(LOG_DIR, "active.jsonl")
+local_log_lock = threading.Lock()
+last_local_save_time = 0
+
+COLUMNS = ["timestamp", "payload"]
+
+def pack_entry(ts, raw):
+    return [ts, raw]
+
+def unpack_row(row):
+    if not isinstance(row, list) or len(row) < 2:
+        return None
+    payload = dict(row[1])
+    payload["device"] = DEVICE_NAME
+    payload["timestamp"] = row[0]
+    return payload
+
+def save_local_telemetry(data):
+    global last_local_save_time
+    try:
+        connected = is_mqtt_connected and control_client.is_connected()
+    except Exception:
+        connected = False
+
+    # Store locally ONLY when device is not connected to internet/broker
+    if connected:
+        return
+
+    current_time = time.time()
+    if current_time - last_local_save_time < 45:
+        return
+
+    # Use Indian Standard Time (+05:30) offset for timestamping
+    import datetime
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    ts_str = datetime.datetime.now(ist_tz).isoformat()
+
+    try:
+        new_row = pack_entry(ts_str, data)
+    except Exception as e:
+        print(f"⚠️ Error packing local telemetry entry: {e}")
+        last_local_save_time = current_time
+        return
+
+    print(f"📝 Saving local telemetry offline: {ts_str}")
+
+    def write_thread():
+        with local_log_lock:
+            try:
+                os.makedirs(LOG_DIR, exist_ok=True)
+                write_header = not os.path.exists(ACTIVE_LOG_FILE) or os.path.getsize(ACTIVE_LOG_FILE) == 0
+                with open(ACTIVE_LOG_FILE, "a") as f:
+                    if write_header:
+                        f.write(json.dumps(COLUMNS) + "\n")
+                    f.write(json.dumps(new_row) + "\n")
+                
+                # Check if active log exceeds 10,000 entries (approx 1.5MB)
+                if os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 1500000:
+                    rot_name = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
+                    os.rename(ACTIVE_LOG_FILE, rot_name)
+                print(f"✅ Offline telemetry written successfully to {ACTIVE_LOG_FILE}")
+            except Exception as e:
+                print(f"Local JSON save error: {e}")
+
+    threading.Thread(target=write_thread, daemon=True).start()
+    last_local_save_time = current_time
+
+def sync_offline_data_worker():
+    while True:
+        try:
+            try:
+                connected = is_mqtt_connected and control_client.is_connected()
+            except Exception:
+                connected = False
+
+            if connected and os.path.exists(LOG_DIR):
+                files = [f for f in os.listdir(LOG_DIR) if f.endswith(".jsonl") or f == "active.jsonl"]
+                if "active.jsonl" in files and os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 0:
+                    with local_log_lock:
+                        rot_name = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
+                        try:
+                            os.rename(ACTIVE_LOG_FILE, rot_name)
+                        except Exception:
+                            pass
+                    # Re-list files after rename
+                    files = [f for f in os.listdir(LOG_DIR) if f.endswith(".jsonl")]
+                
+                # Filter out active.jsonl just in case, and sort chronologically
+                files = [f for f in files if f != "active.jsonl"]
+                files.sort()
+                
+                for fname in files:
+                    fpath = os.path.join(LOG_DIR, fname)
+                    rows = []
+                    with local_log_lock:
+                        if os.path.exists(fpath):
+                            try:
+                                with open(fpath, "r") as f:
+                                    first_line = True
+                                    for line in f:
+                                        line = line.strip()
+                                        if line:
+                                            parsed = json.loads(line)
+                                            if first_line and isinstance(parsed, list) and len(parsed) > 0 and parsed[0] == "timestamp":
+                                                first_line = False
+                                                continue
+                                            rows.append(parsed)
+                                            first_line = False
+                            except Exception as re:
+                                print(f"[OfflineSync] Error reading {fname}: {re}")
+
+                    if not rows:
+                        try:
+                            os.remove(fpath)
+                        except Exception:
+                            pass
+                        continue
+
+                    print(f"[OfflineSync] Syncing segment {fname} with {len(rows)} entries...")
+                    remaining_rows = list(rows)
+                    success = True
+
+                    batch_size = 500
+                    for idx in range(0, len(rows), batch_size):
+                        batch = rows[idx:idx+batch_size]
+
+                        try:
+                            conn = is_mqtt_connected and control_client.is_connected()
+                        except Exception:
+                            conn = False
+                        if not conn:
+                            print("[OfflineSync] Lost connection during sync. Pausing.")
+                            success = False
+                            break
+
+                        batch_payload = []
+                        for row in batch:
+                            payload = unpack_row(row)
+                            if payload:
+                                batch_payload.append(payload)
+
+                        try:
+                            if batch_payload:
+                                control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", json.dumps(batch_payload), qos=1)
+                            # Small sleep to prevent network choke
+                            time.sleep(0.05)
+                        except Exception as pe:
+                            print(f"[OfflineSync] Publish batch failed: {pe}")
+                            success = False
+                            break
+
+                        remaining_rows = remaining_rows[len(batch):]
+
+                    # Update the segment file
+                    with local_log_lock:
+                        try:
+                            if remaining_rows:
+                                with open(fpath, "w") as f:
+                                    f.write(json.dumps(COLUMNS) + "\n")
+                                    for r in remaining_rows:
+                                        f.write(json.dumps(r) + "\n")
+                            else:
+                                if os.path.exists(fpath):
+                                    os.remove(fpath)
+                                print(f"[OfflineSync] Finished and removed log segment: {fname}")
+                        except Exception as we:
+                            print(f"[OfflineSync] Error updating log segment {fname}: {we}")
+                            success = False
+
+                    if not success:
+                        break
+        except Exception as e:
+            print(f"[OfflineSync] General error: {e}")
+
+        time.sleep(15)
+
 def update_ui():
     if not running: return
     try:
@@ -616,7 +804,16 @@ def update_ui():
                 'status': d.get('status')
             }
         # Publish all 7 sensors in one burst
-        control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", json.dumps(live_data_payload))
+        try:
+            import datetime
+            ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+            ts_str = datetime.datetime.now(ist_tz).isoformat()
+            live_data_payload["device"] = DEVICE_NAME
+            live_data_payload["timestamp"] = ts_str
+            control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", json.dumps(live_data_payload))
+        except: pass
+        
+        save_local_telemetry(live_data_payload)
     except: pass
 
     # 2. HISTORICAL LOGGING (ThingSpeak ARRAY transmission for all 7 sensors)
@@ -765,6 +962,7 @@ if __name__ == "__main__":
     threading.Thread(target=auto_trust_devices, daemon=True).start()
     threading.Thread(target=start_bluetooth_server, daemon=True).start()
     threading.Thread(target=sensor_reader, daemon=True).start()
+    threading.Thread(target=sync_offline_data_worker, daemon=True).start()
     show(frame_main)
     update_ui()
     root.mainloop()

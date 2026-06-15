@@ -7,6 +7,7 @@ import Almora2Settings from '../AdminDashboard/Almora2Settings';
 import ColdStorageSettings from '../AdminDashboard/ColdStorageSettings';
 import LightMotorPumpSettings from '../AdminDashboard/LightMotorPumpSettings';
 import OfficeControlSettings from '../AdminDashboard/OfficeControlSettings';
+import ControllingDeviceSettings from '../AdminDashboard/ControllingDeviceSettings';
 
 const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('profile');
@@ -37,6 +38,7 @@ const SettingsPage = () => {
       {key: 'cold_storage_config', label: 'Cold Storage Setup', icon: Monitor},
       {key: 'light_motor_pump_config', label: 'Light Motor Pump Setup', icon: Monitor},
       {key: 'office_control_config', label: 'Office Control Setup', icon: Monitor},
+      {key: 'controlling_config', label: 'Controller Setup', icon: Monitor},
     ] : []),
     // { key: 'notifications', label: 'Notifications', icon: Bell },
     { key: 'security', label: 'Security', icon: Shield },
@@ -107,6 +109,11 @@ const SettingsPage = () => {
             {/* Office Control */}
             {activeTab === 'office_control_config' && (
               <OfficeControlSettings />
+            )}
+
+            {/* InHydro Controller */}
+            {activeTab === 'controlling_config' && (
+              <ControllingDeviceSettings />
             )}
 
             {/* Profile */}

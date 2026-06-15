@@ -64,6 +64,15 @@ const getFieldMeta = (name) => {
   if (lowerName.includes('ec')) return { type: 'ec', unit: 'mS/cm', icon: BarChart3, color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/20' };
   if (lowerName.includes('ph')) return { type: 'ph', unit: '', icon: TrendingDown, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' };
   if (lowerName.includes('co2')) return { type: 'co2', unit: 'PPM', icon: Activity, color: 'text-teal-400', bg: 'bg-teal-500/10 border-teal-500/20' };
+  if (lowerName.includes('vpd')) return { type: 'default', unit: 'kPa', icon: Activity, color: 'text-cyan-400', bg: 'bg-cyan-500/10 border-cyan-500/20' };
+  if (lowerName.includes('dli')) return { type: 'default', unit: 'mol/m²/d', icon: Activity, color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20' };
+  if (lowerName.includes('wind_speed') || lowerName.includes('wind speed')) return { type: 'default', unit: 'm/s', icon: Activity, color: 'text-sky-400', bg: 'bg-sky-500/10 border-sky-500/20' };
+  if (lowerName.includes('wind_dir') || lowerName.includes('wind direction')) return { type: 'default', unit: '°', icon: Activity, color: 'text-indigo-400', bg: 'bg-indigo-500/10 border-indigo-500/20' };
+  if (lowerName.includes('dissolved oxygen') || lowerName.includes('do')) return { type: 'default', unit: 'mg/L', icon: Activity, color: 'text-rose-400', bg: 'bg-rose-500/10 border-rose-500/20' };
+  if (lowerName.includes('ppfd')) return { type: 'default', unit: 'µmol/m²/s', icon: Activity, color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/20' };
+  if (lowerName.includes('(n)') || lowerName.includes('nitrogen')) return { type: 'default', unit: 'mg/kg', icon: Activity, color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' };
+  if (lowerName.includes('(p)') || lowerName.includes('phosphorus')) return { type: 'default', unit: 'mg/kg', icon: Activity, color: 'text-lime-400', bg: 'bg-lime-500/10 border-lime-500/20' };
+  if (lowerName.includes('(k)') || lowerName.includes('potassium')) return { type: 'default', unit: 'mg/kg', icon: Activity, color: 'text-violet-400', bg: 'bg-violet-500/10 border-violet-500/20' };
   return { type: 'default', unit: '', icon: Activity, color: 'text-slate-400', bg: 'bg-slate-800/50 border-slate-700/50' };
 };
 
@@ -232,7 +241,7 @@ const AnalyticsPage = () => {
         const data = await res.json();
         if (data.success) {
           const tsDevices = data.data.filter(
-            (d) => (d.thingspeak?.channelId || d.tempChannelId)
+            (d) => (d.thingspeak?.channelId || d.tempChannelId || d.deviceType === 'controlling' || d.deviceType === 'office_control' || d.deviceType === 'multi_sensor')
           );
           setAllDevices(tsDevices);
           if (tsDevices.length > 0 && !selectedDeviceId) {
@@ -280,7 +289,7 @@ const AnalyticsPage = () => {
       const exactFeeds = result.feeds || [];
 
       const cFields = [];
-      for (let i = 1; i <= 8; i++) {
+      for (let i = 1; i <= 17; i++) {
         const key = `field${i}`;
         const hasData = exactFeeds.some(f => f[key] != null && f[key] !== '');
         if (result.channel?.[key] || hasData) {
