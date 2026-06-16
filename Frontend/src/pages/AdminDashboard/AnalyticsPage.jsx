@@ -425,7 +425,8 @@ const AnalyticsPage = () => {
           >
             {allDevices.map((d) => (
               <option key={d._id} value={d._id}>
-                {d.name} (CH: {d.thingspeak?.channelId || 'Local'})
+                {/* {d.name} (CH: {d.thingspeak?.channelId || 'Local'}) */}
+                {d.name}
               </option>
             ))}
           </select>
