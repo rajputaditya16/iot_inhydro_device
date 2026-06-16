@@ -12,15 +12,30 @@ exports.getUsers = async (req, res) => {
     const { search } = req.query;
     let filter = {};
 
+    if (req.user && req.user.role === 'admin') {
+      filter.createdBy = req.user._id;
+    }
+
     if (search) {
       const regex = new RegExp(search, 'i');
-      filter = {
+      const searchFilter = {
         $or: [{ name: regex }, { email: regex }, { role: regex }],
       };
+      if (req.user && req.user.role === 'admin') {
+        filter = {
+          $and: [
+            { createdBy: req.user._id },
+            searchFilter
+          ]
+        };
+      } else {
+        filter = searchFilter;
+      }
     }
 
     const users = await User.find(filter)
       .populate('assignedDevices', 'name location status')
+      .populate('createdBy', 'name role')
       .sort({ createdAt: -1 })
       .select('-password');
 
@@ -45,7 +60,12 @@ exports.getUsers = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 exports.getUser = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id)
+    const query = { _id: req.params.id };
+    if (req.user && req.user.role === 'admin') {
+      query.createdBy = req.user._id;
+    }
+
+    const user = await User.findOne(query)
       .populate('assignedDevices', 'name location status')
       .select('-password');
 
@@ -81,6 +101,18 @@ exports.createUser = async (req, res) => {
   const { name, email, password, role, assignedLocations, assignedDevices } = req.body;
 
   try {
+    // Enforce user creation limit for admins
+    if (req.user && req.user.role === 'admin') {
+      const userCount = await User.countDocuments({ createdBy: req.user._id });
+      const maxAllowed = req.user.maxUsersAllowed !== undefined ? req.user.maxUsersAllowed : 1;
+      if (userCount >= maxAllowed) {
+        return res.status(403).json({
+          success: false,
+          message: `User limit reached. You are only allowed to create up to ${maxAllowed} user(s). Please contact the Super Admin for permission to create more.`,
+        });
+      }
+    }
+
     // Check duplicate email
     const existing = await User.findOne({ email: email.toLowerCase() });
     if (existing) {
@@ -120,6 +152,11 @@ exports.updateUser = async (req, res) => {
   try {
     const { name, email, role, isActive, assignedLocations, assignedDevices } = req.body;
 
+    const query = { _id: req.params.id };
+    if (req.user && req.user.role === 'admin') {
+      query.createdBy = req.user._id;
+    }
+
     const updateData = {};
     if (name !== undefined) updateData.name = name;
     if (email !== undefined) updateData.email = email.toLowerCase();
@@ -128,7 +165,7 @@ exports.updateUser = async (req, res) => {
     if (assignedLocations !== undefined) updateData.assignedLocations = assignedLocations;
     if (assignedDevices !== undefined) updateData.assignedDevices = assignedDevices;
 
-    const user = await User.findByIdAndUpdate(req.params.id, updateData, {
+    const user = await User.findOneAndUpdate(query, updateData, {
       returnDocument: 'after',
       runValidators: true,
     })
@@ -159,7 +196,11 @@ exports.updateUser = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 exports.deleteUser = async (req, res) => {
   try {
-    const user = await User.findByIdAndDelete(req.params.id);
+    const query = { _id: req.params.id };
+    if (req.user && req.user.role === 'admin') {
+      query.createdBy = req.user._id;
+    }
+    const user = await User.findOneAndDelete(query);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
@@ -179,11 +220,16 @@ exports.assignToUser = async (req, res) => {
   try {
     const { assignedLocations, assignedDevices } = req.body;
 
+    const query = { _id: req.params.id };
+    if (req.user && req.user.role === 'admin') {
+      query.createdBy = req.user._id;
+    }
+
     const updateData = {};
     if (assignedLocations !== undefined) updateData.assignedLocations = assignedLocations;
     if (assignedDevices !== undefined) updateData.assignedDevices = assignedDevices;
 
-    const user = await User.findByIdAndUpdate(req.params.id, updateData, {
+    const user = await User.findOneAndUpdate(query, updateData, {
       returnDocument: 'after',
       runValidators: true,
     })
@@ -211,7 +257,11 @@ exports.assignToUser = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 exports.toggleUserStatus = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
+    const query = { _id: req.params.id };
+    if (req.user && req.user.role === 'admin') {
+      query.createdBy = req.user._id;
+    }
+    const user = await User.findOne(query);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }

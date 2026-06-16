@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Search, Plus, Edit2, Trash2, Shield, Eye, UserCog, ShieldAlert, AlertTriangle, Ban, CheckCircle } from 'lucide-react';
+import { Users, Search, Plus, Edit2, Trash2, Shield, Eye, UserCog, ShieldAlert, AlertTriangle, Ban, CheckCircle, AlertCircle, CheckCircle2, X } from 'lucide-react';
 import { SkeletonTable } from '../../components/Skeleton';
 import EmptyState from '../../components/EmptyState';
 import Modal from '../../components/Modal';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
- 
+
 const roleBadge = {
   // admin: 'bg-red-500/10 text-red-400 border-red-500/20',
   // operator: 'bg-green-500/10 text-green-400 border-green-500/20',
@@ -18,7 +18,7 @@ const roleIcon = {
   // operator: Users, 
   viewer: Eye,
 };
- 
+
 const ROLES = ['viewer'];
 
 const UserManagement = () => {
@@ -48,8 +48,23 @@ const UserManagement = () => {
   const [assignLoading, setAssignLoading] = useState(false);
   const [assignError, setAssignError] = useState('');
 
+  // ── Toast/Popup state ───────────────────────────────────────────────────────
+  const [showPopup, setShowPopup] = useState(false);
+  const [popupText, setPopupText] = useState('');
+  const [popupType, setPopupType] = useState('success'); // 'success' or 'error'
+
+  const triggerPopup = (text, type = 'success') => {
+    setPopupText(text);
+    setPopupType(type);
+    setShowPopup(true);
+    setTimeout(() => {
+      setShowPopup(false);
+    }, 4000);
+  };
+
   // ── Auth ────────────────────────────────────────────────────────────────────
   const token = localStorage.getItem('token');
+  const loggedInUser = JSON.parse(localStorage.getItem('user') || '{}');
 
   // ── Fetch Users ─────────────────────────────────────────────────────────────
   const fetchUsers = useCallback(async () => {
@@ -98,7 +113,11 @@ const UserManagement = () => {
     (u) =>
       u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.role.toLowerCase().includes(searchTerm.toLowerCase())
+      u.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (u.createdBy &&
+        (typeof u.createdBy === 'object' ? u.createdBy.name : u.createdBy)
+          .toLowerCase()
+          .includes(searchTerm.toLowerCase()))
   );
 
   // ── Open Add/Edit User Modal ────────────────────────────────────────────────
@@ -150,11 +169,14 @@ const UserManagement = () => {
       if (data.success) {
         setShowUserModal(false);
         fetchUsers();
+        triggerPopup(isEditing ? 'User updated successfully!' : 'User created successfully!', 'success');
       } else {
         setFormError(data.message || data.errors?.map((e) => e.msg).join(', ') || 'Error saving user');
+        triggerPopup(data.message || 'Error saving user', 'error');
       }
     } catch (err) {
       setFormError('Network error');
+      triggerPopup('Network error while saving user', 'error');
     } finally {
       setFormLoading(false);
     }
@@ -176,11 +198,16 @@ const UserManagement = () => {
       const data = await res.json();
       if (data.success) {
         setShowDeleteConfirm(false);
+        const name = userToDelete?.name || 'User';
         setUserToDelete(null);
         fetchUsers();
+        triggerPopup(`User "${name}" deleted successfully!`, 'success');
+      } else {
+        triggerPopup(data.message || 'Failed to delete user', 'error');
       }
     } catch (err) {
       console.error('Failed to delete user', err);
+      triggerPopup('Error deleting user', 'error');
     }
   };
 
@@ -231,11 +258,14 @@ const UserManagement = () => {
       if (data.success) {
         setShowAssignModal(false);
         fetchUsers();
+        triggerPopup('Devices & locations assigned successfully!', 'success');
       } else {
         setAssignError(data.message || 'Error assigning');
+        triggerPopup(data.message || 'Error assigning', 'error');
       }
     } catch (err) {
       setAssignError('Network error');
+      triggerPopup('Network error while assigning devices', 'error');
     } finally {
       setAssignLoading(false);
     }
@@ -244,13 +274,24 @@ const UserManagement = () => {
   // ── Toggle Status ───────────────────────────────────────────────────────────
   const handleToggleStatus = async (userId) => {
     try {
+      const user = users.find((u) => u._id === userId);
+      const isBlocking = user ? user.status === 'active' || user.isActive : true;
+      const actionText = isBlocking ? 'deactivated' : 'activated';
+
       const res = await fetch(`${API_BASE}/api/users/${userId}/toggle-status`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) fetchUsers();
+      const data = await res.json();
+      if (res.ok && data.success) {
+        fetchUsers();
+        triggerPopup(`User account ${actionText} successfully!`, 'success');
+      } else {
+        triggerPopup(data.message || `Failed to ${isBlocking ? 'deactivate' : 'activate'} user account`, 'error');
+      }
     } catch (err) {
       console.error('Failed to toggle status', err);
+      triggerPopup('Network error while toggling status', 'error');
     }
   };
 
@@ -284,7 +325,7 @@ const UserManagement = () => {
 
       {/* Table */}
       {loading ? (
-        <SkeletonTable rows={5} cols={6} />
+        <SkeletonTable rows={5} cols={7} />
       ) : filtered.length === 0 ? (
         <EmptyState icon={Users} title="No users found" description="No users match your search criteria." />
       ) : (
@@ -298,6 +339,7 @@ const UserManagement = () => {
               <tr className="border-b border-slate-700/50">
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">User</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Role</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Created By</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Locations</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Devices</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Status</th>
@@ -309,6 +351,8 @@ const UserManagement = () => {
                 const RoleIcon = roleIcon[user.role] || Users;
                 const userDevices = user.assignedDevices || [];
                 const userLocations = user.assignedLocations || [];
+                const creatorId = user.createdBy && (typeof user.createdBy === 'object' ? user.createdBy._id?.toString() : user.createdBy.toString());
+                const isMe = creatorId && loggedInUser && creatorId === loggedInUser._id?.toString();
                 return (
                   <tr key={user._id} className="border-b border-slate-700/30 transition-colors hover:bg-slate-800/50">
                     <td className="px-6 py-4">
@@ -327,6 +371,26 @@ const UserManagement = () => {
                         <RoleIcon className="h-3 w-3" />
                         {user.role}
                       </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {user.createdBy ? (
+                        <div>
+                          <p className="font-medium text-slate-200">
+                            {isMe ? '{Me}' : (typeof user.createdBy === 'object' ? user.createdBy.name : user.createdBy)}
+                          </p>
+                          {typeof user.createdBy === 'object' && user.createdBy.role && (
+                            <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded uppercase mt-0.5 tracking-wide ${
+                              user.createdBy.role === 'superadmin'
+                                ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                                : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                            }`}>
+                              {user.createdBy.role}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-slate-500 italic">System</span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex flex-wrap gap-1">
@@ -358,17 +422,15 @@ const UserManagement = () => {
                     <td className="px-6 py-4">
                       <button
                         onClick={() => handleToggleStatus(user._id)}
-                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase cursor-pointer transition-all hover:opacity-80 ${
-                          user.status === 'active'
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase cursor-pointer transition-all hover:opacity-80 ${user.status === 'active'
                             ? 'bg-emerald-500/10 text-emerald-400'
                             : 'bg-slate-500/10 text-slate-500'
-                        }`}
+                          }`}
                         title="Click to toggle status"
                       >
                         <span
-                          className={`h-1.5 w-1.5 rounded-full ${
-                            user.status === 'active' ? 'bg-emerald-400' : 'bg-slate-500'
-                          }`}
+                          className={`h-1.5 w-1.5 rounded-full ${user.status === 'active' ? 'bg-emerald-400' : 'bg-slate-500'
+                            }`}
                         />
                         {user.status}
                       </button>
@@ -391,11 +453,10 @@ const UserManagement = () => {
                         </button>
                         <button
                           onClick={() => handleToggleStatus(user._id)}
-                          className={`rounded-lg p-2 text-slate-400 transition-colors ${
-                            user.status === 'active'
+                          className={`rounded-lg p-2 text-slate-400 transition-colors ${user.status === 'active'
                               ? 'hover:bg-orange-500/10 hover:text-orange-400'
                               : 'hover:bg-emerald-500/10 hover:text-emerald-400'
-                          }`}
+                            }`}
                           title={user.status === 'active' ? 'Block User' : 'Unblock User'}
                         >
                           {user.status === 'active'
@@ -646,6 +707,44 @@ const UserManagement = () => {
           </div>
         )}
       </Modal>
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {showPopup && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+            className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-2xl border bg-slate-900/90 px-4 py-3 shadow-xl backdrop-blur-md ${
+              popupType === 'error'
+                ? 'border-rose-500/20 text-rose-400 shadow-rose-500/5'
+                : 'border-emerald-500/20 text-emerald-400 shadow-emerald-500/5'
+            }`}
+          >
+            <div className={`rounded-full p-1.5 ${
+              popupType === 'error' ? 'bg-rose-500/10' : 'bg-emerald-500/10'
+            }`}>
+              {popupType === 'error' ? (
+                <AlertCircle className="h-5 w-5 text-rose-400" />
+              ) : (
+                <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+              )}
+            </div>
+            <div className="pr-4">
+              <p className="text-xs font-semibold text-white">
+                {popupType === 'error' ? 'Action Failed' : 'Action Successful'}
+              </p>
+              <p className="text-[11px] text-slate-400">{popupText}</p>
+            </div>
+            <button
+              onClick={() => setShowPopup(false)}
+              className="text-slate-500 hover:text-slate-300 transition-colors p-1"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

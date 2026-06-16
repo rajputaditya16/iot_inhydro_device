@@ -124,6 +124,16 @@ exports.login = async (req, res) => {
       });
     }
 
+    if (accountType === 'user' && user.createdBy) {
+      const creatorAdmin = await Admin.findById(user.createdBy);
+      if (creatorAdmin && !creatorAdmin.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: 'Your organization account is deactivated. Contact support.',
+        });
+      }
+    }
+
     // 4. Verify password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {

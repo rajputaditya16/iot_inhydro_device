@@ -10,7 +10,7 @@ exports.getAdmins = async (req, res) => {
     const admins = await Admin.find({ _id: { $ne: req.user._id } })
       .populate('assignedDevices', 'name location status')
       .select('-password');
-      
+
     const adminsWithCounts = await Promise.all(
       admins.map(async (admin) => {
         const userCount = await User.countDocuments({ createdBy: admin._id });
@@ -36,7 +36,7 @@ exports.getAdmins = async (req, res) => {
 // @access  Private/SuperAdmin
 exports.createAdmin = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, maxUsersAllowed } = req.body;
 
     const existingAdmin = await Admin.findOne({ email });
     if (existingAdmin) {
@@ -48,6 +48,7 @@ exports.createAdmin = async (req, res) => {
       email,
       password,
       role: role || 'admin',
+      maxUsersAllowed: maxUsersAllowed !== undefined ? Number(maxUsersAllowed) : 1,
     });
 
     res.status(201).json({
@@ -69,7 +70,7 @@ exports.createAdmin = async (req, res) => {
 // @access  Private/SuperAdmin
 exports.updateAdmin = async (req, res) => {
   try {
-    const { name, email, role, password } = req.body;
+    const { name, email, role, password, maxUsersAllowed } = req.body;
     const admin = await Admin.findById(req.params.id);
 
     if (!admin) {
@@ -80,9 +81,10 @@ exports.updateAdmin = async (req, res) => {
     if (email) admin.email = email;
     if (role) admin.role = role;
     if (password) admin.password = password; // pre-save hook handles hashing
+    if (maxUsersAllowed !== undefined) admin.maxUsersAllowed = Number(maxUsersAllowed);
 
     await admin.save();
-    
+
     // remove password from response
     admin.password = undefined;
 

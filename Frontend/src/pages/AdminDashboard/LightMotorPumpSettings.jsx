@@ -374,7 +374,7 @@ const LightMotorPumpSettings = () => {
       }).catch(err => console.error('DB sync error:', err));
     }
 
-    client.publish(`inhydro/${deviceRoot}/config/update`, JSON.stringify(payload), (err) => {
+    client.publish(`inhydro/${deviceRoot}/config/update`, JSON.stringify(payload), { retain: true }, (err) => {
       if (err) {
         setStatus('error');
       } else {

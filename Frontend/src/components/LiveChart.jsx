@@ -23,7 +23,7 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
-const LiveChart = ({ data, type = 'temperature', title, unit }) => {
+const LiveChart = ({ data, type = 'temperature', title, unit, subtitle = 'Last 24 hours' }) => {
   const colors = colorSchemes[type] || colorSchemes.temperature;
   const gradientId = `gradient-${type}`;
   const isBoth = data && data[0]?.isBoth;
@@ -33,7 +33,7 @@ const LiveChart = ({ data, type = 'temperature', title, unit }) => {
       <div className="mb-3 flex items-center justify-between">
         <div>
           <h4 className="text-sm font-semibold text-white">{title}</h4>
-          <p className="text-[10px] text-slate-500">Last 24 hours</p>
+          <p className="text-[10px] text-slate-500">{subtitle}</p>
         </div>
         <span className="text-xs text-slate-400">{unit}</span>
       </div>

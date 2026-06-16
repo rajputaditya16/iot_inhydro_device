@@ -55,6 +55,16 @@ const protect = async (req, res, next) => {
       });
     }
 
+    if (req.user.createdBy) {
+      const creatorAdmin = await Admin.findById(req.user.createdBy);
+      if (creatorAdmin && !creatorAdmin.isActive) {
+        return res.status(403).json({
+          success: false,
+          message: 'Your organization account is deactivated.',
+        });
+      }
+    }
+
     next();
   } catch (err) {
     return res.status(401).json({
