@@ -462,7 +462,8 @@ const LiveMonitoring = () => {
                 return (
                   <option key={d._id} value={d._id}>
                     {d.name} — {d.location}
-                    {hasCfg ? ` (CH:${d.thingspeak.channelId})` : ' (No ThingSpeak)'}
+                   
+                   {/* {hasCfg ? ` (CH:${d.thingspeak.channelId})` : ' (No ThingSpeak)'} */}
                   </option>
                 );
               })}
