@@ -42,6 +42,12 @@ setpoints = {
     "EC MAX": 1.8,
     "PH LOW": 5.8,
     "PH HIGH": 6.5,
+    "D T Max": 35.0,
+    "DT Min": 15.0,
+    "N T Max": 35.0,
+    "N T Min": 15.0,
+    "H Max": 80.0,
+    "H Min": 30.0,
     "Timer1 Name": "TIMER 1",
     "Timer1 Start": "10:00",
     "Timer1 Stop": "17:00",
@@ -57,11 +63,15 @@ setpoints = {
     "Timer3 Stop": "17:00",
     "Timer3 ON Min": 15,
     "Timer3 OFF Min": 30,
-    "Timer4 Name": "TIMER 4",
-    "Timer4 Start": "10:00",
-    "Timer4 Stop": "17:00",
-    "Timer4 ON Min": 15,
-    "Timer4 OFF Min": 30,
+    "Timer4 Name": "AC TIMER",
+    "Timer4 D_Start": "10:00",
+    "Timer4 D_Stop": "17:00",
+    "Timer4 D_ON Min": 15,
+    "Timer4 D_OFF Min": 30,
+    "Timer4 N_Start": "17:05",
+    "Timer4 N_Stop": "09:55",
+    "Timer4 N_ON Min": 15,
+    "Timer4 N_OFF Min": 30,
     "Timer5 Name": "TIMER 5",
     "Timer5 Start": "10:00",
     "Timer5 Stop": "17:00",
@@ -73,14 +83,10 @@ setpoints = {
     "Timer6 ON Min": 15,
     "Timer6 OFF Min": 30,
     "Timer7 Name": "TIMER 7",
-    "Timer7 D_Start": "10:00",
-    "Timer7 D_Stop": "17:00",
-    "Timer7 D_ON Min": 15,
-    "Timer7 D_OFF Min": 30,
-    "Timer7 N_Start": "17:05",
-    "Timer7 N_Stop": "09:55",
-    "Timer7 N_ON Min": 15,
-    "Timer7 N_OFF Min": 30,
+    "Timer7 Start": "10:00",
+    "Timer7 Stop": "17:00",
+    "Timer7 ON Min": 15,
+    "Timer7 OFF Min": 30,
     "Timer8 Name": "TIMER 8",
     "Timer8 D_Start": "10:00",
     "Timer8 D_Stop": "17:00",
@@ -99,10 +105,23 @@ setpoints = {
     "Timer9 N_Stop": "09:55",
     "Timer9 N_ON Min": 15,
     "Timer9 N_OFF Min": 30,
+    "Timer10 Name": "TIMER 10",
+    "Timer10 D_Start": "10:00",
+    "Timer10 D_Stop": "17:00",
+    "Timer10 D_ON Min": 15,
+    "Timer10 D_OFF Min": 30,
+    "Timer10 N_Start": "17:05",
+    "Timer10 N_Stop": "09:55",
+    "Timer10 N_ON Min": 15,
+    "Timer10 N_OFF Min": 30,
+    "CO2 MIN": 800.0,
+    "CO2 MAX": 1200.0,
     "DO MIN": 5.0,
     "DO MAX": 8.0,
     "WATER TEMP MAX": 21.0,
     "WATER TEMP MIN": 18.0,
+    "WIND SPEED MIN": 2.0,
+    "WIND SPEED MAX": 10.0,
     "SYSTEM PASSWORD": "1234",
 }
 
@@ -196,15 +215,17 @@ def on_control_message(client, userdata, msg):
             "Timer1 Start", "Timer1 Stop",
             "Timer2 Start", "Timer2 Stop",
             "Timer3 Start", "Timer3 Stop",
-            "Timer4 Start", "Timer4 Stop",
+            "Timer4 D_Start", "Timer4 D_Stop",
+            "Timer4 N_Start", "Timer4 N_Stop",
             "Timer5 Start", "Timer5 Stop",
             "Timer6 Start", "Timer6 Stop",
-            "Timer7 D_Start", "Timer7 D_Stop",
-            "Timer7 N_Start", "Timer7 N_Stop",
+            "Timer7 Start", "Timer7 Stop",
             "Timer8 D_Start", "Timer8 D_Stop",
             "Timer8 N_Start", "Timer8 N_Stop",
             "Timer9 D_Start", "Timer9 D_Stop",
-            "Timer9 N_Start", "Timer9 N_Stop"
+            "Timer9 N_Start", "Timer9 N_Stop",
+            "Timer10 D_Start", "Timer10 D_Stop",
+            "Timer10 N_Start", "Timer10 N_Stop"
         ]
         for k in time_keys:
             if k in new_sp:
@@ -214,8 +235,8 @@ def on_control_message(client, userdata, msg):
                     print(f"⚠️ Rejecting invalid time format for {k}: {new_sp[k]}")
                     return
 
-        # Validate Day/Night conflict for Timers 7, 8, 9
-        for t_idx in [7, 8, 9]:
+        # Validate Day/Night conflict for Timers 4, 8, 9, 10
+        for t_idx in [4, 8, 9, 10]:
             d_start = new_sp.get(f"Timer{t_idx} D_Start", setpoints.get(f"Timer{t_idx} D_Start", "10:00"))
             d_stop  = new_sp.get(f"Timer{t_idx} D_Stop", setpoints.get(f"Timer{t_idx} D_Stop", "17:00"))
             n_start = new_sp.get(f"Timer{t_idx} N_Start", setpoints.get(f"Timer{t_idx} N_Start", "17:05"))
@@ -340,33 +361,34 @@ def relay_is_on(ch):
 
 # --- Cyclic Timers & Control Logic ---
 state = {
-    1: {"ec_active": False, "ph_active": False,
-        "chiller_active": False, "do_active": False,
-        "last_ec": 0.0, "last_ph": 0.0}
+    1: {"ec_active": False, "ph_active": False, "ac_active": False,
+        "humi_active": False, "co2_active": False, "chiller_active": False,
+        "do_active": False, "vent_active": False, "last_ec": 0.0, "last_ph": 0.0}
 }
 
 ROOM_CHANNELS = {
-    1: {"ec1": 1, "ec2": 2, "ph": 3, "co2": None, "chiller": 5, "vent": None, "aerator": 16}
+    1: {"ec1": 1, "ec2": 2, "ph": 3, "ac": 4, "humi": 5, "co2": 15, "chiller": None, "aerator": 16, "vent": 15}
 }
 
 timer_state = {
-    1: [{"state": "OFF", "last": 0.0} for _ in range(9)]
+    1: [{"state": "OFF", "last": 0.0} for _ in range(10)]
 }
 
 TIMER_CHANNELS = {
-    1: [6, 7, 8, 9, 10, 11, 12, 13, 14]
+    1: [6, 7, 8, 4, 9, 10, 11, 12, 13, 14]
 }
 
 TIMER_KEYS = [
     ("Timer1 Start", "Timer1 Stop", "Timer1 ON Min", "Timer1 OFF Min"),
     ("Timer2 Start", "Timer2 Stop", "Timer2 ON Min", "Timer2 OFF Min"),
     ("Timer3 Start", "Timer3 Stop", "Timer3 ON Min", "Timer3 OFF Min"),
-    ("Timer4 Start", "Timer4 Stop", "Timer4 ON Min", "Timer4 OFF Min"),
+    ("Timer4 D_Start", "Timer4 D_Stop", "Timer4 D_ON Min", "Timer4 D_OFF Min"),
     ("Timer5 Start", "Timer5 Stop", "Timer5 ON Min", "Timer5 OFF Min"),
     ("Timer6 Start", "Timer6 Stop", "Timer6 ON Min", "Timer6 OFF Min"),
-    ("Timer7 D_Start", "Timer7 D_Stop", "Timer7 D_ON Min", "Timer7 D_OFF Min"),
+    ("Timer7 Start", "Timer7 Stop", "Timer7 ON Min", "Timer7 OFF Min"),
     ("Timer8 D_Start", "Timer8 D_Stop", "Timer8 D_ON Min", "Timer8 D_OFF Min"),
-    ("Timer9 D_Start", "Timer9 D_Stop", "Timer9 D_ON Min", "Timer9 D_OFF Min")
+    ("Timer9 D_Start", "Timer9 D_Stop", "Timer9 D_ON Min", "Timer9 D_OFF Min"),
+    ("Timer10 D_Start", "Timer10 D_Stop", "Timer10 D_ON Min", "Timer10 D_OFF Min")
 ]
 
 def is_within_window(start_str, stop_str):
@@ -384,7 +406,8 @@ def run_timers(room):
     for i, (sk, ek, onk, offk) in enumerate(TIMER_KEYS):
         ch = TIMER_CHANNELS[room][i]
         ts = timer_state[room][i]
-        is_dn_timer = (i in [6, 7, 8]) # Timer 7, 8, 9
+        is_ac_timer = (ch == ROOM_CHANNELS[room]["ac"])
+        is_dn_timer = (i in [3, 7, 8, 9]) # Timer 4, 8, 9, 10
         
         if is_dn_timer:
             in_day = is_within_window(sp.get(f"Timer{i+1} D_Start", "10:00"), sp.get(f"Timer{i+1} D_Stop", "17:00"))
@@ -414,17 +437,18 @@ def run_timers(room):
                     ts["last"] = now
                     print(f"Room{room} Timer {i+1} OFF — cycle complete")
                     
-            if ts["state"] == "ON":
+            if ts["state"] == "ON" and not is_ac_timer:
                 if not relay_is_on(ch):
                     relay_on(ch)
-            elif ts["state"] == "OFF":
+            elif ts["state"] == "OFF" and not is_ac_timer:
                 if relay_is_on(ch):
                     relay_off(ch)
         else:
-            if ts["state"] == "ON" or relay_is_on(ch):
+            if ts["state"] == "ON" or (not is_ac_timer and relay_is_on(ch)):
                 ts["state"] = "OFF"
                 ts["last"] = 0.0
-                relay_off(ch)
+                if not is_ac_timer:
+                    relay_off(ch)
 
 def control_room(room, data):
     st  = state[room]
@@ -520,6 +544,111 @@ def control_room(room, data):
             st["chiller_active"] = False
             st["do_active"] = False
         warnings.append(" WATER SENSOR ERROR")
+
+    if room_env:
+        rt = room_env.get("room_temp")
+        rh = room_env.get("room_humi")
+        
+        ac_timer_on = (timer_state[room][3]["state"] == "ON")
+        
+        if ac_timer_on:
+            in_day = is_within_window(sp.get("Timer4 D_Start", "10:00"), sp.get("Timer4 D_Stop", "17:00"))
+            in_night = is_within_window(sp.get("Timer4 N_Start", "10:00"), sp.get("Timer4 N_Stop", "17:00"))
+            
+            if in_day:
+                t_max = sp.get("D T Max", 35.0)
+                t_min = sp.get("DT Min", 15.0)
+                mode_str = "Day"
+            elif in_night:
+                t_max = sp.get("N T Max", 35.0)
+                t_min = sp.get("N T Min", 15.0)
+                mode_str = "Night"
+            else:
+                t_max = sp.get("D T Max", 35.0)
+                t_min = sp.get("DT Min", 15.0)
+                mode_str = "Day"
+                
+            if not st["ac_active"] and rt >= t_max:
+                st["ac_active"] = True
+                relay_on(ch["ac"])
+                warnings.append(f"⚠ TEMP HIGH ({mode_str} AC ON)")
+                print(f"Room{room} AC ON — {rt}°C >= {t_max}°C ({mode_str})")
+                
+            if st["ac_active"] and rt <= t_min:
+                st["ac_active"] = False
+                relay_off(ch["ac"])
+                print(f"Room{room} AC OFF — {rt}°C <= {t_min}°C ({mode_str})")
+        else:
+            if st["ac_active"] or relay_is_on(ch["ac"]):
+                st["ac_active"] = False
+                relay_off(ch["ac"])
+                print(f"Room{room} AC OFF — Cyclic Timer window OFF")
+                
+        # Humidity control
+        if not st["humi_active"] and rh >= sp.get("H Max", 80.0):
+            st["humi_active"] = True
+            relay_on(ch["humi"])
+            warnings.append("⚠ HUMI HIGH (HUM ON)")
+            print(f"Room{room} Humidifier ON — {rh}% >= {sp.get('H Max', 80.0)}%")
+            
+        if st["humi_active"] and rh <= sp.get("H Min", 30.0):
+            st["humi_active"] = False
+            relay_off(ch["humi"])
+            print(f"Room{room} Humidifier OFF — {rh}% <= {sp.get('H Min', 30.0)}%")
+
+        # CO2 Dosing control
+        co2 = room_env.get("co2")
+        ppfd = room_env.get("ppfd")
+        if co2 is not None:
+            # Only dose CO2 if grow lights are actively on (PPFD > 50)
+            lights_on = (ppfd is not None and ppfd > 50)
+            if lights_on:
+                if not st.get("co2_active", False) and co2 < sp.get("CO2 MIN", 800):
+                    st["co2_active"] = True
+                    relay_on(ch["co2"])
+                    warnings.append("⚠ CO2 LOW — DOSING")
+                    print(f"Room{room} CO2 Dosing ON — {co2}ppm < {sp.get('CO2 MIN', 800)}ppm")
+                    
+                if st.get("co2_active", False) and co2 >= sp.get("CO2 MAX", 1200):
+                    st["co2_active"] = False
+                    relay_off(ch["co2"])
+                    print(f"Room{room} CO2 Dosing OFF — {co2}ppm >= {sp.get('CO2 MAX', 1200)}ppm")
+            else:
+                if st.get("co2_active", False) or relay_is_on(ch["co2"]):
+                    st["co2_active"] = False
+                    relay_off(ch["co2"])
+                    print(f"Room{room} CO2 Dosing OFF — Lights are OFF (PPFD: {ppfd})")
+        else:
+            if st.get("co2_active", False) or relay_is_on(ch["co2"]):
+                st["co2_active"] = False
+                relay_off(ch["co2"])
+        # Wind Vent protection control
+        wind_speed = room_env.get("wind_speed")
+        if wind_speed is not None:
+            if not st.get("vent_active", False) and wind_speed >= sp.get("WIND SPEED MAX", 10.0):
+                st["vent_active"] = True
+                relay_on(ch["vent"])
+                warnings.append("⚠ HIGH WIND — VENTS CLOSED")
+                print(f"Room{room} Vents CLOSED — Wind Speed: {wind_speed} m/s >= {sp.get('WIND SPEED MAX', 10.0)} m/s")
+            elif st.get("vent_active", False) and wind_speed <= sp.get("WIND SPEED MIN", 2.0):
+                st["vent_active"] = False
+                relay_off(ch["vent"])
+                print(f"Room{room} Vents OPEN — Wind Speed: {wind_speed} m/s <= {sp.get('WIND SPEED MIN', 2.0)} m/s")
+        else:
+            if st.get("vent_active", False) or relay_is_on(ch["vent"]):
+                st["vent_active"] = False
+                relay_off(ch["vent"])
+    else:
+        if st["ac_active"] or st["humi_active"] or st["co2_active"] or st.get("vent_active", False) or relay_is_on(ch["ac"]) or relay_is_on(ch["humi"]) or relay_is_on(ch["co2"]) or relay_is_on(ch["vent"]):
+            relay_off(ch["ac"])
+            relay_off(ch["humi"])
+            relay_off(ch["co2"])
+            relay_off(ch["vent"])
+            st["ac_active"] = False
+            st["humi_active"] = False
+            st["co2_active"] = False
+            st["vent_active"] = False
+        warnings.append(" ROOM SENSOR ERROR")
         
     return warnings
 
@@ -883,7 +1012,7 @@ COLUMNS = [
     "water_temp", "moisture", "ec", "ph",
     "room_temp", "room_humi", "orp", "co2",
     "vpd", "dli", "wind_speed", "wind_dir", "do", "ppfd", "n", "p", "k",
-    "r_ec1", "r_ec2", "r_ph", "r_co2", "r_chiller",
+    "r_ec1", "r_ec2", "r_ph", "r_ac", "r_humi",
     "r_tmr1", "r_tmr2", "r_tmr3", "r_tmr5", "r_tmr6", "r_tmr7", "r_tmr8", "r_tmr9", "r_tmr10"
 ]
 
@@ -957,8 +1086,8 @@ def unpack_row(row):
             "ec1": bool(row[18]),
             "ec2": bool(row[19]),
             "ph": bool(row[20]),
-            "co2": bool(row[21]),
-            "chiller": bool(row[22]),
+            "ac": bool(row[21]),
+            "humi": bool(row[22]),
             "tmr1": bool(row[23]),
             "tmr2": bool(row[24]),
             "tmr3": bool(row[25]),
@@ -1452,8 +1581,37 @@ def open_setpoints_window():
     make_cell(grid_dosing, "PH LOW", "pH Low:").grid(row=1, column=0, padx=10, pady=4)
     make_cell(grid_dosing, "PH HIGH", "pH High:").grid(row=1, column=1, padx=10, pady=4)
 
-    # Timers 1-3 Card (Left Pane)
-    card_timers = tk.LabelFrame(left_pane, text=" CYCLIC TIMERS 1-3 ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
+    # CO2 Control Card (Left Pane, below card_dosing)
+    card_co2 = tk.LabelFrame(left_pane, text=" CO2 SETPOINTS ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
+    card_co2.pack(fill="x", pady=5, padx=5)
+    
+    grid_co2 = tk.Frame(card_co2, bg="white")
+    grid_co2.pack(pady=4, padx=5)
+    
+    make_cell(grid_co2, "CO2 MIN", "CO2 Min:").grid(row=0, column=0, padx=10, pady=4)
+    make_cell(grid_co2, "CO2 MAX", "CO2 Max:").grid(row=0, column=1, padx=10, pady=4)
+
+    # Climate Control Card (Left Pane)
+    card_climate = tk.LabelFrame(left_pane, text=" CLIMATE CONTROL ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
+    card_climate.pack(fill="x", pady=5, padx=5)
+    
+    grid_climate = tk.Frame(card_climate, bg="white")
+    grid_climate.pack(pady=4, padx=5)
+    
+    make_cell(grid_climate, "D T Max", "Day T Max:").grid(row=0, column=0, padx=10, pady=4)
+    make_cell(grid_climate, "DT Min", "Day T Min:").grid(row=0, column=1, padx=10, pady=4)
+    make_cell(grid_climate, "N T Max", "Night T Max:").grid(row=1, column=0, padx=10, pady=4)
+    make_cell(grid_climate, "N T Min", "Night T Min:").grid(row=1, column=1, padx=10, pady=4)
+    make_cell(grid_climate, "H Max", "Humid Max:").grid(row=2, column=0, padx=10, pady=4)
+    make_cell(grid_climate, "H Min", "Humid Min:").grid(row=2, column=1, padx=10, pady=4)
+
+
+
+    # Day/Night Timer 4 (AC) (Left Pane)
+    make_dn_timer_card(left_pane, 4, "TIMER 4 / AC").pack(fill="x", pady=8, padx=5)
+
+    # Timers 1-3 Card (Right Pane)
+    card_timers = tk.LabelFrame(right_pane, text=" CYCLIC TIMERS 1-3 ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
     card_timers.pack(fill="x", pady=5, padx=5)
     
     cols = [
@@ -1496,40 +1654,19 @@ def open_setpoints_window():
                 btn.pack(side="right", padx=1)
                 labels_s[full_key] = val_lbl
 
-    # Advanced Control Card (Right Pane)
-    card_adv = tk.LabelFrame(right_pane, text=" ADVANCED CONTROL ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
-    card_adv.pack(fill="x", pady=5, padx=5)
-    
-    grid_adv = tk.Frame(card_adv, bg="white")
-    grid_adv.pack(pady=4, padx=5)
-    
-    make_cell(grid_adv, "WATER TEMP MAX", "Water Temp Max:", width_lbl=13).grid(row=0, column=0, padx=10, pady=4)
-    make_cell(grid_adv, "WATER TEMP MIN", "Water Temp Min:", width_lbl=13).grid(row=0, column=1, padx=10, pady=4)
-    make_cell(grid_adv, "SYSTEM PASSWORD", "Sys PIN/Pass:", width_lbl=13).grid(row=1, column=0, padx=10, pady=4)
-
-    # DO Control Card (Right Pane, below card_adv)
-    card_do = tk.LabelFrame(right_pane, text=" DISSOLVED OXYGEN (DO) ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
-    card_do.pack(fill="x", pady=5, padx=5)
-    
-    grid_do = tk.Frame(card_do, bg="white")
-    grid_do.pack(pady=4, padx=5)
-    
-    make_cell(grid_do, "DO MIN", "DO Min:").grid(row=0, column=0, padx=10, pady=4)
-    make_cell(grid_do, "DO MAX", "DO Max:").grid(row=0, column=1, padx=10, pady=4)
-
-    # Cyclic Timers 4-6 Card (Right Pane)
-    card_timers_ext = tk.LabelFrame(right_pane, text=" CYCLIC TIMERS 4-6 ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
+    # Cyclic Timers 5-7 Card (Right Pane)
+    card_timers_ext = tk.LabelFrame(right_pane, text=" CYCLIC TIMERS 5-7 ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
     card_timers_ext.pack(fill="x", pady=5, padx=5)
     
     cols_ext = [
-        {"name": "Timer 4", "keys": {
-            "Name": "Timer4 Name", "Start": "Timer4 Start", "Stop": "Timer4 Stop", "ON Min": "Timer4 ON Min", "OFF Min": "Timer4 OFF Min"
-        }},
         {"name": "Timer 5", "keys": {
             "Name": "Timer5 Name", "Start": "Timer5 Start", "Stop": "Timer5 Stop", "ON Min": "Timer5 ON Min", "OFF Min": "Timer5 OFF Min"
         }},
         {"name": "Timer 6", "keys": {
             "Name": "Timer6 Name", "Start": "Timer6 Start", "Stop": "Timer6 Stop", "ON Min": "Timer6 ON Min", "OFF Min": "Timer6 OFF Min"
+        }},
+        {"name": "Timer 7", "keys": {
+            "Name": "Timer7 Name", "Start": "Timer7 Start", "Stop": "Timer7 Stop", "ON Min": "Timer7 ON Min", "OFF Min": "Timer7 OFF Min"
         }},
     ]
     
@@ -1559,11 +1696,34 @@ def open_setpoints_window():
                 btn.pack(side="right", padx=1)
                 labels_s[full_key] = val_lbl
 
-    # Bottom container for Day/Night cyclic timers 7-9 side-by-side
+    # Advanced Control Card (Right Pane, below Timers 5-7)
+    card_adv = tk.LabelFrame(right_pane, text=" ADVANCED CONTROL ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
+    card_adv.pack(fill="x", pady=5, padx=5)
+    
+    grid_adv = tk.Frame(card_adv, bg="white")
+    grid_adv.pack(pady=4, padx=5)
+    
+    make_cell(grid_adv, "WATER TEMP MAX", "Water Temp Max:", width_lbl=13).grid(row=0, column=0, padx=10, pady=4)
+    make_cell(grid_adv, "WATER TEMP MIN", "Water Temp Min:", width_lbl=13).grid(row=0, column=1, padx=10, pady=4)
+    make_cell(grid_adv, "WIND SPEED MAX", "Wind Spd Max:", width_lbl=13).grid(row=1, column=0, padx=10, pady=4)
+    make_cell(grid_adv, "WIND SPEED MIN", "Wind Spd Min:", width_lbl=13).grid(row=1, column=1, padx=10, pady=4)
+    make_cell(grid_adv, "SYSTEM PASSWORD", "Sys PIN/Pass:", width_lbl=13).grid(row=2, column=0, padx=10, pady=4)
+
+    # DO Control Card (Right Pane, below card_adv)
+    card_do = tk.LabelFrame(right_pane, text=" DISSOLVED OXYGEN (DO) ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
+    card_do.pack(fill="x", pady=5, padx=5)
+    
+    grid_do = tk.Frame(card_do, bg="white")
+    grid_do.pack(pady=4, padx=5)
+    
+    make_cell(grid_do, "DO MIN", "DO Min:").grid(row=0, column=0, padx=10, pady=4)
+    make_cell(grid_do, "DO MAX", "DO Max:").grid(row=0, column=1, padx=10, pady=4)
+
+    # Bottom container for Day/Night cyclic timers 8-10 side-by-side
     bottom_container = tk.Frame(scrollable_frame, bg="white")
     bottom_container.pack(fill="x", expand=True, pady=10)
 
-    card_dn_all = tk.LabelFrame(bottom_container, text=" DAY/NIGHT CYCLIC TIMERS 7 - 9 ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
+    card_dn_all = tk.LabelFrame(bottom_container, text=" DAY/NIGHT CYCLIC TIMERS 8 - 10 ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
     card_dn_all.pack(fill="x", pady=5, padx=20)
 
     grid_dn = tk.Frame(card_dn_all, bg="white")
@@ -1574,7 +1734,7 @@ def open_setpoints_window():
     # Column 0 is the common Setting label column — leave it blank in row 0
     tk.Label(grid_dn, text="", bg="white", width=14).grid(row=0, column=0, padx=4, pady=4)
 
-    for idx, num in enumerate([7, 8, 9]):
+    for idx, num in enumerate([8, 9, 10]):
         col_day = 1 + idx * 2          # Day column for this timer
         col_night = col_day + 1        # Night column
         name_key = f"Timer{num} Name"
@@ -1597,7 +1757,7 @@ def open_setpoints_window():
     tk.Label(grid_dn, text="Setting", font=("Arial", 9, "bold"), fg="#555",
              bg="#f5f5f5", width=14, anchor="w").grid(row=1, column=0, padx=4, pady=2, sticky="ew")
 
-    for idx, num in enumerate([7, 8, 9]):
+    for idx, num in enumerate([8, 9, 10]):
         col_day = 1 + idx * 2
         tk.Label(grid_dn, text=f"T{num} Day", font=("Arial", 9, "bold"), fg=color,
                  bg="#f5f5f5", width=16, anchor="center").grid(row=1, column=col_day, padx=2, pady=2, sticky="ew")
@@ -1619,7 +1779,7 @@ def open_setpoints_window():
         tk.Label(grid_dn, text=r_lbl, font=("Arial", 9, "bold"), fg="#555",
                  bg=bg_row, width=14, anchor="w").grid(row=r_idx, column=0, padx=4, pady=2, sticky="ew")
 
-        for idx, num in enumerate([7, 8, 9]):
+        for idx, num in enumerate([8, 9, 10]):
             col_day = 1 + idx * 2
             d_key = f"Timer{num} {d_suf}"
             n_key = f"Timer{num} {n_suf}"
@@ -1700,32 +1860,31 @@ def open_setpoints_window():
                     kp_display.config(text="INVALID TIME")
                     return
 
-            # Validate Day/Night conflict for timers 7, 8, 9
+            # Validate Day/Night conflict for timers 4, 8, 9, 10
             if sp_selected_key.startswith("Timer") and any(x in sp_selected_key for x in ["D_Start", "D_Stop", "N_Start", "N_Stop"]):
                 import re
                 m = re.match(r"Timer(\d+)", sp_selected_key)
                 if m:
                     t_idx = m.group(1)
-                    if t_idx in ["7", "8", "9"]:
-                        d_start = val if sp_selected_key == f"Timer{t_idx} D_Start" else setpoints.get(f"Timer{t_idx} D_Start", "10:00")
-                        d_stop  = val if sp_selected_key == f"Timer{t_idx} D_Stop" else setpoints.get(f"Timer{t_idx} D_Stop", "17:00")
-                        n_start = val if sp_selected_key == f"Timer{t_idx} N_Start" else setpoints.get(f"Timer{t_idx} N_Start", "17:05")
-                        n_stop  = val if sp_selected_key == f"Timer{t_idx} N_Stop" else setpoints.get(f"Timer{t_idx} N_Stop", "09:55")
-                        
-                        try:
-                            t_d_start = datetime.datetime.strptime(str(d_start), "%H:%M").time()
-                            t_d_stop  = datetime.datetime.strptime(str(d_stop),  "%H:%M").time()
-                            t_n_start = datetime.datetime.strptime(str(n_start), "%H:%M").time()
-                            t_n_stop  = datetime.datetime.strptime(str(n_stop),  "%H:%M").time()
-                            if (t_d_start >= t_d_stop or
-                                t_n_start < t_d_stop or
-                                t_d_start < t_n_stop or
-                                t_n_start == t_n_stop):
-                                kp_display.config(text="TIME CONFLICT")
-                                return
-                        except Exception:
-                            kp_display.config(text="INVALID TIME")
+                    d_start = val if sp_selected_key == f"Timer{t_idx} D_Start" else setpoints.get(f"Timer{t_idx} D_Start", "10:00")
+                    d_stop  = val if sp_selected_key == f"Timer{t_idx} D_Stop" else setpoints.get(f"Timer{t_idx} D_Stop", "17:00")
+                    n_start = val if sp_selected_key == f"Timer{t_idx} N_Start" else setpoints.get(f"Timer{t_idx} N_Start", "17:05")
+                    n_stop  = val if sp_selected_key == f"Timer{t_idx} N_Stop" else setpoints.get(f"Timer{t_idx} N_Stop", "09:55")
+                    
+                    try:
+                        t_d_start = datetime.datetime.strptime(str(d_start), "%H:%M").time()
+                        t_d_stop  = datetime.datetime.strptime(str(d_stop),  "%H:%M").time()
+                        t_n_start = datetime.datetime.strptime(str(n_start), "%H:%M").time()
+                        t_n_stop  = datetime.datetime.strptime(str(n_stop),  "%H:%M").time()
+                        if (t_d_start >= t_d_stop or
+                            t_n_start < t_d_stop or
+                            t_d_start < t_n_stop or
+                            t_n_start == t_n_stop):
+                            kp_display.config(text="TIME CONFLICT")
                             return
+                    except Exception:
+                        kp_display.config(text="INVALID TIME")
+                        return
 
             setpoints[sp_selected_key] = val
             if sp_selected_key in labels_s:
@@ -1823,21 +1982,27 @@ def update_live_timers_ui():
     st = state[1]
     set_lbl_state("ec_mode", st["ec_active"])
     set_lbl_state("ph_mode", st["ph_active"])
-    set_lbl_state("chiller_mode", st.get("chiller_active", False))
+    set_lbl_state("ac_mode", st["ac_active"])
+    set_lbl_state("humi_mode", st["humi_active"])
+    set_lbl_state("co2_mode", st.get("co2_active", False))
     set_lbl_state("do_mode", st.get("do_active", False))
+    set_lbl_state("vent_mode", st.get("vent_active", False))
 
     set_lbl_state("r_ec1", relay_is_on(1), "ON", "OFF")
     set_lbl_state("r_ec2", relay_is_on(2), "ON", "OFF")
     set_lbl_state("r_ph", relay_is_on(3), "ON", "OFF")
-    set_lbl_state("r_chiller", relay_is_on(5), "ON", "OFF")
+    set_lbl_state("r_ac", relay_is_on(4), "ON", "OFF")
+    set_lbl_state("r_humi", relay_is_on(5), "ON", "OFF")
+    set_lbl_state("r_co2", relay_is_on(15), "ON", "OFF")
     set_lbl_state("r_aerator", relay_is_on(16), "ON", "OFF")
+    set_lbl_state("r_vent", relay_is_on(15), "ON", "OFF")
     
-    timer_channels = [6, 7, 8, 9, 10, 11, 12, 13, 14]
-    for idx in range(9):
+    timer_channels = [6, 7, 8, 4, 9, 10, 11, 12, 13, 14]
+    for idx in range(10):
         ch = timer_channels[idx]
         set_lbl_state(f"r_tmr{idx+1}", relay_is_on(ch), "ON", "OFF")
 
-    for i in range(9):
+    for i in range(10):
         tname = sp.get(f"Timer{i+1} Name", f"TIMER {i+1}")
         set_lbl_text(f"tname{i+1}", f"  {tname.upper()}  ")
 
@@ -1845,7 +2010,7 @@ def update_live_timers_ui():
         is_on = (ts["state"] == "ON")
         set_lbl_state(f"t{i+1}_status", is_on, "ON", "OFF")
 
-        if i in [6, 7, 8]:
+        if i in [3, 7, 8, 9]:
             w_text = f"D:{sp.get(f'Timer{i+1} D_Start','10:00')}-{sp.get(f'Timer{i+1} D_Stop','17:00')} / N:{sp.get(f'Timer{i+1} N_Start','17:05')}-{sp.get(f'Timer{i+1} N_Stop','09:55')}"
             c_text = f"D:{sp.get(f'Timer{i+1} D_ON Min',15)}m/{sp.get(f'Timer{i+1} D_OFF Min',30)}m N:{sp.get(f'Timer{i+1} N_ON Min',15)}m/{sp.get(f'Timer{i+1} N_OFF Min',30)}m"
         else:
@@ -1987,9 +2152,9 @@ def open_timers_status_window():
     for i in range(5):
         make_timer_status_card(col_L, i)
         
-    # Right Column: Timers 6 to 9
-    tk.Label(col_R, text="CYCLIC TIMERS 6 - 9", font=("Arial", 12, "bold"), fg=color, bg="#f8fafc").pack(pady=(6, 4))
-    for i in range(5, 9):
+    # Right Column: Timers 6 to 10
+    tk.Label(col_R, text="CYCLIC TIMERS 6 - 10", font=("Arial", 12, "bold"), fg=color, bg="#f8fafc").pack(pady=(6, 4))
+    for i in range(5, 10):
         make_timer_status_card(col_R, i)
         
     # Middle Column: System Relays & Control Modes
@@ -2002,8 +2167,11 @@ def open_timers_status_window():
     modes_rows = [
         ("EC Control Mode", "ec_mode"),
         ("pH Control Mode", "ph_mode"),
-        ("Chiller Control Mode", "chiller_mode"),
+        ("AC Control Mode", "ac_mode"),
+        ("Humi Control Mode", "humi_mode"),
+        ("CO2 Dosing Mode", "co2_mode"),
         ("DO Control Mode", "do_mode"),
+        ("Wind Vent Mode", "vent_mode"),
     ]
     for lbl_text, key in modes_rows:
         f = tk.Frame(card_modes, bg="white")
@@ -2021,8 +2189,11 @@ def open_timers_status_window():
         ("EC1 Feed (Ch 1)", "r_ec1"),
         ("EC2 Feed (Ch 2)", "r_ec2"),
         ("pH Dose (Ch 3)", "r_ph"),
-        ("Chiller (Ch 5)", "r_chiller"),
+        ("AC Cooler (Ch 4)", "r_ac"),
+        ("Humidifier (Ch 5)", "r_humi"),
+        ("CO2 Valve (Ch 15)", "r_co2"),
         ("DO Aerator (Ch 16)", "r_aerator"),
+        ("Wind Vent (Ch 15)", "r_vent"),
     ]
     for lbl_text, key in primary_rows:
         f = tk.Frame(card_primary, bg="white")
@@ -2040,12 +2211,12 @@ def open_timers_status_window():
         ("Timer 1 (Ch 6)", "r_tmr1"),
         ("Timer 2 (Ch 7)", "r_tmr2"),
         ("Timer 3 (Ch 8)", "r_tmr3"),
-        ("Timer 4 (Ch 9)", "r_tmr4"),
-        ("Timer 5 (Ch 10)", "r_tmr5"),
-        ("Timer 6 (Ch 11)", "r_tmr6"),
-        ("Timer 7 (Ch 12)", "r_tmr7"),
-        ("Timer 8 (Ch 13)", "r_tmr8"),
-        ("Timer 9 (Ch 14)", "r_tmr9"),
+        ("Timer 5 (Ch 9)", "r_tmr5"),
+        ("Timer 6 (Ch 10)", "r_tmr6"),
+        ("Timer 7 (Ch 11)", "r_tmr7"),
+        ("Timer 8 (Ch 12)", "r_tmr8"),
+        ("Timer 9 (Ch 13)", "r_tmr9"),
+        ("Timer 10 (Ch 14)", "r_tmr10"),
     ]
     for lbl_text, key in timer_ch_rows:
         f = tk.Frame(card_timer_ch, bg="white")
