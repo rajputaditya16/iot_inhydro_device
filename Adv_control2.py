@@ -184,9 +184,12 @@ def init_mqtt_client():
 init_mqtt_client()
 
 
-# --- Control MQTT Setup (HiveMQ) ---
-CONTROL_BROKER = "broker.hivemq.com"
-CONTROL_PORT = 1883
+# --- Control MQTT Setup (Oracle Mosquitto) ---
+CONTROL_BROKER = "147.93.106.142"          # Change to your Oracle VPS IP or Domain name
+CONTROL_PORT = 1883                     # Change to 8883 if you set up Let's Encrypt TLS
+CONTROL_USER = "Inhydro@5598"         # Mosquitto username
+CONTROL_PASS = "MySecretPassword123"     # Mosquitto password
+
 
 def on_control_message(client, userdata, msg):
     try:
@@ -298,9 +301,18 @@ control_client.on_connect = on_control_connect
 control_client.on_disconnect = on_control_disconnect
 
 try:
+    # Set credentials for Mosquitto authentication
+    if CONTROL_USER and CONTROL_PASS:
+        control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
+    
+    # If using TLS port 8883, enable SSL/TLS verification
+    if CONTROL_PORT == 8883:
+        control_client.tls_set()
+        control_client.tls_insecure_set(True)  # Bypass self-signed certificate/IP validation
+
     control_client.loop_start()
     control_client.connect_async(CONTROL_BROKER, CONTROL_PORT, 10)
-    print("✅ Control MQTT (HiveMQ) loop started (connecting...)")
+    print("✅ Control MQTT (Mosquitto) loop started (connecting...)")
 except Exception as e:
     print(f"⚠️ Control MQTT startup failed: {e}")
 
