@@ -66,7 +66,7 @@ const DeviceSettings = () => {
   // We prioritize the user-defined mqttId, falling back to the DB _id
   const selectedDevice = allDevices.find((d) => d._id === selectedDeviceId);
   const deviceRoot = selectedDevice ? (selectedDevice.mqttId || selectedDevice._id) : 'device1';
-  
+
   const updateTopic = `inhydro/${deviceRoot}/setpoints/update`;
   const currentTopic = `inhydro/${deviceRoot}/setpoints/current`;
   const liveTopic = `inhydro/${deviceRoot}/telemetry/live`;
@@ -136,7 +136,7 @@ const DeviceSettings = () => {
         try {
           const incomingLiveData = JSON.parse(message.toString());
           setLiveData(incomingLiveData);
-        } catch (e) {}
+        } catch (e) { }
       } else if (topic === currentTopicRef.current) {
         try {
           const incomingData = JSON.parse(message.toString());
@@ -174,7 +174,7 @@ const DeviceSettings = () => {
       client.unsubscribe(prevTopicRef.current);
       console.log(`Unsubscribed from: ${prevTopicRef.current}`);
     }
-    
+
     if (prevLiveTopicRef.current && prevLiveTopicRef.current !== liveTopic) {
       client.unsubscribe(prevLiveTopicRef.current);
       console.log(`Unsubscribed from: ${prevLiveTopicRef.current}`);
@@ -194,7 +194,7 @@ const DeviceSettings = () => {
     // Reset setpoints to default when switching devices
     // (will be overwritten when the device's retained message arrives)
     const initialSetpoints = { ...defaultSetpoints };
-    
+
     // Merge database ThingSpeak config if it exists
     if (isSuperadmin && selectedDevice && selectedDevice.thingspeak) {
       const ts = selectedDevice.thingspeak;
@@ -206,7 +206,7 @@ const DeviceSettings = () => {
       if (ts.readApiKey) initialSetpoints["READ API KEY"] = ts.readApiKey;
       if (ts.writeApiKey) initialSetpoints["WRITE API KEY"] = ts.writeApiKey;
     }
-    
+
     setSetpoints(initialSetpoints);
   }, [selectedDeviceId, client, selectedDevice, isSuperadmin]);
 
@@ -271,7 +271,7 @@ const DeviceSettings = () => {
         }).catch(err => console.error("DB Sync error:", err));
       }
 
-      client.publish(updateTopic, JSON.stringify(payload), (err) => {
+      client.publish(updateTopic, JSON.stringify(payload), { retain: true }, (err) => {
         if (err) {
           console.error(err);
           setStatus('error');
@@ -327,7 +327,7 @@ const DeviceSettings = () => {
                 <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Temp</span>
                 <span className="text-sm font-black text-white">{liveData.temp ?? 0}<span className="text-[10px] text-orange-400 ml-0.5">°C</span></span>
               </div>
-              
+
               <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-blue-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-blue-500/20">
                 <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400 shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
                 <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Moist</span>
@@ -339,7 +339,7 @@ const DeviceSettings = () => {
                 <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">EC</span>
                 <span className="text-sm font-black text-white">{liveData.ec || liveData.EC || 0}<span className="text-[10px] text-green-400 ml-0.5">µS/cm</span></span>
               </div>
-              
+
               <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-purple-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-purple-500/20">
                 <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.5)]"></div>
                 <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">pH</span>
@@ -355,55 +355,55 @@ const DeviceSettings = () => {
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Loading devices...
               </div>
             ) : allDevices.length === 0 ? (
-            <div className="flex items-center gap-2 text-xs text-yellow-400">
-              <AlertCircle className="h-3.5 w-3.5" /> No devices found
-            </div>
-          ) : (
-            <div className="relative">
-              <select
-                value={selectedDeviceId}
-                onChange={(e) => handleDeviceChange(e.target.value)}
-                className="appearance-none rounded-xl border border-slate-700 bg-slate-800 pl-9 pr-8 py-2 text-sm font-medium text-white outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 cursor-pointer transition-all min-w-[200px]"
-              >
-                {allDevices.map((d) => (
-                  <option key={d._id} value={d._id}>
-                    {d.name} — {d.location}
-                  </option>
-                ))}
-              </select>
-              <Cpu className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-400 pointer-events-none" />
-              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none" />
-            </div>
-          )}
+              <div className="flex items-center gap-2 text-xs text-yellow-400">
+                <AlertCircle className="h-3.5 w-3.5" /> No devices found
+              </div>
+            ) : (
+              <div className="relative">
+                <select
+                  value={selectedDeviceId}
+                  onChange={(e) => handleDeviceChange(e.target.value)}
+                  className="appearance-none rounded-xl border border-slate-700 bg-slate-800 pl-9 pr-8 py-2 text-sm font-medium text-white outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 cursor-pointer transition-all min-w-[200px]"
+                >
+                  {allDevices.map((d) => (
+                    <option key={d._id} value={d._id}>
+                      {d.name} — {d.location}
+                    </option>
+                  ))}
+                </select>
+                <Cpu className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-400 pointer-events-none" />
+                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none" />
+              </div>
+            )}
 
-          {/* Connection status */}
-          <div>
-            {status === 'connected' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Cloud Connected
-              </span>
-            )}
-            {status === 'disconnected' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Connecting...
-              </span>
-            )}
-            {status === 'saving' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400">
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Pushing to Device...
-              </span>
-            )}
-            {status === 'saved' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Pushed Successfully
-              </span>
-            )}
-            {status === 'error' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
-                <AlertCircle className="h-3.5 w-3.5" /> Connection Error
-              </span>
-            )}
-          </div>
+            {/* Connection status */}
+            <div>
+              {status === 'connected' && (
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Cloud Connected
+                </span>
+              )}
+              {status === 'disconnected' && (
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Connecting...
+                </span>
+              )}
+              {status === 'saving' && (
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Pushing to Device...
+                </span>
+              )}
+              {status === 'saved' && (
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Pushed Successfully
+                </span>
+              )}
+              {status === 'error' && (
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
+                  <AlertCircle className="h-3.5 w-3.5" /> Connection Error
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>

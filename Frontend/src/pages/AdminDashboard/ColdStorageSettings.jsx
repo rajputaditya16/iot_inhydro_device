@@ -219,7 +219,7 @@ const ColdStorageSettings = () => {
         }).catch(err => console.error("DB Update error:", err));
     }
 
-    client.publish(`inhydro/${deviceRoot}/setpoints/update`, JSON.stringify(payload), (err) => {
+    client.publish(`inhydro/${deviceRoot}/setpoints/update`, JSON.stringify(payload), { retain: true }, (err) => {
         if (err) { setStatus('error'); }
         else {
             setStatus('saved');

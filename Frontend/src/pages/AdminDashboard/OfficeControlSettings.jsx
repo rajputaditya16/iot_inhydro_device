@@ -253,7 +253,7 @@ const OfficeControlSettings = () => {
         delete payload["WRITE API KEY"];
       }
 
-      client.publish(`inhydro/${deviceRoot}/room${activeRoom}/setpoints/update`, JSON.stringify(payload), (err) => {
+      client.publish(`inhydro/${deviceRoot}/room${activeRoom}/setpoints/update`, JSON.stringify(payload), { retain: true }, (err) => {
         if (err) {
           console.error(err);
           setStatus('error');
@@ -390,7 +390,7 @@ const OfficeControlSettings = () => {
         </button>
         <button
           onClick={() => setActiveRoom(2)}
-          className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeRoom === 2 ? 'border-b-2 border-purple-500 text-purple-400' : 'text-slate-400 hover:text-white'}`}
+          className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeRoom === 2 ? 'border-b-2 border-green-500 text-green-400' : 'text-slate-400 hover:text-white'}`}
         >
           Room 2 (Zone 2)
         </button>
@@ -414,7 +414,7 @@ const OfficeControlSettings = () => {
         </div>
 
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
-          <h4 className="mb-4 text-sm font-semibold text-purple-400">Cyclic Timers</h4>
+          <h4 className="mb-4 text-sm font-semibold text-green-400">Cyclic Timers</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4 border border-slate-700/50 p-4 rounded-xl">
               <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Timer 1 Name" objKey="Timer1 Name" type="text" />
@@ -449,7 +449,7 @@ const OfficeControlSettings = () => {
                 </div>
                 {/* Night Settings */}
                 <div className="space-y-4 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
-                  <h5 className="text-xs font-semibold text-purple-400 uppercase tracking-wider">Night Settings</h5>
+                  <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider">Night Settings</h5>
                   <div className="grid grid-cols-2 gap-3">
                     <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer3 N_Start" type="text" />
                     <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer3 N_Stop" type="text" />
@@ -474,7 +474,7 @@ const OfficeControlSettings = () => {
                 </div>
                 {/* Night Settings */}
                 <div className="space-y-4 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
-                  <h5 className="text-xs font-semibold text-purple-400 uppercase tracking-wider">Night Settings</h5>
+                  <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider">Night Settings</h5>
                   <div className="grid grid-cols-2 gap-3">
                     <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer4 N_Start" type="text" />
                     <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer4 N_Stop" type="text" />
@@ -490,15 +490,10 @@ const OfficeControlSettings = () => {
         {isSuperadmin && (
           <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 shadow-lg shadow-blue-500/5">
             <h4 className="mb-4 flex items-center gap-2 text-sm font-semibold text-blue-400">
-              <Radio className="h-4 w-4" /> ThingSpeak Configuration (Room {activeRoom})
+             
             </h4>
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="MQTT Client ID" objKey="CLIENT ID" type="text" />
-              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="MQTT Username" objKey="USERNAME" type="text" />
-              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="MQTT Password" objKey="PASSWORD" type="text" />
-              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Channel ID" objKey="CHANNEL ID" type="text" />
-              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Read API Key" objKey="READ API KEY" type="text" />
-              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Write API Key" objKey="WRITE API KEY" type="text" />
+
               <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="MQTT Port" objKey="PORT" />
             </div>
           </div>

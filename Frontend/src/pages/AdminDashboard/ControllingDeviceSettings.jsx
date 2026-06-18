@@ -114,6 +114,15 @@ const ControllingDeviceSettings = () => {
   const [client, setClient] = useState(null);
   const [liveData, setLiveData] = useState(null);
   const [configSubTab, setConfigSubTab] = useState('env'); // 'env', 'cyclic', 'daynight', 'advanced'
+  const [toast, setToast] = useState({ show: false, type: 'success', message: '' });
+
+  const showToast = (type, message) => {
+    setToast({ show: true, type, message });
+    setTimeout(() => {
+      setToast({ show: false, type: '', message: '' });
+    }, 4000);
+  };
+
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
   // ── Device selector state ──────────────────────────────────────────────────
@@ -325,17 +334,20 @@ const ControllingDeviceSettings = () => {
         }).catch(err => console.error("DB Sync error:", err));
       }
 
-      client.publish(updateTopic, JSON.stringify(payload), (err) => {
+      client.publish(updateTopic, JSON.stringify(payload), { retain: true }, (err) => {
         if (err) {
           console.error(err);
           setStatus('error');
+          showToast('error', `Failed to push configuration to "${selectedDevice?.name || 'Device'}"`);
         } else {
           setStatus('saved');
+          showToast('success', `Setpoints pushed to "${selectedDevice?.name || 'Device'}" successfully!`);
           setTimeout(() => setStatus('connected'), 3000);
         }
       });
     } else {
       setStatus('error');
+      showToast('error', 'MQTT client is not connected');
     }
   };
 
@@ -359,6 +371,25 @@ const ControllingDeviceSettings = () => {
 
   return (
     <div className="space-y-6">
+      {toast.show && (
+        <div className={`fixed top-6 right-6 z-50 flex items-center gap-3 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 max-w-sm ${toast.type === 'success'
+          ? 'border-emerald-500/30 bg-slate-900/95 text-emerald-400 shadow-emerald-950/20'
+          : 'border-red-500/30 bg-slate-900/95 text-red-400 shadow-red-950/20'
+          }`}>
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="h-5 w-5 shrink-0 animate-pulse" />
+          ) : (
+            <AlertCircle className="h-5 w-5 shrink-0 animate-pulse" />
+          )}
+          <div className="flex flex-col">
+            <span className="text-sm font-semibold text-white">
+              {toast.type === 'success' ? 'Success' : 'Error'}
+            </span>
+            <span className="text-xs text-slate-300">{toast.message}</span>
+          </div>
+        </div>
+      )}
+
       {/* Header with Device Selector */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -454,7 +485,7 @@ const ControllingDeviceSettings = () => {
           onClick={() => setConfigSubTab('advanced')}
           className={`px-4 py-2 text-sm font-semibold border-b-2 transition-all ${
             configSubTab === 'advanced'
-              ? 'border-orange-500 text-orange-400'
+              ? 'border-green-500 text-green-400'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
@@ -478,7 +509,7 @@ const ControllingDeviceSettings = () => {
             </div>
 
             <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
-              <h4 className="mb-4 text-sm font-semibold text-orange-400">Climate Setpoints</h4>
+              <h4 className="mb-4 text-sm font-semibold text-green-400">Climate Setpoints</h4>
               <div className="grid grid-cols-2 gap-4 md:grid-cols-6">
                 <InputRow data={setpoints} onChange={handleChange} label="Day Temp Max (°C)" objKey="D T Max" />
                 <InputRow data={setpoints} onChange={handleChange} label="Day Temp Min (°C)" objKey="DT Min" />
@@ -545,7 +576,7 @@ const ControllingDeviceSettings = () => {
                   </div>
                   {/* Night Settings */}
                   <div className="space-y-4 border border-slate-700/30 p-4 rounded-xl bg-slate-900/20">
-                    <h5 className="text-xs font-semibold text-purple-400 uppercase tracking-wider">Night Settings</h5>
+                    <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider">Night Settings</h5>
                     <div className="grid grid-cols-2 gap-3">
                       <InputRow data={setpoints} onChange={handleChange} label="Start Time (HH:MM)" objKey={`Timer${num} N_Start`} type="text" />
                       <InputRow data={setpoints} onChange={handleChange} label="Stop Time (HH:MM)" objKey={`Timer${num} N_Stop`} type="text" />
@@ -560,9 +591,9 @@ const ControllingDeviceSettings = () => {
         )}
 
         {configSubTab === 'advanced' && (
-          <div className="rounded-xl border border-orange-500/20 bg-gradient-to-b from-slate-800/40 to-slate-800/20 p-5 space-y-4 shadow-lg shadow-orange-500/5">
-            <h4 className="text-sm font-semibold text-orange-400 uppercase tracking-wider flex items-center gap-2">
-              <Cpu className="h-4 w-4 text-orange-400" /> Advanced Control
+          <div className="rounded-xl border border-green-500/20 bg-gradient-to-b from-slate-800/40 to-slate-800/20 p-5 space-y-4 shadow-lg shadow-green-500/5">
+            <h4 className="text-sm font-semibold text-green-400 uppercase tracking-wider flex items-center gap-2">
+              <Cpu className="h-4 w-4 text-green-400" /> Advanced Control
             </h4>
             <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
               <InputRow data={setpoints} onChange={handleChange} label="CO2 Target (PPM)" objKey="CO2 TARGET" />

@@ -92,18 +92,40 @@ const parseRobustFloat = (val) => {
   return isNaN(parsed) ? 0 : parsed;
 };
 
+// Downsample feeds to a maximum number of points to prevent DOM/SVG rendering lag
+const downsampleFeeds = (feeds, maxPoints = 1000) => {
+  if (!feeds || feeds.length <= maxPoints) return feeds;
+  const step = Math.ceil(feeds.length / maxPoints);
+  const result = [];
+  for (let i = 0; i < feeds.length; i += step) {
+    result.push(feeds[i]);
+  }
+  return result;
+};
+
 // Format feeds into chart-ready data dynamically based on available channel fields
 const mapFeedsToCharts = (feeds, filter, channelFields, isBothRooms = false) => {
-  const validFeeds = Array.isArray(feeds) ? feeds : [];
-  const timeFormat = filter === 'today' || filter === 'custom'
-    ? { hour: '2-digit', minute: '2-digit' }
-    : { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+  const rawFeedsArray = Array.isArray(feeds) ? feeds : [];
+  const validFeeds = downsampleFeeds(rawFeedsArray, 1000);
+
+  let isMultiDay = ['week', 'month', 'three_months'].includes(filter);
+  if (!isMultiDay && filter === 'custom' && validFeeds.length > 1) {
+    const firstDate = new Date(validFeeds[0].created_at).toDateString();
+    const lastDate = new Date(validFeeds[validFeeds.length - 1].created_at).toDateString();
+    if (firstDate !== lastDate) {
+      isMultiDay = true;
+    }
+  }
+
+  const timeFormat = isMultiDay
+    ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+    : { hour: '2-digit', minute: '2-digit' };
 
   if (!isBothRooms) {
     const mappedData = {};
     channelFields.forEach(field => {
       mappedData[field.key] = validFeeds.map((f) => ({
-        time: new Date(f.created_at).toLocaleTimeString('en-US', timeFormat),
+        time: new Date(f.created_at).toLocaleString('en-US', timeFormat),
         value: parseRobustFloat(f[field.key]),
       }));
     });
@@ -117,7 +139,7 @@ const mapFeedsToCharts = (feeds, filter, channelFields, isBothRooms = false) => 
       
       if (!timeGroupsMap.has(roundedMs)) {
         timeGroupsMap.set(roundedMs, {
-          time: new Date(roundedMs).toLocaleTimeString('en-US', timeFormat),
+          time: new Date(roundedMs).toLocaleString('en-US', timeFormat),
           rawTimestamp: roundedMs
         });
       }
@@ -316,55 +338,79 @@ const AnalyticsPage = () => {
   // Build chart data from raw feeds
   const chartData = useMemo(() => mapFeedsToCharts(rawFeeds, filter, channelFields, selectedRoom === 'both'), [rawFeeds, filter, channelFields, selectedRoom]);
 
-  // Statistical helpers
-  const calcAvg = (data) => {
-    if (!data || data.length === 0) return '--';
-    const values = data.map(d => {
-      if (d.isBoth) {
-        const vals = [d.room1Value, d.room2Value].filter(v => v !== null && v !== undefined);
-        return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  // Compute summary statistics in a single optimized pass over rawFeeds
+  const summaryStats = useMemo(() => {
+    const stats = {};
+    channelFields.forEach(f => {
+      stats[f.key] = { min: Infinity, max: -Infinity, sum: 0, count: 0 };
+    });
+
+    if (!rawFeeds || rawFeeds.length === 0) return stats;
+
+    const len = rawFeeds.length;
+
+    for (let i = 0; i < len; i++) {
+      const feed = rawFeeds[i];
+      for (let j = 0; j < channelFields.length; j++) {
+        const fieldKey = channelFields[j].key;
+        const val = parseRobustFloat(feed[fieldKey]);
+        if (feed[fieldKey] !== undefined && feed[fieldKey] !== null && feed[fieldKey] !== '') {
+          const s = stats[fieldKey];
+          if (val < s.min) s.min = val;
+          if (val > s.max) s.max = val;
+          s.sum += val;
+          s.count++;
+        }
       }
-      return d.value;
-    }).filter(v => v !== null && v !== undefined);
-    if (values.length === 0) return '--';
-    return (values.reduce((s, v) => s + v, 0) / values.length).toFixed(1);
-  };
-  const calcMax = (data) => {
-    if (!data || data.length === 0) return '--';
-    const values = data.map(d => {
-      if (d.isBoth) {
-        const vals = [d.room1Value, d.room2Value].filter(v => v !== null && v !== undefined);
-        return vals.length > 0 ? Math.max(...vals) : null;
-      }
-      return d.value;
-    }).filter(v => v !== null && v !== undefined);
-    if (values.length === 0) return '--';
-    return Math.max(...values).toFixed(1);
-  };
-  const calcMin = (data) => {
-    if (!data || data.length === 0) return '--';
-    const values = data.map(d => {
-      if (d.isBoth) {
-        const vals = [d.room1Value, d.room2Value].filter(v => v !== null && v !== undefined);
-        return vals.length > 0 ? Math.min(...vals) : null;
-      }
-      return d.value;
-    }).filter(v => v !== null && v !== undefined);
-    if (values.length === 0) return '--';
-    return Math.min(...values).toFixed(1);
-  };
+    }
+
+    const formatted = {};
+    channelFields.forEach(f => {
+      const s = stats[f.key];
+      formatted[f.key] = {
+        avg: s.count > 0 ? (s.sum / s.count).toFixed(1) : '--',
+        min: s.min !== Infinity ? s.min.toFixed(1) : '--',
+        max: s.max !== -Infinity ? s.max.toFixed(1) : '--'
+      };
+    });
+    return formatted;
+  }, [rawFeeds, channelFields]);
 
   const summaryMetrics = channelFields.map(f => {
     const meta = getFieldMeta(f.name);
     return {
       label: `Avg ${f.name}`,
-      value: calcAvg(chartData[f.key]),
+      value: summaryStats[f.key]?.avg || '--',
       unit: meta.unit,
       icon: meta.icon,
       color: meta.color,
       bg: meta.bg
     };
   });
+
+  const chartSubtitle = useMemo(() => {
+    switch (filter) {
+      case 'today':
+        return 'Today';
+      case 'yesterday':
+        return 'Yesterday';
+      case 'week':
+        return 'This Week';
+      case 'month':
+        return 'This Month';
+      case 'three_months':
+        return 'Last 3 Months';
+      case 'custom':
+        if (customStartDate && customEndDate) {
+          return `${customStartDate} to ${customEndDate}`;
+        } else if (customStartDate) {
+          return `From ${customStartDate}`;
+        }
+        return 'Custom Date';
+      default:
+        return 'Last 24 hours';
+    }
+  }, [filter, customStartDate, customEndDate]);
 
   const filterLabel = filter === 'custom' ? (customStartDate && customEndDate ? `${customStartDate}_to_${customEndDate}` : customStartDate || 'custom') : filter;
 
@@ -425,7 +471,6 @@ const AnalyticsPage = () => {
           >
             {allDevices.map((d) => (
               <option key={d._id} value={d._id}>
-                {/* {d.name} (CH: {d.thingspeak?.channelId || 'Local'}) */}
                 {d.name}
               </option>
             ))}
@@ -612,7 +657,7 @@ const AnalyticsPage = () => {
           {channelFields.map(f => {
             const meta = getFieldMeta(f.name);
             return (
-              <LiveChart key={f.key} data={chartData[f.key]} type={meta.type} title={`${f.name} Trend`} unit={meta.unit} />
+              <LiveChart key={f.key} data={chartData[f.key]} type={meta.type} title={`${f.name} Trend`} unit={meta.unit} subtitle={chartSubtitle} />
             );
           })}
         </div>
@@ -641,13 +686,13 @@ const AnalyticsPage = () => {
             <tbody>
               {channelFields.map((f) => {
                 const meta = getFieldMeta(f.name);
-                const data = chartData[f.key];
+                const stats = summaryStats[f.key] || { avg: '--', min: '--', max: '--' };
                 return (
                   <tr key={f.key} className="border-b border-slate-700/30 hover:bg-slate-800/50 transition-colors">
                     <td className="px-6 py-3 font-medium text-white">{f.name}</td>
-                    <td className="px-6 py-3 text-slate-300">{calcAvg(data)} {meta.unit}</td>
-                    <td className="px-6 py-3 text-cyan-400">{calcMin(data)} {meta.unit}</td>
-                    <td className="px-6 py-3 text-orange-400">{calcMax(data)} {meta.unit}</td>
+                    <td className="px-6 py-3 text-slate-300">{stats.avg} {meta.unit}</td>
+                    <td className="px-6 py-3 text-cyan-400">{stats.min} {meta.unit}</td>
+                    <td className="px-6 py-3 text-orange-400">{stats.max} {meta.unit}</td>
                   </tr>
                 );
               })}

@@ -35,6 +35,10 @@ const adminSchema = new mongoose.Schema(
 		lastLogin: {
 			type: Date,
 		},
+		maxUsersAllowed: {
+			type: Number,
+			default: 1,
+		},
 		permissions: {
 			type: [String],
 			default: ['all'],

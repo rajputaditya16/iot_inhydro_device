@@ -78,7 +78,7 @@ const Almora2Settings = () => {
 
   const handleNameSave = async () => {
     if (!tempName.trim() || !selectedDevice) return;
-    
+
     try {
       const res = await fetch(`${API_BASE}/api/devices/${selectedDevice._id}`, {
         method: 'PUT',
@@ -118,12 +118,12 @@ const Almora2Settings = () => {
     setSetpoints(initialSetpoints);
 
     mqttClient.on('connect', () => {
-        console.log(`Connected to MQTT Cloud Broker for ${deviceRoot}`);
-        setStatus('connected');
-        
-        mqttClient.subscribe(`inhydro/${deviceRoot}/setpoints/current`);
-        mqttClient.subscribe(`inhydro/${deviceRoot}/telemetry/live`);
-        mqttClient.publish(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
+      console.log(`Connected to MQTT Cloud Broker for ${deviceRoot}`);
+      setStatus('connected');
+
+      mqttClient.subscribe(`inhydro/${deviceRoot}/setpoints/current`);
+      mqttClient.subscribe(`inhydro/${deviceRoot}/telemetry/live`);
+      mqttClient.publish(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
     });
 
     mqttClient.on('message', (topic, message) => {
@@ -131,7 +131,7 @@ const Almora2Settings = () => {
         try {
           const liveData = JSON.parse(message.toString());
           setLiveData(liveData);
-        } catch (e) {}
+        } catch (e) { }
       }
       else if (topic === `inhydro/${deviceRoot}/setpoints/current`) {
         try {
@@ -157,7 +157,7 @@ const Almora2Settings = () => {
         mqttClient.end();
       }
     };
-  }, [deviceRoot, selectedDevice, isSuperadmin]); 
+  }, [deviceRoot, selectedDevice, isSuperadmin]);
 
   const handleChange = (key, value) => {
     setSetpoints(prev => ({
@@ -169,10 +169,10 @@ const Almora2Settings = () => {
   const handleSave = () => {
     if (client && client.connected) {
       setStatus('saving');
-      
+
       const payload = { ...setpoints };
       const numericFields = ['T MIN', 'T MAX', 'H MIN', 'H MAX', 'PORT'];
-                             
+
       numericFields.forEach(field => {
         if (payload[field] !== undefined && payload[field] !== "") {
           const numValue = Number(payload[field]);
@@ -213,7 +213,7 @@ const Almora2Settings = () => {
         }).catch(err => console.error("DB Sync error:", err));
       }
 
-      client.publish(`inhydro/${deviceRoot}/setpoints/update`, JSON.stringify(payload), (err) => {
+      client.publish(`inhydro/${deviceRoot}/setpoints/update`, JSON.stringify(payload), { retain: true }, (err) => {
         if (err) {
           console.error(err);
           setStatus('error');
@@ -252,10 +252,10 @@ const Almora2Settings = () => {
           <div className="flex items-center gap-3">
             {isEditingName ? (
               <div className="flex items-center gap-2">
-                <input 
+                <input
                   autoFocus
-                  type="text" 
-                  value={tempName} 
+                  type="text"
+                  value={tempName}
                   onChange={(e) => setTempName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleNameSave()}
                   className="rounded border border-green-500 bg-slate-900/50 px-2 py-0.5 text-base font-semibold text-white outline-none"
@@ -273,73 +273,72 @@ const Almora2Settings = () => {
           </div>
           <p className="text-sm text-slate-400 mt-1">Manage CO2 & Environmental Integrations</p>
         </div>
-        
+
         <div className="flex flex-wrap items-center gap-4">
-            {/* Live Analytics Engine (Premium Display) */}
-            {liveData && (
-              <div className="flex items-center gap-2 overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/40 p-1 shadow-2xl backdrop-blur-md">
-                <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-orange-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-orange-500/20">
-                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-orange-400Shadow shadow-orange-500/50"></div>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Temp</span>
-                  <span className="text-sm font-black text-white">{liveData.temp}<span className="text-[10px] text-orange-400 ml-0.5">°C</span></span>
-                </div>
-                
-                <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-blue-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-blue-500/20">
-                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400Shadow shadow-blue-500/50"></div>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Hum</span>
-                  <span className="text-sm font-black text-white">{liveData.hum}<span className="text-[10px] text-blue-400 ml-0.5">%</span></span>
-                </div>
-
-                <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-emerald-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-emerald-500/20">
-                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400Shadow shadow-emerald-500/50"></div>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">CO2</span>
-                  <span className="text-sm font-black text-white">{Math.round(liveData.co2)}<span className="text-[10px] text-emerald-400 ml-1">PPM</span></span>
-                </div>
+          {/* Live Analytics Engine (Premium Display) */}
+          {liveData && (
+            <div className="flex items-center gap-2 overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/40 p-1 shadow-2xl backdrop-blur-md">
+              <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-orange-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-orange-500/20">
+                <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-orange-400Shadow shadow-orange-500/50"></div>
+                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Temp</span>
+                <span className="text-sm font-black text-white">{liveData.temp}<span className="text-[10px] text-orange-400 ml-0.5">°C</span></span>
               </div>
-            )}
 
-            {/* Selection Dropdown */}
-            <div className="relative">
-              <button 
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium text-white outline-none transition-all ${isDropdownOpen ? 'border-green-500 bg-slate-800' : 'border-slate-700 bg-slate-900/50 hover:border-green-500 hover:bg-slate-800'}`}
-              >
-                <Server className="h-4 w-4 text-green-400" />
-                <span className="max-w-[150px] truncate">{selectedDevice?.name || 'Select Node'}</span>
-                <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-              
-              {/* Dropdown Menu */}
-              {isDropdownOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsDropdownOpen(false)}></div>
-                  <div className="absolute right-0 top-full z-50 mt-2 flex w-56 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl">
-                    {almoraDevices.map((dev) => (
-                      <button
-                        key={dev._id}
-                        onClick={() => {
-                          setDeviceRoot(dev.mqttId || dev._id);
-                          setIsDropdownOpen(false);
-                        }}
-                        className={`flex items-center w-full justify-start px-4 py-3 text-sm transition-colors hover:bg-slate-800 ${
-                          deviceRoot === (dev.mqttId || dev._id) ? 'bg-green-500/10 text-green-400 font-semibold' : 'text-slate-300'
+              <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-blue-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-blue-500/20">
+                <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400Shadow shadow-blue-500/50"></div>
+                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Hum</span>
+                <span className="text-sm font-black text-white">{liveData.hum}<span className="text-[10px] text-blue-400 ml-0.5">%</span></span>
+              </div>
+
+              <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-emerald-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-emerald-500/20">
+                <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400Shadow shadow-emerald-500/50"></div>
+                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">CO2</span>
+                <span className="text-sm font-black text-white">{Math.round(liveData.co2)}<span className="text-[10px] text-emerald-400 ml-1">PPM</span></span>
+              </div>
+            </div>
+          )}
+
+          {/* Selection Dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium text-white outline-none transition-all ${isDropdownOpen ? 'border-green-500 bg-slate-800' : 'border-slate-700 bg-slate-900/50 hover:border-green-500 hover:bg-slate-800'}`}
+            >
+              <Server className="h-4 w-4 text-green-400" />
+              <span className="max-w-[150px] truncate">{selectedDevice?.name || 'Select Node'}</span>
+              <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {/* Dropdown Menu */}
+            {isDropdownOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setIsDropdownOpen(false)}></div>
+                <div className="absolute right-0 top-full z-50 mt-2 flex w-56 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl">
+                  {almoraDevices.map((dev) => (
+                    <button
+                      key={dev._id}
+                      onClick={() => {
+                        setDeviceRoot(dev.mqttId || dev._id);
+                        setIsDropdownOpen(false);
+                      }}
+                      className={`flex items-center w-full justify-start px-4 py-3 text-sm transition-colors hover:bg-slate-800 ${deviceRoot === (dev.mqttId || dev._id) ? 'bg-green-500/10 text-green-400 font-semibold' : 'text-slate-300'
                         }`}
-                      >
-                        <span className="truncate">{dev.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-            
-            <div className="min-w-[140px] flex justify-end">
-              {status === 'connected' && <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Cloud Connected</span>}
-              {status === 'disconnected' && <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400"><RefreshCw className="h-4 w-4 animate-spin" /> Connecting...</span>}
-              {status === 'saving' && <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400"><RefreshCw className="h-4 w-4 animate-spin" /> Pushing...</span>}
-              {status === 'saved' && <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Live Successfully</span>}
-              {status === 'error' && <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400"><AlertCircle className="h-4 w-4" /> Check Connection</span>}
-            </div>
+                    >
+                      <span className="truncate">{dev.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="min-w-[140px] flex justify-end">
+            {status === 'connected' && <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Cloud Connected</span>}
+            {status === 'disconnected' && <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400"><RefreshCw className="h-4 w-4 animate-spin" /> Connecting...</span>}
+            {status === 'saving' && <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400"><RefreshCw className="h-4 w-4 animate-spin" /> Pushing...</span>}
+            {status === 'saved' && <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Live Successfully</span>}
+            {status === 'error' && <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400"><AlertCircle className="h-4 w-4" /> Check Connection</span>}
+          </div>
         </div>
       </div>
 
@@ -379,7 +378,7 @@ const Almora2Settings = () => {
       </div>
 
       <div className="pt-4">
-        <button 
+        <button
           onClick={handleSave}
           disabled={status === 'disconnected' || status === 'saving'}
           className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-transform active:scale-95 disabled:opacity-50"
