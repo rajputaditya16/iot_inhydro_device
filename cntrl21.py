@@ -21,6 +21,12 @@ R2_PORT_MD02 = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.5:1.0-port0"
 R2_PORT_ORP  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.4:1.0-port0"
 R2_PORT_CO2  = "/dev/serial/by-path/platform-3f98000.usb-usb-0:1:2:1:0-port0"
 
+# Room 3 sensor ports
+R3_PORT_SOIL = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.10:1.0-port0"
+R3_PORT_MD02 = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.9:1.0-port0"
+R3_PORT_ORP  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.8:1.0-port0"
+R3_PORT_CO2  = "/dev/serial/by-path/platform-3f98000.usb-usb-0:1:2:2:0-port0"
+
 # MODBUS SETTINGS
 RELAY_BAUD = 9600
 RELAY_PORT_FIXED = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.7:1.0-port0"
@@ -52,6 +58,17 @@ R2_CH_TMR1  = 22
 R2_CH_TMR2  = 23
 R2_CH_TMR3  = 24
 
+# Room 3 relay channels
+R3_CH_EC1   = 25
+R3_CH_EC2   = 26
+R3_CH_PH    = 27
+R3_CH_AC    = 28
+R3_CH_HUMI  = 29
+R3_CH_TMR1  = 30
+R3_CH_TMR2  = 31
+R3_CH_TMR3  = 32
+
+
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -72,6 +89,7 @@ print(f"🚀 Device: {DEVICE_NAME}")
 SP_FILE = {
     1: os.path.join(BASE_DIR, f"setpoints_{DEVICE_NAME}_room1.json"),
     2: os.path.join(BASE_DIR, f"setpoints_{DEVICE_NAME}_room2.json"),
+    3: os.path.join(BASE_DIR, f"setpoints_{DEVICE_NAME}_room3.json"),
 }
 
 OLD_FILE = os.path.join(BASE_DIR, "setpoints.json")
@@ -117,7 +135,8 @@ def relay_is_on(ch):
     return _relay_state.get(ch, False)
 
 ALL_CHANNELS = [R1_CH_EC1, R1_CH_EC2, R1_CH_PH, R1_CH_AC, R1_CH_HUMI, R1_CH_TMR1, R1_CH_TMR2, R1_CH_TMR3,
-                R2_CH_EC1, R2_CH_EC2, R2_CH_PH, R2_CH_AC, R2_CH_HUMI, R2_CH_TMR1, R2_CH_TMR2, R2_CH_TMR3]
+                R2_CH_EC1, R2_CH_EC2, R2_CH_PH, R2_CH_AC, R2_CH_HUMI, R2_CH_TMR1, R2_CH_TMR2, R2_CH_TMR3,
+                R3_CH_EC1, R3_CH_EC2, R3_CH_PH, R3_CH_AC, R3_CH_HUMI, R3_CH_TMR1, R3_CH_TMR2, R3_CH_TMR3]
 
 def all_relays_off():
     for ch in ALL_CHANNELS: relay_off(ch)
@@ -166,6 +185,12 @@ R2_md02 = _open_sensor(R2_PORT_MD02, "R2 MD02", baudrate=9600)
 R2_orp  = _open_sensor(R2_PORT_ORP,  "R2 ORP",  baudrate=4800)
 R2_co2  = _open_sensor(R2_PORT_CO2,  "R2 CO2",  baudrate=9600)
 
+R3_soil = _open_sensor(R3_PORT_SOIL, "R3 Soil", baudrate=9600)
+R3_md02 = _open_sensor(R3_PORT_MD02, "R3 MD02", baudrate=9600)
+R3_orp  = _open_sensor(R3_PORT_ORP,  "R3 ORP",  baudrate=4800)
+R3_co2  = _open_sensor(R3_PORT_CO2,  "R3 CO2",  baudrate=9600)
+
+
 
 def default_setpoints():
     return {
@@ -195,7 +220,7 @@ def default_setpoints():
         "READ API KEY": "", "WRITE API KEY": "",
     }
 
-setpoints = {1: default_setpoints(), 2: default_setpoints()}
+setpoints = {1: default_setpoints(), 2: default_setpoints(), 3: default_setpoints()}
 
 def load_setpoints(room):
     f = SP_FILE[room]
@@ -207,6 +232,7 @@ def load_setpoints(room):
 
 load_setpoints(1)
 load_setpoints(2)
+load_setpoints(3)
 
 def save_setpoints(room):
     with open(SP_FILE[room], "w") as f:
@@ -254,26 +280,27 @@ def _v(val): return val if val is not None else ""
 
 last_cloud_publish_time = 0
 
-def publish_telemetry(d1, d2):
-    """d1 = Room1 sensor dict, d2 = Room2 sensor dict. Each field = JSON array."""
+def publish_telemetry(d1, d2, d3):
+    """d1 = Room1 sensor dict, d2 = Room2 sensor dict, d3 = Room3 sensor dict. Each field = JSON array."""
     global last_cloud_publish_time
     current_time = time.time()
     if current_time - last_cloud_publish_time < 35:
         return
         
-    def arr(a, b): return json.dumps([a, b])
-    s1 = d1.get("soil"); s2 = d2.get("soil")
-    r1 = d1.get("room"); r2 = d2.get("room")
+    def arr(a, b, c): return json.dumps([a, b, c])
+    s1 = d1.get("soil"); s2 = d2.get("soil"); s3 = d3.get("soil")
+    r1 = d1.get("room"); r2 = d2.get("room"); r3 = d3.get("room")
     fields = {
-        "field1": arr(_v(s1['soil_temp'] if s1 else None), _v(s2['soil_temp'] if s2 else None)),
-        "field2": arr(_v(s1['moisture']  if s1 else None), _v(s2['moisture']  if s2 else None)),
-        "field3": arr(_v((s1['ec'] * 0.85)/1000 if s1 and s1.get('ec') is not None else None), _v((s2['ec'] * 0.85)/1000 if s2 and s2.get('ec') is not None else None)),
-        "field4": arr(_v(s1['ph']        if s1 else None), _v(s2['ph']        if s2 else None)),
-        "field5": arr(_v(r1['room_temp'] if r1 else None), _v(r2['room_temp'] if r2 else None)),
-        "field6": arr(_v(r1['room_humi'] if r1 else None), _v(r2['room_humi'] if r2 else None)),
-        "field7": arr(_v(d1.get('orp')), _v(d2.get('orp'))),
-        "field8": arr(_v(d1.get('co2')), _v(d2.get('co2'))),
+        "field1": arr(_v(s1['soil_temp'] if s1 else None), _v(s2['soil_temp'] if s2 else None), _v(s3['soil_temp'] if s3 else None)),
+        "field2": arr(_v(s1['moisture']  if s1 else None), _v(s2['moisture']  if s2 else None), _v(s3['moisture']  if s3 else None)),
+        "field3": arr(_v((s1['ec'] * 0.85)/1000 if s1 and s1.get('ec') is not None else None), _v((s2['ec'] * 0.85)/1000 if s2 and s2.get('ec') is not None else None), _v((s3['ec'] * 0.85)/1000 if s3 and s3.get('ec') is not None else None)),
+        "field4": arr(_v(s1['ph']        if s1 else None), _v(s2['ph']        if s2 else None), _v(s3['ph']        if s3 else None)),
+        "field5": arr(_v(r1['room_temp'] if r1 else None), _v(r2['room_temp'] if r2 else None), _v(r3['room_temp'] if r3 else None)),
+        "field6": arr(_v(r1['room_humi'] if r1 else None), _v(r2['room_humi'] if r2 else None), _v(r3['room_humi'] if r3 else None)),
+        "field7": arr(_v(d1.get('orp')), _v(d2.get('orp')), _v(d3.get('orp'))),
+        "field8": arr(_v(d1.get('co2')), _v(d2.get('co2')), _v(d3.get('co2'))),
     }
+
 
     try:
         connected = mqtt_client.is_connected() if mqtt_client else False
@@ -388,7 +415,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         is_mqtt_connected = True
         print("✅ Control MQTT (HiveMQ) connected/reconnected")
-        for room in [1, 2]:
+        for room in [1, 2, 3]:
             client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/update")
             client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/request_sync")
             try:
@@ -487,12 +514,19 @@ def read_all_sensors(room):
             "orp": read_orp(R1_orp, "R1 ORP"),
             "co2": read_co2(R1_co2, "R1 CO2"),
         }
-    else:
+    elif room == 2:
         return {
             "soil": read_soil(R2_soil, "R2 Soil"),
             "room": read_md02(R2_md02, "R2 MD02"),
             "orp": read_orp(R2_orp, "R2 ORP"),
             "co2": read_co2(R2_co2, "R2 CO2"),
+        }
+    else:
+        return {
+            "soil": read_soil(R3_soil, "R3 Soil"),
+            "room": read_md02(R3_md02, "R3 MD02"),
+            "orp": read_orp(R3_orp, "R3 ORP"),
+            "co2": read_co2(R3_co2, "R3 CO2"),
         }
 
 
@@ -502,6 +536,8 @@ state = {
         "humi_active": False, "last_ec": 0.0, "last_ph": 0.0},
     2: {"ec_active": False, "ph_active": False, "ac_active": False,
         "humi_active": False, "last_ec": 0.0, "last_ph": 0.0},
+    3: {"ec_active": False, "ph_active": False, "ac_active": False,
+        "humi_active": False, "last_ec": 0.0, "last_ph": 0.0},
 }
 
 ROOM_CHANNELS = {
@@ -509,6 +545,8 @@ ROOM_CHANNELS = {
         "ac": R1_CH_AC,   "humi": R1_CH_HUMI},
     2: {"ec1": R2_CH_EC1, "ec2": R2_CH_EC2, "ph": R2_CH_PH,
         "ac": R2_CH_AC,   "humi": R2_CH_HUMI},
+    3: {"ec1": R3_CH_EC1, "ec2": R3_CH_EC2, "ph": R3_CH_PH,
+        "ac": R3_CH_AC,   "humi": R3_CH_HUMI},
 }
 
 def control_room(room, data):
@@ -615,11 +653,13 @@ def control_room(room, data):
 timer_state = {
     1: [{"state": "OFF", "last": 0.0}, {"state": "OFF", "last": 0.0}, {"state": "OFF", "last": 0.0}, {"state": "OFF", "last": 0.0}],
     2: [{"state": "OFF", "last": 0.0}, {"state": "OFF", "last": 0.0}, {"state": "OFF", "last": 0.0}, {"state": "OFF", "last": 0.0}],
+    3: [{"state": "OFF", "last": 0.0}, {"state": "OFF", "last": 0.0}, {"state": "OFF", "last": 0.0}, {"state": "OFF", "last": 0.0}],
 }
 
 TIMER_CHANNELS = {
     1: [R1_CH_TMR1, R1_CH_TMR2, R1_CH_TMR3, R1_CH_AC],
     2: [R2_CH_TMR1, R2_CH_TMR2, R2_CH_TMR3, R2_CH_AC],
+    3: [R3_CH_TMR1, R3_CH_TMR2, R3_CH_TMR3, R3_CH_AC],
 }
 
 TIMER_KEYS = [
@@ -815,14 +855,14 @@ SML  = ("Arial", 14, "bold")
 TINY = ("Arial", 12)
 
 frame_home   = tk.Frame(root, bg="white")
-frame_room   = {1: tk.Frame(root, bg="white"), 2: tk.Frame(root, bg="white")}
-frame_set    = {1: tk.Frame(root, bg="white"), 2: tk.Frame(root, bg="white")}
+frame_room   = {1: tk.Frame(root, bg="white"), 2: tk.Frame(root, bg="white"), 3: tk.Frame(root, bg="white")}
+frame_set    = {1: tk.Frame(root, bg="white"), 2: tk.Frame(root, bg="white"), 3: tk.Frame(root, bg="white")}
 
 active_room  = 1   # which room detail / setpoint screen is open
 
 def show(frame):
-    for f in [frame_home, frame_room[1], frame_room[2],
-              frame_set[1], frame_set[2]]:
+    for f in [frame_home, frame_room[1], frame_room[2], frame_room[3],
+              frame_set[1], frame_set[2], frame_set[3]]:
         f.pack_forget()
     frame.pack(fill="both", expand=True)
     try: lbl_logo.lift()
@@ -830,7 +870,7 @@ def show(frame):
 
 
 
-tk.Label(frame_home, text="INHYDRO — DUAL ROOM CONTROLLER",
+tk.Label(frame_home, text="INHYDRO — TRIPLE ROOM CONTROLLER",
          font=BIG, fg="#1565c0", bg="white").pack(pady=(10,4))
 
 home_grid = tk.Frame(frame_home, bg="white")
@@ -879,6 +919,7 @@ def make_home_box(room):
 
 make_home_box(1)
 make_home_box(2)
+make_home_box(3)
 
 home_footer = tk.Frame(frame_home, bg="#eeeeee", height=50)
 home_footer.pack(side="bottom", fill="x")
@@ -1025,6 +1066,7 @@ def build_room_screen(room):
 
 build_room_screen(1)
 build_room_screen(2)
+build_room_screen(3)
 
 
 
@@ -1349,6 +1391,7 @@ def build_setpoint_screen(room):
 
 build_setpoint_screen(1)
 build_setpoint_screen(2)
+build_setpoint_screen(3)
 
 def stop_room(room):
     ch  = ROOM_CHANNELS[room]
@@ -1363,7 +1406,7 @@ def stop_room(room):
 
 def restart_program():
     all_relays_off()
-    for inst in [R1_soil,R1_md02,R1_orp,R1_co2,R2_soil,R2_md02,R2_orp,R2_co2]:
+    for inst in [R1_soil,R1_md02,R1_orp,R1_co2,R2_soil,R2_md02,R2_orp,R2_co2,R3_soil,R3_md02,R3_orp,R3_co2]:
         try:
             if inst: inst.serial.close()
         except: pass
@@ -1490,7 +1533,8 @@ def update_home_summary(room, data):
 # Global cache for sensor readings
 sensor_data_cache = {
     1: {"soil": None, "room": None, "orp": None, "co2": None},
-    2: {"soil": None, "room": None, "orp": None, "co2": None}
+    2: {"soil": None, "room": None, "orp": None, "co2": None},
+    3: {"soil": None, "room": None, "orp": None, "co2": None}
 }
 
 def sensor_polling_worker():
@@ -1500,17 +1544,19 @@ def sensor_polling_worker():
             sensor_data_cache[1] = read_all_sensors(1)
             time.sleep(0.5)
             sensor_data_cache[2] = read_all_sensors(2)
+            time.sleep(0.5)
+            sensor_data_cache[3] = read_all_sensors(3)
             time.sleep(1.0)
         except Exception as e:
             time.sleep(2)
 
-def publish_live_telemetry(d1, d2):
+def publish_live_telemetry(d1, d2, d3):
     try:
         # We assume control_client is globally available as it is defined at the module level.
         ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
         ts_str = datetime.datetime.now(ist_tz).isoformat()
         
-        for room, d in [(1, d1), (2, d2)]:
+        for room, d in [(1, d1), (2, d2), (3, d3)]:
             soil_data = dict(d.get("soil")) if d.get("soil") else None
             if soil_data and soil_data.get("ec") is not None:
                 soil_data["ec"] = round((soil_data["ec"] * 0.85) / 1000, 2)
@@ -1564,10 +1610,21 @@ COLUMNS = [
     "r2_t1_state", "r2_t1_last",
     "r2_t2_state", "r2_t2_last",
     "r2_t3_state", "r2_t3_last",
-    "r2_t4_state", "r2_t4_last"
+    "r2_t4_state", "r2_t4_last",
+
+    # Room 3 Sensors
+    "r3_soil_ec", "r3_soil_ph", "r3_soil_temp", "r3_soil_moisture",
+    "r3_room_temp", "r3_room_humi", "r3_orp", "r3_co2",
+    # Room 3 Relays
+    "r3_ec1", "r3_ec2", "r3_ph", "r3_ac", "r3_humi", "r3_tmr1", "r3_tmr2", "r3_tmr3",
+    # Room 3 Timers (4 timers)
+    "r3_t1_state", "r3_t1_last",
+    "r3_t2_state", "r3_t2_last",
+    "r3_t3_state", "r3_t3_last",
+    "r3_t4_state", "r3_t4_last"
 ]
 
-def pack_entry(ts, d1, d2):
+def pack_entry(ts, d1, d2, d3):
     row = [ts]
     # Pack Room 1 Sensors
     s1 = d1.get("soil") if d1 else None
@@ -1645,11 +1702,49 @@ def pack_entry(ts, d1, d2):
         last_val = timer_state[2][i]["last"] if len(timer_state[2]) > i else 0.0
         row.extend([1 if state_val == "ON" else 0, last_val])
         
+    # Pack Room 3 Sensors
+    s3 = d3.get("soil") if d3 else None
+    s3_ec = None
+    if s3 and s3.get("ec") is not None:
+        s3_ec = round((s3["ec"] * 0.85) / 1000, 2)
+    s3_ph = s3.get("ph") if s3 else None
+    s3_temp = s3.get("soil_temp") if s3 else None
+    s3_moist = s3.get("moisture") if s3 else None
+    
+    r3 = d3.get("room") if d3 else None
+    r3_temp = r3.get("room_temp") if r3 else None
+    r3_humi = r3.get("room_humi") if r3 else None
+    
+    row.extend([
+        s3_ec, s3_ph, s3_temp, s3_moist,
+        r3_temp, r3_humi,
+        d3.get("orp") if d3 else None,
+        d3.get("co2") if d3 else None
+    ])
+    
+    # Pack Room 3 Relays
+    row.extend([
+        1 if relay_is_on(ROOM_CHANNELS[3]["ec1"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[3]["ec2"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[3]["ph"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[3]["ac"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[3]["humi"]) else 0,
+        1 if relay_is_on(TIMER_CHANNELS[3][0]) else 0,
+        1 if relay_is_on(TIMER_CHANNELS[3][1]) else 0,
+        1 if relay_is_on(TIMER_CHANNELS[3][2]) else 0
+    ])
+    
+    # Pack Room 3 Timers (4 timers)
+    for i in range(4):
+        state_val = timer_state[3][i]["state"] if len(timer_state[3]) > i else "OFF"
+        last_val = timer_state[3][i]["last"] if len(timer_state[3]) > i else 0.0
+        row.extend([1 if state_val == "ON" else 0, last_val])
+        
     return row
 
 def unpack_row(row):
-    if not isinstance(row, list) or len(row) < 49:
-        return None, None
+    if not isinstance(row, list) or len(row) < 73:
+        return None, None, None
     ts = row[0]
     
     # Unpack Room 1 Sensors
@@ -1731,12 +1826,52 @@ def unpack_row(row):
             "tmr3": bool(row[40])
         }
     }
-    return p1, p2
+
+    # Unpack Room 3 Sensors
+    s3 = None
+    if any(row[i] is not None for i in [49, 50, 51, 52]):
+        s3 = {
+            "ec": row[49],
+            "ph": row[50],
+            "soil_temp": row[51],
+            "moisture": row[52]
+        }
+    rm3 = None
+    if any(row[i] is not None for i in [53, 54]):
+        rm3 = {
+            "room_temp": row[53],
+            "room_humi": row[54]
+        }
+    r3_timers = []
+    for i in range(4):
+        t_state = "ON" if row[65 + i*2] == 1 else "OFF"
+        t_last = row[66 + i*2]
+        r3_timers.append({"state": t_state, "last": t_last})
+        
+    p3 = {
+        "timestamp": ts,
+        "soil": s3,
+        "room": rm3,
+        "orp": row[55],
+        "co2": row[56],
+        "timer_state": r3_timers,
+        "relay_status": {
+            "ec1": bool(row[57]),
+            "ec2": bool(row[58]),
+            "ph": bool(row[59]),
+            "ac": bool(row[60]),
+            "humi": bool(row[61]),
+            "tmr1": bool(row[62]),
+            "tmr2": bool(row[63]),
+            "tmr3": bool(row[64])
+        }
+    }
+    return p1, p2, p3
 
 LOG_DIR = os.path.join(BASE_DIR, "local_logs")
 ACTIVE_LOG_FILE = os.path.join(LOG_DIR, "active.jsonl")
 
-def save_local_telemetry(d1, d2):
+def save_local_telemetry(d1, d2, d3):
     global last_local_save_time
     try:
         connected = is_mqtt_connected and control_client.is_connected()
@@ -1755,7 +1890,7 @@ def save_local_telemetry(d1, d2):
     ts_str = datetime.datetime.now(ist_tz).isoformat()
 
     try:
-        new_row = pack_entry(ts_str, d1, d2)
+        new_row = pack_entry(ts_str, d1, d2, d3)
     except Exception as e:
         print(f"⚠️ Error packing local telemetry entry: {e}")
         last_local_save_time = current_time
@@ -1852,16 +1987,20 @@ def sync_offline_data_worker():
 
                         p1_batch = []
                         p2_batch = []
+                        p3_batch = []
                         for row in batch:
-                            p1, p2 = unpack_row(row)
+                            p1, p2, p3 = unpack_row(row)
                             if p1: p1_batch.append(p1)
                             if p2: p2_batch.append(p2)
+                            if p3: p3_batch.append(p3)
 
                         try:
                             if p1_batch:
                                 control_client.publish(f"inhydro/{DEVICE_NAME}/room1/telemetry/live", json.dumps(p1_batch), qos=1)
                             if p2_batch:
                                 control_client.publish(f"inhydro/{DEVICE_NAME}/room2/telemetry/live", json.dumps(p2_batch), qos=1)
+                            if p3_batch:
+                                control_client.publish(f"inhydro/{DEVICE_NAME}/room3/telemetry/live", json.dumps(p3_batch), qos=1)
                             # Small sleep to prevent network choke
                             time.sleep(0.05)
                         except Exception as pe:
@@ -1898,21 +2037,26 @@ def update():
     """Main UI Thread: Handles Timers and Relay Control (Never blocks)."""
     d1 = sensor_data_cache[1]
     d2 = sensor_data_cache[2]
+    d3 = sensor_data_cache[3]
 
     w1 = control_room(1, d1)
     w2 = control_room(2, d2)
+    w3 = control_room(3, d3)
 
     run_timers(1)
     run_timers(2)
+    run_timers(3)
 
     update_home_summary(1, d1)
     update_home_summary(2, d2)
+    update_home_summary(3, d3)
     update_room_detail(1, d1, w1)
     update_room_detail(2, d2, w2)
+    update_room_detail(3, d3, w3)
 
-    publish_telemetry(d1, d2)
-    publish_live_telemetry(d1, d2)
-    save_local_telemetry(d1, d2)
+    publish_telemetry(d1, d2, d3)
+    publish_live_telemetry(d1, d2, d3)
+    save_local_telemetry(d1, d2, d3)
 
     root.after(1000, update)
 
