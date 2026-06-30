@@ -71,11 +71,12 @@ const LiveMonitoring = () => {
   const [selectedSensor, setSelectedSensor] = useState(null); // The sensor currently "clicked" for detail
   const mqttClientRef = useRef(null);
 
-  // ── Office Control Dual Room Live States ────────────────────────────────────
-  const [officeControlData, setOfficeControlData] = useState({ 1: null, 2: null });
+  // ── Office Control Triple Room Live States ──────────────────────────────────
+  const [officeControlData, setOfficeControlData] = useState({ 1: null, 2: null, 3: null });
   const [officeControlHistory, setOfficeControlHistory] = useState({
     1: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
-    2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
+    2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
+    3: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
   });
   const [activeRoomTab, setActiveRoomTab] = useState(1);
 
@@ -141,10 +142,11 @@ const LiveMonitoring = () => {
     setActiveFields([]);
     
     // Clear dual-room MQTT states
-    setOfficeControlData({ 1: null, 2: null });
+    setOfficeControlData({ 1: null, 2: null, 3: null });
     setOfficeControlHistory({
       1: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
-      2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
+      2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
+      3: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
     });
 
     // Clear controlling MQTT states
@@ -301,6 +303,7 @@ const LiveMonitoring = () => {
       } else if (isOfficeControl) {
         client.subscribe(`inhydro/${mqttId}/room1/telemetry/live`);
         client.subscribe(`inhydro/${mqttId}/room2/telemetry/live`);
+        client.subscribe(`inhydro/${mqttId}/room3/telemetry/live`);
       } else if (isControlling) {
         client.subscribe(`inhydro/${mqttId}/monitor/telemetry/live`);
       }
@@ -532,12 +535,12 @@ const LiveMonitoring = () => {
         </motion.div>
       )}
 
-      {/* ── Office Control Dual-Room Live View ───────────────────────────── */}
+      {/* ── Office Control Triple-Room Live View ──────────────────────────── */}
       {deviceMeta?.deviceType === 'office_control' && (
         <div className="space-y-6">
           {/* Room Selection Tabs */}
           <div className="flex border-b border-slate-700/60 pb-px">
-            {[1, 2].map((room) => (
+            {[1, 2, 3].map((room) => (
               <button
                 key={room}
                 onClick={() => setActiveRoomTab(room)}
@@ -571,7 +574,7 @@ const LiveMonitoring = () => {
               ) : !officeControlData[activeRoomTab] ? (
                 <div className="rounded-2xl border border-dashed border-slate-700/50 p-6 text-sm text-slate-400 text-center">
                   <div className="animate-pulse mb-2 text-green-500 font-medium">Waiting for Live Device Stream...</div>
-                  <div className="text-xs text-slate-500">Please start control.py on your device to stream real-time data.</div>
+                  <div className="text-xs text-slate-500">Please start cntrl21.py on your device to stream real-time data.</div>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 xl:grid-cols-1">

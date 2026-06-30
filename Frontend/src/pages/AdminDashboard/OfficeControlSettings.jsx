@@ -35,7 +35,7 @@ const OfficeControlSettings = () => {
   const [deviceRoot, setDeviceRoot] = useState('');
   const [activeRoom, setActiveRoom] = useState(1);
 
-  const [setpoints, setSetpoints] = useState({ 1: { ...defaultSetpoints }, 2: { ...defaultSetpoints } });
+  const [setpoints, setSetpoints] = useState({ 1: { ...defaultSetpoints }, 2: { ...defaultSetpoints }, 3: { ...defaultSetpoints } });
 
   const [status, setStatus] = useState('disconnected');
   const [loading, setLoading] = useState(true);
@@ -116,10 +116,10 @@ const OfficeControlSettings = () => {
     setStatus('disconnected');
     const mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
 
-    const initialSetpoints = { 1: { ...defaultSetpoints }, 2: { ...defaultSetpoints } };
+    const initialSetpoints = { 1: { ...defaultSetpoints }, 2: { ...defaultSetpoints }, 3: { ...defaultSetpoints } };
     if (isSuperadmin && selectedDevice && selectedDevice.thingspeak) {
       const ts = selectedDevice.thingspeak;
-      ['1', '2'].forEach(room => {
+      ['1', '2', '3'].forEach(room => {
         if (ts.clientId) initialSetpoints[room]["CLIENT ID"] = ts.clientId;
         if (ts.username) initialSetpoints[room]["USERNAME"] = ts.username;
         if (ts.password) initialSetpoints[room]["PASSWORD"] = ts.password;
@@ -133,7 +133,7 @@ const OfficeControlSettings = () => {
 
     mqttClient.on('connect', () => {
       setStatus('connected');
-      [1, 2].forEach(room => {
+      [1, 2, 3].forEach(room => {
         mqttClient.subscribe(`inhydro/${deviceRoot}/room${room}/setpoints/current`);
         mqttClient.publish(`inhydro/${deviceRoot}/room${room}/setpoints/request_sync`, '1');
       });
@@ -393,6 +393,12 @@ const OfficeControlSettings = () => {
           className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeRoom === 2 ? 'border-b-2 border-green-500 text-green-400' : 'text-slate-400 hover:text-white'}`}
         >
           Room 2 (Zone 2)
+        </button>
+        <button
+          onClick={() => setActiveRoom(3)}
+          className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeRoom === 3 ? 'border-b-2 border-green-500 text-green-400' : 'text-slate-400 hover:text-white'}`}
+        >
+          Room 3 (Zone 3)
         </button>
       </div>
 

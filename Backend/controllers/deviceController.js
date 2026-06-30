@@ -205,6 +205,7 @@ exports.pushThingspeakConfig = async (req, res) => {
     if (device.deviceType === 'office_control' || device.deviceType === 'system2') {
       await publishToDevice(`inhydro/${deviceRoot}/room1/setpoints/update`, payload);
       await publishToDevice(`inhydro/${deviceRoot}/room2/setpoints/update`, payload);
+      await publishToDevice(`inhydro/${deviceRoot}/room3/setpoints/update`, payload);
     } else if (device.deviceType === 'controlling') {
       await publishToDevice(`inhydro/${deviceRoot}/monitor/setpoints/update`, payload);
     } else {
@@ -254,9 +255,9 @@ exports.getDeviceAnalytics = async (req, res) => {
         timestamp: { $gte: start, $lte: end },
       };
 
-      const room = req.query.room || 'room1'; // 'room1', 'room2' or 'both'
+      const room = req.query.room || 'room1'; // 'room1', 'room2', 'room3' or 'both'
       if (device.deviceType === 'office_control' && room !== 'both') {
-        const targetRoom = room === 'room2' ? 'room2' : 'room1';
+        const targetRoom = room === 'room2' ? 'room2' : (room === 'room3' ? 'room3' : 'room1');
         query.$or = [
           { topic: { $regex: targetRoom, $options: 'i' } },
           { topic: { $regex: 'rooms', $options: 'i' } }
@@ -272,8 +273,8 @@ exports.getDeviceAnalytics = async (req, res) => {
           timestamp: { $gte: start, $lte: end },
         };
         if (device.deviceType === 'office_control' && room !== 'both') {
-          const targetRoom = room === 'room2' ? 'room2' : 'room1';
-          oldQuery.topic = { $regex: targetRoom, $options: 'i' };
+          const targetRoom = room === 'room2' ? 'room2' : (room === 'room3' ? 'room3' : 'room1');
+          oldQuery.topic = { $regex: targetRoom, $options: 'i'};
         }
         packets = await MqttPacket.find(oldQuery).sort({ timestamp: 1 });
       }
@@ -282,11 +283,11 @@ exports.getDeviceAnalytics = async (req, res) => {
       packets.forEach((p) => {
         const d = p.data || {};
         if (device.deviceType === 'office_control') {
-          const isMerged = (d.room1 !== undefined || d.room2 !== undefined);
+          const isMerged = (d.room1 !== undefined || d.room2 !== undefined || d.room3 !== undefined);
 
           if (isMerged) {
             if (room === 'both') {
-              ['room1', 'room2'].forEach((rName) => {
+              ['room1', 'room2', 'room3'].forEach((rName) => {
                 const roomData = d[rName] || {};
                 mappedFeeds.push({
                   created_at: p.timestamp.toISOString(),
@@ -319,7 +320,7 @@ exports.getDeviceAnalytics = async (req, res) => {
               });
             }
           } else {
-            const packetRoom = p.topic && p.topic.toLowerCase().includes('room2') ? 'room2' : 'room1';
+            const packetRoom = p.topic && p.topic.toLowerCase().includes('room3') ? 'room3' : (p.topic && p.topic.toLowerCase().includes('room2') ? 'room2' : 'room1');
             if (room === 'both' || packetRoom === room) {
               mappedFeeds.push({
                 created_at: p.timestamp.toISOString(),

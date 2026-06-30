@@ -131,7 +131,7 @@ const mapFeedsToCharts = (feeds, filter, channelFields, isBothRooms = false) => 
     });
     return mappedData;
   } else {
-    // Both rooms: group by rounded timestamp
+    // Both/all rooms: group by rounded timestamp
     const timeGroupsMap = new Map();
     validFeeds.forEach(f => {
       const timeObj = new Date(f.created_at);
@@ -146,7 +146,8 @@ const mapFeedsToCharts = (feeds, filter, channelFields, isBothRooms = false) => 
       
       const group = timeGroupsMap.get(roundedMs);
       const isRoom2 = f.room === 'room2';
-      const suffix = isRoom2 ? 'Room2' : 'Room1';
+      const isRoom3 = f.room === 'room3';
+      const suffix = isRoom3 ? 'Room3' : (isRoom2 ? 'Room2' : 'Room1');
       
       channelFields.forEach(field => {
         group[`${field.key}${suffix}`] = parseRobustFloat(f[field.key]);
@@ -161,6 +162,7 @@ const mapFeedsToCharts = (feeds, filter, channelFields, isBothRooms = false) => 
         time: g.time,
         room1Value: g[`${field.key}Room1`] !== undefined ? g[`${field.key}Room1`] : null,
         room2Value: g[`${field.key}Room2`] !== undefined ? g[`${field.key}Room2`] : null,
+        room3Value: g[`${field.key}Room3`] !== undefined ? g[`${field.key}Room3`] : null,
         isBoth: true
       }));
     });
@@ -485,7 +487,8 @@ const AnalyticsPage = () => {
             >
               <option value="room1">Room 1</option>
               <option value="room2">Room 2</option>
-              <option value="both">Both Rooms</option>
+              <option value="room3">Room 3</option>
+              <option value="both">All Rooms</option>
             </select>
           )}
 
