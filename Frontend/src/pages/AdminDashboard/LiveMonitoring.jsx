@@ -72,10 +72,11 @@ const LiveMonitoring = () => {
   const mqttClientRef = useRef(null);
 
   // ── Office Control Dual Room Live States ────────────────────────────────────
-  const [officeControlData, setOfficeControlData] = useState({ 1: null, 2: null });
+  const [officeControlData, setOfficeControlData] = useState({ 1: null, 2: null, 3: null });
   const [officeControlHistory, setOfficeControlHistory] = useState({
     1: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
-    2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
+    2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
+    3: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
   });
   const [activeRoomTab, setActiveRoomTab] = useState(1);
 
@@ -141,10 +142,11 @@ const LiveMonitoring = () => {
     setActiveFields([]);
     
     // Clear dual-room MQTT states
-    setOfficeControlData({ 1: null, 2: null });
+    setOfficeControlData({ 1: null, 2: null, 3: null });
     setOfficeControlHistory({
       1: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
-      2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
+      2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
+      3: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
     });
 
     // Clear controlling MQTT states
@@ -301,6 +303,7 @@ const LiveMonitoring = () => {
       } else if (isOfficeControl) {
         client.subscribe(`inhydro/${mqttId}/room1/telemetry/live`);
         client.subscribe(`inhydro/${mqttId}/room2/telemetry/live`);
+        client.subscribe(`inhydro/${mqttId}/room3/telemetry/live`);
       } else if (isControlling) {
         client.subscribe(`inhydro/${mqttId}/monitor/telemetry/live`);
       }
@@ -336,16 +339,27 @@ const LiveMonitoring = () => {
           const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
           setOfficeControlHistory(prev => {
             const roomHist = { ...prev[room] };
-            const metrics = {
-              soil_temp: payload.soil?.soil_temp,
-              moisture: payload.soil?.moisture,
-              ec: payload.soil?.ec,
-              ph: payload.soil?.ph,
-              room_temp: payload.room?.room_temp,
-              room_humi: payload.room?.room_humi,
-              orp: payload.orp,
-              co2: payload.co2
-            };
+            let metrics = {};
+            if (room === 3) {
+              metrics = {
+                md02_1_temp: payload.md02_1?.room_temp,
+                md02_1_humi: payload.md02_1?.room_humi,
+                md02_2_temp: payload.md02_2?.room_temp,
+                md02_2_humi: payload.md02_2?.room_humi,
+                co2: payload.co2
+              };
+            } else {
+              metrics = {
+                soil_temp: payload.soil?.soil_temp,
+                moisture: payload.soil?.moisture,
+                ec: payload.soil?.ec,
+                ph: payload.soil?.ph,
+                room_temp: payload.room?.room_temp,
+                room_humi: payload.room?.room_humi,
+                orp: payload.orp,
+                co2: payload.co2
+              };
+            }
             Object.keys(metrics).forEach(key => {
               const val = metrics[key] !== undefined && metrics[key] !== null ? parseFloat(metrics[key]) : 0;
               roomHist[key] = [...(roomHist[key] || []), { time: timeStr, value: val }].slice(-24);
@@ -537,7 +551,7 @@ const LiveMonitoring = () => {
         <div className="space-y-6">
           {/* Room Selection Tabs */}
           <div className="flex border-b border-slate-700/60 pb-px">
-            {[1, 2].map((room) => (
+            {[1, 2, 3].map((room) => (
               <button
                 key={room}
                 onClick={() => setActiveRoomTab(room)}
@@ -575,97 +589,139 @@ const LiveMonitoring = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 xl:grid-cols-1">
-                  <BigMetric
-                    label="Soil Temp"
-                    value={officeControlData[activeRoomTab].soil?.soil_temp}
-                    unit="°C"
-                    icon={Thermometer}
-                    type="temperature"
-                  />
-                  <BigMetric
-                    label="Soil Moisture"
-                    value={officeControlData[activeRoomTab].soil?.moisture}
-                    unit="%"
-                    icon={Droplets}
-                    type="moisture"
-                  />
-                  {/* EC card — shows mS/cm + TDS in one line */}
-                  {(() => {
-                    const ecVal = officeControlData[activeRoomTab].soil?.ec;
-                    const tdsVal = ecVal != null ? Math.round(ecVal * 500) : null;
-                    const ecStatus = getMetricStatus('ec', ecVal ?? 0);
-                    const ecColor = getMetricColor(ecStatus);
-                    const bgMap = {
-                      'text-emerald-400': 'bg-emerald-500/10 border-emerald-500/20',
-                      'text-yellow-400':  'bg-yellow-500/10 border-yellow-500/20',
-                      'text-red-400':     'bg-red-500/10 border-red-500/20',
-                      'text-slate-500':   'bg-slate-500/10 border-slate-500/20',
-                    };
-                    return (
-                      <motion.div
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className={`rounded-2xl border p-4 ${bgMap[ecColor] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <div className={`rounded-lg p-1.5 ${ecColor} bg-white/5`}>
-                            <Zap className="h-4 w-4" />
-                          </div>
-                          <span className="text-sm font-medium text-slate-400">Soil EC</span>
-                        </div>
-                        <div className="mt-3 flex items-baseline gap-1.5 flex-wrap">
-                          <span className={`text-2xl font-bold tabular-nums ${ecColor}`}>
-                            {ecVal != null ? ecVal.toFixed(2) : '--'}
-                          </span>
-                          <span className="text-sm text-slate-500">mS/cm</span>
-                          {tdsVal != null && (
-                            <span className="text-sm text-slate-400 font-semibold">
-                              ({tdsVal} ppm)
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-1.5 flex items-center gap-1.5">
-                          <div className={`h-1.5 w-1.5 rounded-full ${ecStatus === 'normal' ? 'bg-emerald-400' : ecStatus === 'warning' ? 'bg-yellow-400' : ecStatus === 'critical' ? 'bg-red-400' : 'bg-slate-500'}`} />
-                          <span className="text-xs text-slate-500 capitalize">{ecStatus}</span>
-                        </div>
-                      </motion.div>
-                    );
-                  })()}
-                  <BigMetric
-                    label="Soil pH"
-                    value={officeControlData[activeRoomTab].soil?.ph}
-                    unit="pH"
-                    icon={FlaskConical}
-                    type="ph"
-                  />
-                  <BigMetric
-                    label="Room Temp"
-                    value={officeControlData[activeRoomTab].room?.room_temp}
-                    unit="°C"
-                    icon={Thermometer}
-                    type="temperature"
-                  />
-                  <BigMetric
-                    label="Room Humidity"
-                    value={officeControlData[activeRoomTab].room?.room_humi}
-                    unit="%"
-                    icon={Droplets}
-                    type="moisture"
-                  />
-                  <BigMetric
-                    label="ORP Level"
-                    value={officeControlData[activeRoomTab].orp}
-                    unit="mV"
-                    icon={Activity}
-                    type="default"
-                  />
-                  <BigMetric
-                    label="CO2 Level"
-                    value={officeControlData[activeRoomTab].co2}
-                    unit="ppm"
-                    icon={Activity}
-                    type="co2"
-                  />
+                  {activeRoomTab === 3 ? (
+                    <>
+                      <BigMetric
+                        label="MD02 #1 Temp"
+                        value={officeControlData[activeRoomTab].md02_1?.room_temp}
+                        unit="°C"
+                        icon={Thermometer}
+                        type="temperature"
+                      />
+                      <BigMetric
+                        label="MD02 #1 Humi"
+                        value={officeControlData[activeRoomTab].md02_1?.room_humi}
+                        unit="%"
+                        icon={Droplets}
+                        type="moisture"
+                      />
+                      <BigMetric
+                        label="MD02 #2 Temp"
+                        value={officeControlData[activeRoomTab].md02_2?.room_temp}
+                        unit="°C"
+                        icon={Thermometer}
+                        type="temperature"
+                      />
+                      <BigMetric
+                        label="MD02 #2 Humi"
+                        value={officeControlData[activeRoomTab].md02_2?.room_humi}
+                        unit="%"
+                        icon={Droplets}
+                        type="moisture"
+                      />
+                      <BigMetric
+                        label="CO2 Level"
+                        value={officeControlData[activeRoomTab].co2}
+                        unit="ppm"
+                        icon={Activity}
+                        type="co2"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <BigMetric
+                        label="Soil Temp"
+                        value={officeControlData[activeRoomTab].soil?.soil_temp}
+                        unit="°C"
+                        icon={Thermometer}
+                        type="temperature"
+                      />
+                      <BigMetric
+                        label="Soil Moisture"
+                        value={officeControlData[activeRoomTab].soil?.moisture}
+                        unit="%"
+                        icon={Droplets}
+                        type="moisture"
+                      />
+                      {/* EC card — shows mS/cm + TDS in one line */}
+                      {(() => {
+                        const ecVal = officeControlData[activeRoomTab].soil?.ec;
+                        const tdsVal = ecVal != null ? Math.round(ecVal * 500) : null;
+                        const ecStatus = getMetricStatus('ec', ecVal ?? 0);
+                        const ecColor = getMetricColor(ecStatus);
+                        const bgMap = {
+                          'text-emerald-400': 'bg-emerald-500/10 border-emerald-500/20',
+                          'text-yellow-400':  'bg-yellow-500/10 border-yellow-500/20',
+                          'text-red-400':     'bg-red-500/10 border-red-500/20',
+                          'text-slate-500':   'bg-slate-500/10 border-slate-500/20',
+                        };
+                        return (
+                          <motion.div
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className={`rounded-2xl border p-4 ${bgMap[ecColor] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <div className={`rounded-lg p-1.5 ${ecColor} bg-white/5`}>
+                                <Zap className="h-4 w-4" />
+                              </div>
+                              <span className="text-sm font-medium text-slate-400">Soil EC</span>
+                            </div>
+                            <div className="mt-3 flex items-baseline gap-1.5 flex-wrap">
+                              <span className={`text-2xl font-bold tabular-nums ${ecColor}`}>
+                                {ecVal != null ? ecVal.toFixed(2) : '--'}
+                              </span>
+                              <span className="text-sm text-slate-500">mS/cm</span>
+                              {tdsVal != null && (
+                                <span className="text-sm text-slate-400 font-semibold">
+                                  ({tdsVal} ppm)
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <div className={`h-1.5 w-1.5 rounded-full ${ecStatus === 'normal' ? 'bg-emerald-400' : ecStatus === 'warning' ? 'bg-yellow-400' : ecStatus === 'critical' ? 'bg-red-400' : 'bg-slate-500'}`} />
+                              <span className="text-xs text-slate-500 capitalize">{ecStatus}</span>
+                            </div>
+                          </motion.div>
+                        );
+                      })()}
+                      <BigMetric
+                        label="Soil pH"
+                        value={officeControlData[activeRoomTab].soil?.ph}
+                        unit="pH"
+                        icon={FlaskConical}
+                        type="ph"
+                      />
+                      <BigMetric
+                        label="Room Temp"
+                        value={officeControlData[activeRoomTab].room?.room_temp}
+                        unit="°C"
+                        icon={Thermometer}
+                        type="temperature"
+                      />
+                      <BigMetric
+                        label="Room Humidity"
+                        value={officeControlData[activeRoomTab].room?.room_humi}
+                        unit="%"
+                        icon={Droplets}
+                        type="moisture"
+                      />
+                      <BigMetric
+                        label="ORP Level"
+                        value={officeControlData[activeRoomTab].orp}
+                        unit="mV"
+                        icon={Activity}
+                        type="default"
+                      />
+                      <BigMetric
+                        label="CO2 Level"
+                        value={officeControlData[activeRoomTab].co2}
+                        unit="ppm"
+                        icon={Activity}
+                        type="co2"
+                      />
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -684,54 +740,91 @@ const LiveMonitoring = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <LiveChart
-                    data={officeControlHistory[activeRoomTab].soil_temp}
-                    type="temperature"
-                    title="Soil Temperature Trend"
-                    unit="°C"
-                  />
-                  <LiveChart
-                    data={officeControlHistory[activeRoomTab].moisture}
-                    type="moisture"
-                    title="Soil Moisture Trend"
-                    unit="%"
-                  />
-                  <LiveChart
-                    data={officeControlHistory[activeRoomTab].ec}
-                    type="ec"
-                    title="Soil EC Trend"
-                    unit="mS/cm"
-                  />
-                  <LiveChart
-                    data={officeControlHistory[activeRoomTab].ph}
-                    type="ph"
-                    title="Soil pH Trend"
-                    unit="pH"
-                  />
-                  <LiveChart
-                    data={officeControlHistory[activeRoomTab].room_temp}
-                    type="temperature"
-                    title="Room Temperature Trend"
-                    unit="°C"
-                  />
-                  <LiveChart
-                    data={officeControlHistory[activeRoomTab].room_humi}
-                    type="moisture"
-                    title="Room Humidity Trend"
-                    unit="%"
-                  />
-                  <LiveChart
-                    data={officeControlHistory[activeRoomTab].orp}
-                    type="temperature"
-                    title="ORP Level Trend"
-                    unit="mV"
-                  />
-                  <LiveChart
-                    data={officeControlHistory[activeRoomTab].co2}
-                    type="moisture"
-                    title="CO2 Level Trend"
-                    unit="ppm"
-                  />
+                  {activeRoomTab === 3 ? (
+                    <>
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].md02_1_temp}
+                        type="temperature"
+                        title="MD02 #1 Temp Trend"
+                        unit="°C"
+                      />
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].md02_1_humi}
+                        type="moisture"
+                        title="MD02 #1 Humi Trend"
+                        unit="%"
+                      />
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].md02_2_temp}
+                        type="temperature"
+                        title="MD02 #2 Temp Trend"
+                        unit="°C"
+                      />
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].md02_2_humi}
+                        type="moisture"
+                        title="MD02 #2 Humi Trend"
+                        unit="%"
+                      />
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].co2}
+                        type="moisture"
+                        title="CO2 Level Trend"
+                        unit="ppm"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].soil_temp}
+                        type="temperature"
+                        title="Soil Temperature Trend"
+                        unit="°C"
+                      />
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].moisture}
+                        type="moisture"
+                        title="Soil Moisture Trend"
+                        unit="%"
+                      />
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].ec}
+                        type="ec"
+                        title="Soil EC Trend"
+                        unit="mS/cm"
+                      />
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].ph}
+                        type="ph"
+                        title="Soil pH Trend"
+                        unit="pH"
+                      />
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].room_temp}
+                        type="temperature"
+                        title="Room Temperature Trend"
+                        unit="°C"
+                      />
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].room_humi}
+                        type="moisture"
+                        title="Room Humidity Trend"
+                        unit="%"
+                      />
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].orp}
+                        type="temperature"
+                        title="ORP Level Trend"
+                        unit="mV"
+                      />
+                      <LiveChart
+                        data={officeControlHistory[activeRoomTab].co2}
+                        type="moisture"
+                        title="CO2 Level Trend"
+                        unit="ppm"
+                      />
+                    </>
+                  )}
                 </div>
               )}
             </div>

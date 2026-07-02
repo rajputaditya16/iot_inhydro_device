@@ -1,0 +1,30 @@
+[Unit]
+Description=Pigpio daemon for GPIO control
+After=syslog.target network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pigpiod -g
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+
+
+
+
+
+sudo apt update
+sudo apt install -y build-essential wget tar
+# Download and extract the source code
+cd ~
+wget https://github.com/joan2937/pigpio/archive/refs/tags/v79.tar.gz
+tar zxf v79.tar.gz
+cd pigpio-79
+# Compile and install
+make
+sudo make install
+sudo ldconfig
+# Reload systemd and start the daemon
+sudo systemctl daemon-reload
+sudo systemctl enable --now pigpiod

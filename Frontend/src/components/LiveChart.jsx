@@ -73,6 +73,15 @@ const LiveChart = ({ data, type = 'temperature', title, unit, subtitle = 'Last 2
                 dot={false}
                 activeDot={{ r: 4, fill: '#a855f7', stroke: '#0f172a', strokeWidth: 2 }}
               />
+              <Line
+                type="monotone"
+                dataKey="room3Value"
+                stroke="#10b981"
+                strokeWidth={2}
+                name="Room 3"
+                dot={false}
+                activeDot={{ r: 4, fill: '#10b981', stroke: '#0f172a', strokeWidth: 2 }}
+              />
             </LineChart>
           ) : (
             <AreaChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>

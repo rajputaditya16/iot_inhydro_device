@@ -205,6 +205,7 @@ exports.pushThingspeakConfig = async (req, res) => {
     if (device.deviceType === 'office_control' || device.deviceType === 'system2') {
       await publishToDevice(`inhydro/${deviceRoot}/room1/setpoints/update`, payload);
       await publishToDevice(`inhydro/${deviceRoot}/room2/setpoints/update`, payload);
+      await publishToDevice(`inhydro/${deviceRoot}/room3/setpoints/update`, payload);
     } else if (device.deviceType === 'controlling') {
       await publishToDevice(`inhydro/${deviceRoot}/monitor/setpoints/update`, payload);
     } else {
@@ -241,6 +242,7 @@ exports.getDeviceAnalytics = async (req, res) => {
     // Parse date filters, default to last 24 hours
     const start = req.query.start ? new Date(req.query.start) : new Date(Date.now() - 24 * 60 * 60 * 1000);
     const end = req.query.end ? new Date(req.query.end) : new Date();
+    const room = req.query.room || 'room1'; // 'room1', 'room2', 'room3' or 'both'
 
     // Map Mongoose documents to standard ThingSpeak feeds format
     let feeds = [];
@@ -254,9 +256,8 @@ exports.getDeviceAnalytics = async (req, res) => {
         timestamp: { $gte: start, $lte: end },
       };
 
-      const room = req.query.room || 'room1'; // 'room1', 'room2' or 'both'
       if (device.deviceType === 'office_control' && room !== 'both') {
-        const targetRoom = room === 'room2' ? 'room2' : 'room1';
+        const targetRoom = (room === 'room2' || room === 'room3') ? room : 'room1';
         query.$or = [
           { topic: { $regex: targetRoom, $options: 'i' } },
           { topic: { $regex: 'rooms', $options: 'i' } }
@@ -272,7 +273,7 @@ exports.getDeviceAnalytics = async (req, res) => {
           timestamp: { $gte: start, $lte: end },
         };
         if (device.deviceType === 'office_control' && room !== 'both') {
-          const targetRoom = room === 'room2' ? 'room2' : 'room1';
+          const targetRoom = (room === 'room2' || room === 'room3') ? room : 'room1';
           oldQuery.topic = { $regex: targetRoom, $options: 'i' };
         }
         packets = await MqttPacket.find(oldQuery).sort({ timestamp: 1 });
@@ -282,16 +283,63 @@ exports.getDeviceAnalytics = async (req, res) => {
       packets.forEach((p) => {
         const d = p.data || {};
         if (device.deviceType === 'office_control') {
-          const isMerged = (d.room1 !== undefined || d.room2 !== undefined);
+          const isMerged = (d.room1 !== undefined || d.room2 !== undefined || d.room3 !== undefined);
 
           if (isMerged) {
             if (room === 'both') {
-              ['room1', 'room2'].forEach((rName) => {
+              ['room1', 'room2', 'room3'].forEach((rName) => {
                 const roomData = d[rName] || {};
+                if (rName === 'room3') {
+                  mappedFeeds.push({
+                    created_at: p.timestamp.toISOString(),
+                    entry_id: mappedFeeds.length + 1,
+                    room: rName,
+                    field1: roomData.md02_1?.room_temp !== undefined && roomData.md02_1?.room_temp !== null ? String(roomData.md02_1.room_temp) : null,
+                    field2: roomData.md02_1?.room_humi !== undefined && roomData.md02_1?.room_humi !== null ? String(roomData.md02_1.room_humi) : null,
+                    field3: roomData.md02_2?.room_temp !== undefined && roomData.md02_2?.room_temp !== null ? String(roomData.md02_2.room_temp) : null,
+                    field4: roomData.md02_2?.room_humi !== undefined && roomData.md02_2?.room_humi !== null ? String(roomData.md02_2.room_humi) : null,
+                    field5: null,
+                    field6: null,
+                    field7: null,
+                    field8: roomData.co2 !== undefined && roomData.co2 !== null ? String(roomData.co2) : null,
+                  });
+                } else {
+                  mappedFeeds.push({
+                    created_at: p.timestamp.toISOString(),
+                    entry_id: mappedFeeds.length + 1,
+                    room: rName,
+                    field1: roomData.soil?.soil_temp !== undefined && roomData.soil?.soil_temp !== null ? String(roomData.soil.soil_temp) : null,
+                    field2: roomData.soil?.moisture !== undefined && roomData.soil?.moisture !== null ? String(roomData.soil.moisture) : null,
+                    field3: roomData.soil?.ec !== undefined && roomData.soil?.ec !== null ? String(roomData.soil.ec) : null,
+                    field4: roomData.soil?.ph !== undefined && roomData.soil?.ph !== null ? String(roomData.soil.ph) : null,
+                    field5: roomData.room?.room_temp !== undefined && roomData.room?.room_temp !== null ? String(roomData.room.room_temp) : null,
+                    field6: roomData.room?.room_humi !== undefined && roomData.room?.room_humi !== null ? String(roomData.room.room_humi) : null,
+                    field7: roomData.orp !== undefined && roomData.orp !== null ? String(roomData.orp) : null,
+                    field8: roomData.co2 !== undefined && roomData.co2 !== null ? String(roomData.co2) : null,
+                  });
+                }
+              });
+            } else {
+              const roomData = d[room] || {};
+              if (room === 'room3') {
                 mappedFeeds.push({
                   created_at: p.timestamp.toISOString(),
                   entry_id: mappedFeeds.length + 1,
-                  room: rName,
+                  room: room,
+                  field1: roomData.md02_1?.room_temp !== undefined && roomData.md02_1?.room_temp !== null ? String(roomData.md02_1.room_temp) : null,
+                  field2: roomData.md02_1?.room_humi !== undefined && roomData.md02_1?.room_humi !== null ? String(roomData.md02_1.room_humi) : null,
+                  field3: roomData.md02_2?.room_temp !== undefined && roomData.md02_2?.room_temp !== null ? String(roomData.md02_2.room_temp) : null,
+                  field4: roomData.md02_2?.room_humi !== undefined && roomData.md02_2?.room_humi !== null ? String(roomData.md02_2.room_humi) : null,
+                  field5: null,
+                  field6: null,
+                  field7: null,
+                  field8: roomData.co2 !== undefined && roomData.co2 !== null ? String(roomData.co2) : null,
+                });
+              } else {
+                mappedFeeds.push({
+                  created_at: p.timestamp.toISOString(),
+                  entry_id: mappedFeeds.length + 1,
+                  room: room,
                   field1: roomData.soil?.soil_temp !== undefined && roomData.soil?.soil_temp !== null ? String(roomData.soil.soil_temp) : null,
                   field2: roomData.soil?.moisture !== undefined && roomData.soil?.moisture !== null ? String(roomData.soil.moisture) : null,
                   field3: roomData.soil?.ec !== undefined && roomData.soil?.ec !== null ? String(roomData.soil.ec) : null,
@@ -301,39 +349,40 @@ exports.getDeviceAnalytics = async (req, res) => {
                   field7: roomData.orp !== undefined && roomData.orp !== null ? String(roomData.orp) : null,
                   field8: roomData.co2 !== undefined && roomData.co2 !== null ? String(roomData.co2) : null,
                 });
-              });
-            } else {
-              const roomData = d[room] || {};
-              mappedFeeds.push({
-                created_at: p.timestamp.toISOString(),
-                entry_id: mappedFeeds.length + 1,
-                room: room,
-                field1: roomData.soil?.soil_temp !== undefined && roomData.soil?.soil_temp !== null ? String(roomData.soil.soil_temp) : null,
-                field2: roomData.soil?.moisture !== undefined && roomData.soil?.moisture !== null ? String(roomData.soil.moisture) : null,
-                field3: roomData.soil?.ec !== undefined && roomData.soil?.ec !== null ? String(roomData.soil.ec) : null,
-                field4: roomData.soil?.ph !== undefined && roomData.soil?.ph !== null ? String(roomData.soil.ph) : null,
-                field5: roomData.room?.room_temp !== undefined && roomData.room?.room_temp !== null ? String(roomData.room.room_temp) : null,
-                field6: roomData.room?.room_humi !== undefined && roomData.room?.room_humi !== null ? String(roomData.room.room_humi) : null,
-                field7: roomData.orp !== undefined && roomData.orp !== null ? String(roomData.orp) : null,
-                field8: roomData.co2 !== undefined && roomData.co2 !== null ? String(roomData.co2) : null,
-              });
+              }
             }
           } else {
-            const packetRoom = p.topic && p.topic.toLowerCase().includes('room2') ? 'room2' : 'room1';
+            const packetRoom = p.topic && p.topic.toLowerCase().includes('room3') ? 'room3' : p.topic && p.topic.toLowerCase().includes('room2') ? 'room2' : 'room1';
             if (room === 'both' || packetRoom === room) {
-              mappedFeeds.push({
-                created_at: p.timestamp.toISOString(),
-                entry_id: mappedFeeds.length + 1,
-                room: packetRoom,
-                field1: d.soil?.soil_temp !== undefined && d.soil?.soil_temp !== null ? String(d.soil.soil_temp) : null,
-                field2: d.soil?.moisture !== undefined && d.soil?.moisture !== null ? String(d.soil.moisture) : null,
-                field3: d.soil?.ec !== undefined && d.soil?.ec !== null ? String(d.soil.ec) : null,
-                field4: d.soil?.ph !== undefined && d.soil?.ph !== null ? String(d.soil.ph) : null,
-                field5: d.room?.room_temp !== undefined && d.room?.room_temp !== null ? String(d.room.room_temp) : null,
-                field6: d.room?.room_humi !== undefined && d.room?.room_humi !== null ? String(d.room.room_humi) : null,
-                field7: d.orp !== undefined && d.orp !== null ? String(d.orp) : null,
-                field8: d.co2 !== undefined && d.co2 !== null ? String(d.co2) : null,
-              });
+              if (packetRoom === 'room3') {
+                mappedFeeds.push({
+                  created_at: p.timestamp.toISOString(),
+                  entry_id: mappedFeeds.length + 1,
+                  room: packetRoom,
+                  field1: d.md02_1?.room_temp !== undefined && d.md02_1?.room_temp !== null ? String(d.md02_1.room_temp) : null,
+                  field2: d.md02_1?.room_humi !== undefined && d.md02_1?.room_humi !== null ? String(d.md02_1.room_humi) : null,
+                  field3: d.md02_2?.room_temp !== undefined && d.md02_2?.room_temp !== null ? String(d.md02_2.room_temp) : null,
+                  field4: d.md02_2?.room_humi !== undefined && d.md02_2?.room_humi !== null ? String(d.md02_2.room_humi) : null,
+                  field5: null,
+                  field6: null,
+                  field7: null,
+                  field8: d.co2 !== undefined && d.co2 !== null ? String(d.co2) : null,
+                });
+              } else {
+                mappedFeeds.push({
+                  created_at: p.timestamp.toISOString(),
+                  entry_id: mappedFeeds.length + 1,
+                  room: packetRoom,
+                  field1: d.soil?.soil_temp !== undefined && d.soil?.soil_temp !== null ? String(d.soil.soil_temp) : null,
+                  field2: d.soil?.moisture !== undefined && d.soil?.moisture !== null ? String(d.soil.moisture) : null,
+                  field3: d.soil?.ec !== undefined && d.soil?.ec !== null ? String(d.soil.ec) : null,
+                  field4: d.soil?.ph !== undefined && d.soil?.ph !== null ? String(d.soil.ph) : null,
+                  field5: d.room?.room_temp !== undefined && d.room?.room_temp !== null ? String(d.room.room_temp) : null,
+                  field6: d.room?.room_humi !== undefined && d.room?.room_humi !== null ? String(d.room.room_humi) : null,
+                  field7: d.orp !== undefined && d.orp !== null ? String(d.orp) : null,
+                  field8: d.co2 !== undefined && d.co2 !== null ? String(d.co2) : null,
+                });
+              }
             }
           }
         } else if (device.deviceType === 'multi_sensor') {
@@ -428,14 +477,25 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field16 = 'Phosphorus (P)';
       channelData.field17 = 'Potassium (K)';
     } else if (device.deviceType === 'office_control') {
-      channelData.field1 = 'Avg Water Temperature';
-      channelData.field2 = 'Avg Water Moisture';
-      channelData.field3 = 'Avg EC';
-      channelData.field4 = 'Avg Ph';
-      channelData.field5 = 'Avg Room Temperature';
-      channelData.field6 = 'Avg Room Humidity';
-      channelData.field7 = 'Avg ORP';
-      channelData.field8 = 'Avg CO2';
+      if (room === 'room3') {
+        channelData.field1 = 'MD02 #1 Temp';
+        channelData.field2 = 'MD02 #1 Humi';
+        channelData.field3 = 'MD02 #2 Temp';
+        channelData.field4 = 'MD02 #2 Humi';
+        channelData.field5 = 'Field 5';
+        channelData.field6 = 'Field 6';
+        channelData.field7 = 'Field 7';
+        channelData.field8 = 'CO2 Level';
+      } else {
+        channelData.field1 = 'Soil Temp';
+        channelData.field2 = 'Soil Moisture';
+        channelData.field3 = 'Soil EC';
+        channelData.field4 = 'Soil pH';
+        channelData.field5 = 'Room Temp';
+        channelData.field6 = 'Room Humidity';
+        channelData.field7 = 'ORP Level';
+        channelData.field8 = 'CO2 Level';
+      }
     } else if (device.deviceType === 'multi_sensor') {
       channelData.field1 = 'Cold Room 1 Temp';
       channelData.field2 = 'Cold Room 2 Temp';

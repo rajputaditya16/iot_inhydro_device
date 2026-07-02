@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Edit3, Radio } from 'lucide-react';
 import mqtt from 'mqtt';
 
-const defaultSetpoints = {
+const defaultSetpointsRoom12 = {
   "EC MIN": 1.2, "EC MAX": 1.8,
   "PH LOW": 5.8, "PH HIGH": 6.5,
   "D T Max": 35.0, "DT Min": 15.0,
@@ -18,6 +18,42 @@ const defaultSetpoints = {
   "Timer4 N_Start": "17:05", "Timer4 N_Stop": "09:55", "Timer4 N_ON Min": 15, "Timer4 N_OFF Min": 30,
 };
 
+const defaultSetpointsRoom3 = {
+  "Timer1 Name": "TIMER 1", "Timer1 Start": "10:00", "Timer1 Stop": "17:00", "Timer1 ON Min": 15, "Timer1 OFF Min": 30,
+  "Timer2 Name": "TIMER 2", "Timer2 Start": "10:00", "Timer2 Stop": "17:00", "Timer2 ON Min": 15, "Timer2 OFF Min": 30,
+  "Timer3 Name": "TIMER 3",
+  "Timer3 D_Start": "10:00", "Timer3 D_Stop": "17:00", "Timer3 D_ON Min": 15, "Timer3 D_OFF Min": 30,
+  "Timer3 N_Start": "17:05", "Timer3 N_Stop": "09:55", "Timer3 N_ON Min": 15, "Timer3 N_OFF Min": 30,
+  "AC1 Name": "AC 1 TIMER",
+  "AC1 D_Start": "10:00", "AC1 D_Stop": "17:00",
+  "AC1 D_ON Min": 15,     "AC1 D_OFF Min": 30,
+  "AC1 N_Start": "17:05", "AC1 N_Stop": "09:55",
+  "AC1 N_ON Min": 15,     "AC1 N_OFF Min": 30,
+  "AC1 D_T Max": 35.0,    "AC1 D_T Min": 15.0,
+  "AC1 N_T Max": 35.0,    "AC1 N_T Min": 15.0,
+  "AC2 Name": "AC 2 TIMER",
+  "AC2 D_Start": "10:00", "AC2 D_Stop": "17:00",
+  "AC2 D_ON Min": 15,     "AC2 D_OFF Min": 30,
+  "AC2 N_Start": "17:05", "AC2 N_Stop": "09:55",
+  "AC2 N_ON Min": 15,     "AC2 N_OFF Min": 30,
+  "AC2 D_T Max": 35.0,    "AC2 D_T Min": 15.0,
+  "AC2 N_T Max": 35.0,    "AC2 N_T Min": 15.0,
+  "HUMI1 Name": "HUMI 1 TIMER",
+  "HUMI1 D_Start": "10:00", "HUMI1 D_Stop": "17:00",
+  "HUMI1 D_ON Min": 15,     "HUMI1 D_OFF Min": 30,
+  "HUMI1 N_Start": "17:05", "HUMI1 N_Stop": "09:55",
+  "HUMI1 N_ON Min": 15,     "HUMI1 N_OFF Min": 30,
+  "HUMI1 D_H Max": 80.0,    "HUMI1 D_H Min": 30.0,
+  "HUMI1 N_H Max": 80.0,    "HUMI1 N_H Min": 30.0,
+  "HUMI2 Name": "HUMI 2 TIMER",
+  "HUMI2 D_Start": "10:00", "HUMI2 D_Stop": "17:00",
+  "HUMI2 D_ON Min": 15,     "HUMI2 D_OFF Min": 30,
+  "HUMI2 N_Start": "17:05", "HUMI2 N_Stop": "09:55",
+  "HUMI2 N_ON Min": 15,     "HUMI2 N_OFF Min": 30,
+  "HUMI2 D_H Max": 80.0,    "HUMI2 D_H Min": 30.0,
+  "HUMI2 N_H Max": 80.0,    "HUMI2 N_H Min": 30.0,
+};
+
 const InputRow = ({ label, objKey, type = "number", data, onChange }) => (
   <div className="flex flex-col gap-1">
     <label className="text-xs font-medium text-slate-400">{label}</label>
@@ -30,12 +66,76 @@ const InputRow = ({ label, objKey, type = "number", data, onChange }) => (
   </div>
 );
 
+const StandardTimerCard = ({ prefix, label, data, onChange }) => (
+  <div className="space-y-4 border border-slate-700/50 p-4 rounded-xl">
+    <InputRow data={data} onChange={onChange} label={`${label} Name`} objKey={`${prefix} Name`} type="text" />
+    <div className="grid grid-cols-2 gap-4">
+      <InputRow data={data} onChange={onChange} label="Start Time (HH:MM)" objKey={`${prefix} Start`} type="text" />
+      <InputRow data={data} onChange={onChange} label="Stop Time (HH:MM)" objKey={`${prefix} Stop`} type="text" />
+      <InputRow data={data} onChange={onChange} label="ON Duration (Min)" objKey={`${prefix} ON Min`} />
+      <InputRow data={data} onChange={onChange} label="OFF Duration (Min)" objKey={`${prefix} OFF Min`} />
+    </div>
+  </div>
+);
+
+const DayNightTimerCard = ({ prefix, label, data, onChange, isAC = false, isHumi = false }) => (
+  <div className="space-y-4 border border-slate-700/50 p-4 rounded-xl bg-slate-900/10">
+    <InputRow data={data} onChange={onChange} label={`${label} Name`} objKey={`${prefix} Name`} type="text" />
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Day Settings */}
+      <div className="space-y-3 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
+        <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider">Day Settings</h5>
+        <div className="grid grid-cols-2 gap-3">
+          <InputRow data={data} onChange={onChange} label="Start Time (HH:MM)" objKey={`${prefix} D_Start`} type="text" />
+          <InputRow data={data} onChange={onChange} label="Stop Time (HH:MM)" objKey={`${prefix} D_Stop`} type="text" />
+          <InputRow data={data} onChange={onChange} label="ON Duration (Min)" objKey={`${prefix} D_ON Min`} />
+          <InputRow data={data} onChange={onChange} label="OFF Duration (Min)" objKey={`${prefix} D_OFF Min`} />
+          {isAC && (
+            <>
+              <InputRow data={data} onChange={onChange} label="Day Temp Max (°C)" objKey={`${prefix} D_T Max`} />
+              <InputRow data={data} onChange={onChange} label="Day Temp Min (°C)" objKey={`${prefix} D_T Min`} />
+            </>
+          )}
+          {isHumi && (
+            <>
+              <InputRow data={data} onChange={onChange} label="Day Humi Max (%)" objKey={`${prefix} D_H Max`} />
+              <InputRow data={data} onChange={onChange} label="Day Humi Min (%)" objKey={`${prefix} D_H Min`} />
+            </>
+          )}
+        </div>
+      </div>
+      {/* Night Settings */}
+      <div className="space-y-3 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
+        <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider">Night Settings</h5>
+        <div className="grid grid-cols-2 gap-3">
+          <InputRow data={data} onChange={onChange} label="Start Time (HH:MM)" objKey={`${prefix} N_Start`} type="text" />
+          <InputRow data={data} onChange={onChange} label="Stop Time (HH:MM)" objKey={`${prefix} N_Stop`} type="text" />
+          <InputRow data={data} onChange={onChange} label="ON Duration (Min)" objKey={`${prefix} N_ON Min`} />
+          <InputRow data={data} onChange={onChange} label="OFF Duration (Min)" objKey={`${prefix} N_OFF Min`} />
+          {isAC && (
+            <>
+              <InputRow data={data} onChange={onChange} label="Night Temp Max (°C)" objKey={`${prefix} N_T Max`} />
+              <InputRow data={data} onChange={onChange} label="Night Temp Min (°C)" objKey={`${prefix} N_T Min`} />
+            </>
+          )}
+          {isHumi && (
+            <>
+              <InputRow data={data} onChange={onChange} label="Night Humi Max (%)" objKey={`${prefix} N_H Max`} />
+              <InputRow data={data} onChange={onChange} label="Night Humi Min (%)" objKey={`${prefix} N_H Min`} />
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
 const OfficeControlSettings = () => {
   const [devices, setDevices] = useState([]);
   const [deviceRoot, setDeviceRoot] = useState('');
   const [activeRoom, setActiveRoom] = useState(1);
 
-  const [setpoints, setSetpoints] = useState({ 1: { ...defaultSetpoints }, 2: { ...defaultSetpoints } });
+  const [setpoints, setSetpoints] = useState({ 1: { ...defaultSetpointsRoom12 }, 2: { ...defaultSetpointsRoom12 }, 3: { ...defaultSetpointsRoom3 } });
 
   const [status, setStatus] = useState('disconnected');
   const [loading, setLoading] = useState(true);
@@ -116,10 +216,14 @@ const OfficeControlSettings = () => {
     setStatus('disconnected');
     const mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
 
-    const initialSetpoints = { 1: { ...defaultSetpoints }, 2: { ...defaultSetpoints } };
+    const initialSetpoints = {
+      1: { ...defaultSetpointsRoom12 },
+      2: { ...defaultSetpointsRoom12 },
+      3: { ...defaultSetpointsRoom3 }
+    };
     if (isSuperadmin && selectedDevice && selectedDevice.thingspeak) {
       const ts = selectedDevice.thingspeak;
-      ['1', '2'].forEach(room => {
+      ['1', '2', '3'].forEach(room => {
         if (ts.clientId) initialSetpoints[room]["CLIENT ID"] = ts.clientId;
         if (ts.username) initialSetpoints[room]["USERNAME"] = ts.username;
         if (ts.password) initialSetpoints[room]["PASSWORD"] = ts.password;
@@ -133,7 +237,7 @@ const OfficeControlSettings = () => {
 
     mqttClient.on('connect', () => {
       setStatus('connected');
-      [1, 2].forEach(room => {
+      [1, 2, 3].forEach(room => {
         mqttClient.subscribe(`inhydro/${deviceRoot}/room${room}/setpoints/current`);
         mqttClient.publish(`inhydro/${deviceRoot}/room${room}/setpoints/request_sync`, '1');
       });
@@ -192,7 +296,21 @@ const OfficeControlSettings = () => {
       setStatus('saving');
 
       const payload = { ...setpoints[activeRoom] };
-      const numericFields = ['EC MIN', 'EC MAX', 'PH LOW', 'PH HIGH', 'D T Max', 'DT Min', 'N T Max', 'N T Min', 'H Max', 'H Min', 'Timer1 ON Min', 'Timer1 OFF Min', 'Timer2 ON Min', 'Timer2 OFF Min', 'Timer3 D_ON Min', 'Timer3 D_OFF Min', 'Timer3 N_ON Min', 'Timer3 N_OFF Min', 'Timer4 D_ON Min', 'Timer4 D_OFF Min', 'Timer4 N_ON Min', 'Timer4 N_OFF Min', 'PORT'];
+      const numericFields = [
+        'EC MIN', 'EC MAX', 'PH LOW', 'PH HIGH', 'D T Max', 'DT Min', 'N T Max', 'N T Min', 'H Max', 'H Min',
+        'Timer1 ON Min', 'Timer1 OFF Min', 'Timer2 ON Min', 'Timer2 OFF Min',
+        'Timer3 D_ON Min', 'Timer3 D_OFF Min', 'Timer3 N_ON Min', 'Timer3 N_OFF Min',
+        'Timer4 D_ON Min', 'Timer4 D_OFF Min', 'Timer4 N_ON Min', 'Timer4 N_OFF Min',
+        'AC1 D_ON Min', 'AC1 D_OFF Min', 'AC1 N_ON Min', 'AC1 N_OFF Min',
+        'AC1 D_T Max', 'AC1 D_T Min', 'AC1 N_T Max', 'AC1 N_T Min',
+        'AC2 D_ON Min', 'AC2 D_OFF Min', 'AC2 N_ON Min', 'AC2 N_OFF Min',
+        'AC2 D_T Max', 'AC2 D_T Min', 'AC2 N_T Max', 'AC2 N_T Min',
+        'HUMI1 D_ON Min', 'HUMI1 D_OFF Min', 'HUMI1 N_ON Min', 'HUMI1 N_OFF Min',
+        'HUMI1 D_H Max', 'HUMI1 D_H Min', 'HUMI1 N_H Max', 'HUMI1 N_H Min',
+        'HUMI2 D_ON Min', 'HUMI2 D_OFF Min', 'HUMI2 N_ON Min', 'HUMI2 N_OFF Min',
+        'HUMI2 D_H Max', 'HUMI2 D_H Min', 'HUMI2 N_H Max', 'HUMI2 N_H Min',
+        'PORT'
+      ];
 
       numericFields.forEach(field => {
         if (payload[field] !== undefined && payload[field] !== "") {
@@ -394,97 +512,93 @@ const OfficeControlSettings = () => {
         >
           Room 2 (Zone 2)
         </button>
+        <button
+          onClick={() => setActiveRoom(3)}
+          className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeRoom === 3 ? 'border-b-2 border-green-500 text-green-400' : 'text-slate-400 hover:text-white'}`}
+        >
+          Room 3 (Zone 3)
+        </button>
       </div>
 
       <div className="space-y-6">
-        <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
-          <h4 className="mb-4 text-sm font-semibold text-green-400">Core Limits</h4>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="EC Minimum (mS/cm)" objKey="EC MIN" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="EC Maximum (mS/cm)" objKey="EC MAX" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="pH Low Limit" objKey="PH LOW" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="pH High Limit" objKey="PH HIGH" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Day Temp Min (°C)" objKey="DT Min" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Day Temp Max (°C)" objKey="D T Max" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Night Temp Min (°C)" objKey="N T Min" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Night Temp Max (°C)" objKey="N T Max" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Room Humidity Min (%)" objKey="H Min" />
-            <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Room Humidity Max (%)" objKey="H Max" />
+        {activeRoom !== 3 && (
+          <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
+            <h4 className="mb-4 text-sm font-semibold text-green-400">Core Limits</h4>
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="EC Minimum (mS/cm)" objKey="EC MIN" />
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="EC Maximum (mS/cm)" objKey="EC MAX" />
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="pH Low Limit" objKey="PH LOW" />
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="pH High Limit" objKey="PH HIGH" />
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Day Temp Min (°C)" objKey="DT Min" />
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Day Temp Max (°C)" objKey="D T Max" />
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Night Temp Min (°C)" objKey="N T Min" />
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Night Temp Max (°C)" objKey="N T Max" />
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Room Humidity Min (%)" objKey="H Min" />
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Room Humidity Max (%)" objKey="H Max" />
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
           <h4 className="mb-4 text-sm font-semibold text-green-400">Cyclic Timers</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4 border border-slate-700/50 p-4 rounded-xl">
-              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Timer 1 Name" objKey="Timer1 Name" type="text" />
-              <div className="grid grid-cols-2 gap-4">
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer1 Start" type="text" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer1 Stop" type="text" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer1 ON Min" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer1 OFF Min" />
+          
+          {activeRoom === 3 ? (
+            <div className="space-y-6">
+              {/* Row 1: Timer 1 & Timer 2 */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <StandardTimerCard prefix="Timer1" label="Timer 1" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
+                <StandardTimerCard prefix="Timer2" label="Timer 2" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
               </div>
-            </div>
-            <div className="space-y-4 border border-slate-700/50 p-4 rounded-xl">
-              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Timer 2 Name" objKey="Timer2 Name" type="text" />
-              <div className="grid grid-cols-2 gap-4">
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer2 Start" type="text" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer2 Stop" type="text" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer2 ON Min" />
-                <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer2 OFF Min" />
-              </div>
-            </div>
-            <div className="md:col-span-2 space-y-4 border border-slate-700/50 p-4 rounded-xl">
-              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Timer 3 Name" objKey="Timer3 Name" type="text" />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                {/* Day Settings */}
-                <div className="space-y-4 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
-                  <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider">Day Settings</h5>
-                  <div className="grid grid-cols-2 gap-3">
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer3 D_Start" type="text" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer3 D_Stop" type="text" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer3 D_ON Min" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer3 D_OFF Min" />
-                  </div>
+
+              {/* Row 2: Timer 3 (Full Width Day/Night) */}
+              <DayNightTimerCard prefix="Timer3" label="Timer 3" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
+
+              {/* Separator Line */}
+              <div className="border-t border-slate-700/50 my-6" />
+
+              {/* Climate Control Header */}
+              <h4 className="text-sm font-semibold text-green-400">Climate Control Timers</h4>
+
+              {/* Row 3: AC Timers vs Humidifier Timers (Side by side with vertical separator) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative">
+                {/* AC Timers (Left side) */}
+                <div className="space-y-6">
+                  <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider text-center border-b border-slate-700/50 pb-2">AC Timers</h5>
+                  <DayNightTimerCard prefix="AC1" label="AC 1" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} isAC={true} />
+                  
+                  {/* Internal Separator */}
+                  <div className="border-t border-slate-700/30 my-4" />
+                  
+                  <DayNightTimerCard prefix="AC2" label="AC 2" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} isAC={true} />
                 </div>
-                {/* Night Settings */}
-                <div className="space-y-4 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
-                  <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider">Night Settings</h5>
-                  <div className="grid grid-cols-2 gap-3">
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer3 N_Start" type="text" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer3 N_Stop" type="text" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer3 N_ON Min" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer3 N_OFF Min" />
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="md:col-span-2 space-y-4 border border-slate-700/50 p-4 rounded-xl">
-              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Timer 4 Name (AC TIMER)" objKey="Timer4 Name" type="text" />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                {/* Day Settings */}
-                <div className="space-y-4 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
-                  <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider">Day Settings</h5>
-                  <div className="grid grid-cols-2 gap-3">
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer4 D_Start" type="text" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer4 D_Stop" type="text" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer4 D_ON Min" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer4 D_OFF Min" />
-                  </div>
-                </div>
-                {/* Night Settings */}
-                <div className="space-y-4 border border-slate-700/30 p-3 rounded-lg bg-slate-900/20">
-                  <h5 className="text-xs font-semibold text-green-400 uppercase tracking-wider">Night Settings</h5>
-                  <div className="grid grid-cols-2 gap-3">
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Start Time (HH:MM)" objKey="Timer4 N_Start" type="text" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="Stop Time (HH:MM)" objKey="Timer4 N_Stop" type="text" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="ON Duration (Min)" objKey="Timer4 N_ON Min" />
-                    <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="OFF Duration (Min)" objKey="Timer4 N_OFF Min" />
-                  </div>
+
+                {/* Vertical Separator Line (visible on md screens and up) */}
+                <div className="hidden md:block absolute left-1/2 top-0 bottom-0 border-l border-slate-700/50" />
+
+                {/* Humidifier Timers (Right side) */}
+                <div className="space-y-6">
+                  <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider text-center border-b border-slate-700/50 pb-2">Humidifier Timers</h5>
+                  <DayNightTimerCard prefix="HUMI1" label="HUMI 1" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} isHumi={true} />
+                  
+                  {/* Internal Separator */}
+                  <div className="border-t border-slate-700/30 my-4" />
+                  
+                  <DayNightTimerCard prefix="HUMI2" label="HUMI 2" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} isHumi={true} />
                 </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <StandardTimerCard prefix="Timer1" label="Timer 1" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
+              <StandardTimerCard prefix="Timer2" label="Timer 2" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
+              <div className="md:col-span-2">
+                <DayNightTimerCard prefix="Timer3" label="Timer 3" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
+              </div>
+              <div className="md:col-span-2">
+                <DayNightTimerCard prefix="Timer4" label="Timer 4 (AC TIMER)" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
+              </div>
+            </div>
+          )}
         </div>
 
         {isSuperadmin && (
