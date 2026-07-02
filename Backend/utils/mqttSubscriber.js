@@ -3,9 +3,7 @@ const mongoose = require('mongoose');
 const Device = require('../models/Device');
 const { getTelemetryModel } = require('../models/TelemetryLog');
 
-const BROKER_URL = process.env.MQTT_BROKER_URL || 'mqtt://147.93.106.142:1883';
-const MQTT_USER = process.env.MQTT_USERNAME || 'Inhydro@5598';
-const MQTT_PASS = process.env.MQTT_PASSWORD || 'MGPL@5598';
+const BROKER_URL = process.env.MQTT_BROKER_URL || 'mqtt://broker.hivemq.com:1883';
 const deviceCache = new Map(); // Caches mqttId -> deviceId to prevent redundant DB queries
 
 /**
@@ -68,14 +66,13 @@ const resolveDeviceId = async (mqttId, topic) => {
 const startMqttSubscriber = () => {
   console.log(`[MQTT Subscriber] Connecting to HiveMQ broker: ${BROKER_URL}`);
 
-  const client = mqtt.connect(BROKER_URL, {
-    username: MQTT_USER,
-    password: MQTT_PASS,
+  const options = {
     clientId: `backend_subscriber_daemon_${Date.now()}`,
     clean: true,
     reconnectPeriod: 5000, // Reconnect every 5 seconds if connection is lost
     rejectUnauthorized: false, // Bypass self-signed certificate validation on raw IP
-  });
+  };
+  const client = mqtt.connect(BROKER_URL, options);
 
   client.on('connect', () => {
     console.log('✅ [MQTT Subscriber] Connected to HiveMQ broker.');
