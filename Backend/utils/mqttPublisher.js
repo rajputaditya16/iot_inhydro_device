@@ -5,9 +5,7 @@
  */
 const mqtt = require('mqtt');
 
-const CONTROL_BROKER = process.env.MQTT_BROKER_URL || 'mqtt://147.93.106.142:1883';
-const MQTT_USER = process.env.MQTT_USERNAME || 'Inhydro@5598';
-const MQTT_PASS = process.env.MQTT_PASSWORD || 'MGPL@5598';
+const CONTROL_BROKER = 'mqtt://broker.hivemq.com:1883'
 
 /**
  * Publish a message to a topic on HiveMQ and disconnect.
@@ -18,11 +16,8 @@ const MQTT_PASS = process.env.MQTT_PASSWORD || 'MGPL@5598';
 const publishToDevice = (topic, payload) => {
   return new Promise((resolve, reject) => {
     const client = mqtt.connect(CONTROL_BROKER, {
-      username: MQTT_USER,
-      password: MQTT_PASS,
       clientId: `backend_publisher_${Date.now()}`,
       connectTimeout: 10000,
-      rejectUnauthorized: false, // Bypass self-signed certificate validation on raw IP
     });
 
     const message = typeof payload === 'string' ? payload : JSON.stringify(payload);
