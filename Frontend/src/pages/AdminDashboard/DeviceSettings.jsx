@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Save, AlertCircle, CheckCircle2, RefreshCw, Cpu, ChevronDown, Radio } from 'lucide-react';
-import mqtt from 'mqtt';
+import { createMqttClient } from '../../utils/mqtt';
 
 const defaultSetpoints = {
   "EC MIN": 1200,
@@ -110,7 +110,7 @@ const DeviceSettings = () => {
 
   // ── Step 2: Connect to MQTT once on mount ──────────────────────────────────
   useEffect(() => {
-    const mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+    const mqttClient = createMqttClient();
 
     mqttClient.on('connect', () => {
       console.log('Connected to MQTT Cloud Broker');

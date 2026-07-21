@@ -3,7 +3,11 @@ const mongoose = require('mongoose');
 const Device = require('../models/Device');
 const { getTelemetryModel } = require('../models/TelemetryLog');
 
-const BROKER_URL = process.env.MQTT_BROKER_URL || 'mqtt://broker.hivemq.com:1883';
+const EventEmitter = require('events');
+const telemetryEmitter = new EventEmitter();
+telemetryEmitter.setMaxListeners(100);
+
+const BROKER_URL = process.env.MQTT_BROKER_URL || 'mqtt://147.93.106.142:1883';
 const deviceCache = new Map(); // Caches mqttId -> deviceId to prevent redundant DB queries
 
 /**
@@ -64,10 +68,12 @@ const resolveDeviceId = async (mqttId, topic) => {
  * Initializes and starts the MQTT Subscriber listener.
  */
 const startMqttSubscriber = () => {
-  console.log(`[MQTT Subscriber] Connecting to HiveMQ broker: ${BROKER_URL}`);
+  console.log(`[MQTT Subscriber] Connecting to Mosquitto VPS broker: ${BROKER_URL}`);
 
   const options = {
     clientId: `backend_subscriber_daemon_${Date.now()}`,
+    username: process.env.MQTT_USERNAME || 'Inhydro@5598',
+    password: process.env.MQTT_PASSWORD || 'MGPL@5598',
     clean: true,
     reconnectPeriod: 5000, // Reconnect every 5 seconds if connection is lost
     rejectUnauthorized: false, // Bypass self-signed certificate validation on raw IP
@@ -75,7 +81,7 @@ const startMqttSubscriber = () => {
   const client = mqtt.connect(BROKER_URL, options);
 
   client.on('connect', () => {
-    console.log('✅ [MQTT Subscriber] Connected to HiveMQ broker.');
+    console.log('✅ [MQTT Subscriber] Connected to Mosquitto VPS broker.');
 
     // Subscribe to multi-sensor telemetry: inhydro/{mqttId}/telemetry/live
     client.subscribe('inhydro/+/telemetry/live', (err) => {
@@ -172,6 +178,15 @@ const startMqttSubscriber = () => {
         });
         console.log(`[MQTT Subscriber] Saved live telemetry for "${mqttId}" on topic "${topic}" in collection ${TelemetryModel.collection.name}`);
       }
+
+      // Emit in-memory event for SSE real-time web streaming
+      telemetryEmitter.emit('telemetry', {
+        deviceId: deviceId.toString(),
+        mqttId,
+        topic,
+        data: payloadData,
+        timestamp: new Date()
+      });
     } catch (err) {
       console.error(`[MQTT Subscriber] Error processing incoming MQTT packet on "${topic}":`, err.message);
     }
@@ -185,8 +200,8 @@ const startMqttSubscriber = () => {
     console.log('[MQTT Subscriber] Connection closed.');
   });
 
-  // Export disconnect functionality to allow clean shutdowns if needed
   return client;
 };
 
-module.exports = { startMqttSubscriber };
+module.exports = { startMqttSubscriber, telemetryEmitter };
+

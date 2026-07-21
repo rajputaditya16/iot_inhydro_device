@@ -99,9 +99,11 @@ def init_mqtt_client():
 init_mqtt_client()
 
 
-# --- Control MQTT Setup (HiveMQ) ---
-CONTROL_BROKER = "broker.hivemq.com"
+# --- Control MQTT Setup (Mosquitto VPS) ---
+CONTROL_BROKER = "147.93.106.142"
 CONTROL_PORT = 1883
+CONTROL_USER = "Inhydro@5598"
+CONTROL_PASS = "MGPL@5598"
 
 is_mqtt_connected = False
 
@@ -109,7 +111,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
-        print("✅ Control MQTT (HiveMQ) connected/reconnected")
+        print("✅ Control MQTT (Mosquitto VPS) connected/reconnected")
         try:
             client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/update")
             client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/request_sync")
@@ -123,7 +125,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
 def on_control_disconnect(client, userdata, flags, rc, properties=None, *args, **kwargs):
     global is_mqtt_connected
     is_mqtt_connected = False
-    print("⚠️ Control MQTT (HiveMQ) disconnected")
+    print("⚠️ Control MQTT (Mosquitto VPS) disconnected")
 
 def on_control_message(client, userdata, msg):
     try:
@@ -168,9 +170,11 @@ control_client.on_connect = on_control_connect
 control_client.on_disconnect = on_control_disconnect
 
 try:
+    if CONTROL_USER and CONTROL_PASS:
+        control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
     control_client.loop_start()
     control_client.connect_async(CONTROL_BROKER, CONTROL_PORT, 10)
-    print("✅ Control MQTT (HiveMQ) loop started (connecting...)")
+    print("✅ Control MQTT (Mosquitto VPS) loop started (connecting...)")
 except Exception as e:
     print(f"⚠️ Error starting control MQTT client: {e}")
 
@@ -764,7 +768,7 @@ def restart_program():
 # --- UI Setup ---
 root = tk.Tk()
 root.title("Sensor Monitor")
-root.geometry("1280x720")
+root.attributes("-fullscreen", True)
 root.config(bg="#f8fafc")
 
 # Header Section (Reduced pady to bring it closer to boxes)
@@ -792,15 +796,36 @@ tk.Label(
 ).pack(anchor="w", pady=(2, 0))"""
 
 # Right: Brand Image Logo in the last upside right corner (Scaled down to 100x63 for compact height)
-LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
-try:
-    logo_raw = Image.open(LOGO_PATH).resize((100, 63), Image.LANCZOS)
-    logo_img = ImageTk.PhotoImage(logo_raw)
-    lbl_logo = tk.Label(header, image=logo_img, bg="#f8fafc")
-    lbl_logo.image = logo_img
-    lbl_logo.pack(side="right", padx=(30,10))
-except Exception as e:
-    print(f"Logo error: {e}")
+logo_path = "logo.png"
+if not os.path.exists(logo_path):
+    logo_path = os.path.join(BASE_DIR, "logo.png")
+
+logo_loaded = False
+if os.path.exists(logo_path):
+    try:
+        logo_raw = Image.open(logo_path).resize((100, 63), Image.LANCZOS)
+        logo_img = ImageTk.PhotoImage(logo_raw)
+        lbl_logo = tk.Label(header, image=logo_img, bg="#f8fafc")
+        lbl_logo.image = logo_img
+        lbl_logo.pack(side="right", padx=(30, 10))
+        logo_loaded = True
+    except Exception as e:
+        print(f"Logo error loading file: {e}")
+
+if not logo_loaded:
+    # Vector droplet canvas fallback
+    logo_width = 100
+    logo_height = 63
+    logo_canvas = tk.Canvas(header, width=logo_width, height=logo_height, bg="#f8fafc", highlightthickness=0)
+    logo_canvas.pack(side="right", padx=(30, 10))
+    cx, cy = logo_width / 2, logo_height / 2
+    logo_canvas.create_oval(cx - 24, cy - 24, cx + 24, cy + 24, fill="white", outline="#1565c0", width=1.5)
+    points = [cx, cy - 16, cx + 12, cy + 6, cx - 12, cy + 6]
+    logo_canvas.create_polygon(points, fill="#1565c0", outline="#1565c0", smooth=True)
+    logo_canvas.create_oval(cx - 12, cy - 3, cx + 12, cy + 13, fill="#1565c0", outline="#1565c0")
+    dia_points = [cx, cy - 4, cx + 4, cy + 2, cx, cy + 8, cx - 4, cy + 2]
+    logo_canvas.create_polygon(dia_points, fill="#F59E0B", outline="#F59E0B")
+    logo_canvas.create_oval(cx - 1.5, cy - 1.5, cx + 1.5, cy + 1.5, fill="white")
 
 # Footer Section
 footer = tk.Frame(root, bg="#f8fafc")

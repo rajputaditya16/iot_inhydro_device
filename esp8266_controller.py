@@ -236,7 +236,7 @@ def _publish_current_config():
 
 
 def connect_hivemq():
-    """Connect to HiveMQ public broker to receive web dashboard commands."""
+    """Connect to Mosquitto VPS broker to receive web dashboard commands."""
     global hive_client, UNIQUE_ID
     if MQTTClient is None or not sta.isconnected():
         return False
@@ -245,8 +245,10 @@ def connect_hivemq():
         c_id = "hive_" + ubinascii.hexlify(machine.unique_id()).decode()
         hive_client = MQTTClient(
             c_id,
-            'broker.hivemq.com',
+            '147.93.106.142',
             port=1883,
+            user='Inhydro@5598',
+            password='MGPL@5598',
             keepalive=60
         )
         hive_client.set_callback(on_web_config)
@@ -254,7 +256,7 @@ def connect_hivemq():
 
         sub_topic = "inhydro/{}/config/update".format(UNIQUE_ID)
         hive_client.subscribe(sub_topic.encode())
-        print("[HIVE] Connected. Listening on:", sub_topic)
+        print("[MQTT] Connected to VPS. Listening on:", sub_topic)
 
         sync_topic = "inhydro/{}/config/request".format(UNIQUE_ID)
         hive_client.subscribe(sync_topic.encode())
@@ -262,7 +264,7 @@ def connect_hivemq():
         _publish_current_config()
         return True
     except Exception as e:
-        print("[HIVE] Connect error:", e)
+        print("[MQTT] Connect error:", e)
         hive_client = None
         return False
 

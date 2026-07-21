@@ -340,6 +340,11 @@ def on_control_message(client, userdata, msg):
     except Exception as e:
         print(f"[MQTT ERROR] {e}")
 
+CONTROL_BROKER = "147.93.106.142"
+CONTROL_PORT = 1883
+CONTROL_USER = "Inhydro@5598"
+CONTROL_PASS = "MGPL@5598"
+
 is_mqtt_connected = False
 
 def on_control_connect(client, userdata, flags, rc, properties=None):
@@ -348,7 +353,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
         is_mqtt_connected = True
         client.subscribe(CONTROL_TOPIC)
         client.subscribe(CONTROL_SYNC_TOPIC)
-        print(f"[MQTT] Connected and subscribed to HiveMQ sync.")
+        print(f"[MQTT] Connected and subscribed to Mosquitto VPS sync.")
     else:
         is_mqtt_connected = False
 
@@ -360,7 +365,9 @@ control_client.on_message = on_control_message
 control_client.on_connect = on_control_connect
 control_client.on_disconnect = on_control_disconnect
 try:
-    control_client.connect_async("broker.hivemq.com", 1883, 60)
+    if CONTROL_USER and CONTROL_PASS:
+        control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
+    control_client.connect_async(CONTROL_BROKER, CONTROL_PORT, 60)
     control_client.loop_start()
 except Exception as e:
     print(f"[MQTT] Warning: Could not start sync client: {e}")
@@ -792,7 +799,7 @@ def update_ui():
     global mqtt_timer, ts_rotation_idx
     mqtt_timer += 1
     
-    # 1. LIVE MONITORING JSON PACKET (HiveMQ)
+    # 1. LIVE MONITORING JSON PACKET (Private Mosquitto)
     with sensor_data_lock: snap = dict(sensor_data)
     try:
         live_data_payload = {}

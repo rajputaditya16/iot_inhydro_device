@@ -8,7 +8,7 @@
 char ssid[64] = "";
 char password[64] = "";
 float tz_offset = 5.5;
-char mqtt_broker[128] = "broker.hivemq.com";
+char mqtt_broker[128] = "147.93.106.142";
 char mqtt_cmd_topic[128] = "inhydro/device1/command";
 char mqtt_status_topic[128] = "inhydro/device1/status";
 String unique_clientId;
@@ -127,7 +127,7 @@ void loadConfig() {
     strlcpy(ssid, doc["ssid"] | "", sizeof(ssid));
     strlcpy(password, doc["password"] | "", sizeof(password));
     tz_offset = doc["tz_offset"] | 5.5;
-    strlcpy(mqtt_broker, doc["mqtt_broker"] | "broker.hivemq.com", sizeof(mqtt_broker));
+    strlcpy(mqtt_broker, doc["mqtt_broker"] | "147.93.106.142", sizeof(mqtt_broker));
     strlcpy(mqtt_cmd_topic, doc["mqtt_cmd_topic"] | "inhydro/device1/command", sizeof(mqtt_cmd_topic));
     strlcpy(mqtt_status_topic, doc["mqtt_status_topic"] | "inhydro/device1/status", sizeof(mqtt_status_topic));
     

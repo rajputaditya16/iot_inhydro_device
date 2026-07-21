@@ -38,7 +38,7 @@ const LiveChart = ({ data, type = 'temperature', title, unit, subtitle = 'Last 2
         <span className="text-xs text-slate-400">{unit}</span>
       </div>
       <div className="h-48">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={100}>
           {isBoth ? (
             <LineChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />

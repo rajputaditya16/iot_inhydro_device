@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Radio, Thermometer, Droplets, Activity } from 'lucide-react';
-import mqtt from 'mqtt';
+import { createMqttClient } from '../../utils/mqtt';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 const defaultSetpoints = {
@@ -107,7 +107,7 @@ const ColdStorageSettings = () => {
   useEffect(() => {
     if (!deviceRoot) return;
     setStatus('disconnected');
-    const mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+    const mqttClient = createMqttClient();
 
     mqttClient.on('connect', () => {
         setStatus('connected');

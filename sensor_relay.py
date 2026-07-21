@@ -180,9 +180,11 @@ def init_mqtt_client():
 
 init_mqtt_client()
 
-# HiveMQ Two-Way Sync Control setup
-CONTROL_BROKER = "broker.hivemq.com"
+# Mosquitto VPS Two-Way Sync Control setup
+CONTROL_BROKER = "147.93.106.142"
 CONTROL_PORT = 1883
+CONTROL_USER = "Inhydro@5598"
+CONTROL_PASS = "MGPL@5598"
 CONTROL_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/update"
 CURRENT_SETP_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/current"
 CONTROL_SYNC_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/request_sync"
@@ -269,6 +271,8 @@ control_client.on_connect = on_control_connect
 control_client.on_disconnect = on_control_disconnect
 
 try:
+    if CONTROL_USER and CONTROL_PASS:
+        control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
     control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
     control_client.loop_start()
 except Exception as e:
@@ -775,7 +779,7 @@ def update():
         lbl_warn.config(text="\n".join(warn))
         lbl_relay.config(text=relay_status())
 
-        # Live Web Dashboard Sync (Fast Update over HiveMQ)
+        # Live Web Dashboard Sync (Fast Update over Private Mosquitto)
         try:
             import datetime
             ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))

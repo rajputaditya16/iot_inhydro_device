@@ -165,9 +165,11 @@ def init_mqtt_client():
 init_mqtt_client()
 
 
-# --- Control MQTT Setup (HiveMQ) ---
-CONTROL_BROKER = "broker.hivemq.com"
+# --- Control MQTT Setup (Private Mosquitto) ---
+CONTROL_BROKER = "147.93.106.142"
 CONTROL_PORT = 1883
+CONTROL_USER = "Inhydro@5598"
+CONTROL_PASS = "MGPL@5598"
 
 def on_control_message(client, userdata, msg):
     try:
@@ -254,7 +256,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
-        print("✅ Control MQTT (HiveMQ) connected/reconnected")
+        print("✅ Control MQTT (Mosquitto VPS) connected/reconnected")
         try:
             client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/update")
             client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/request_sync")
@@ -268,7 +270,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
 def on_control_disconnect(client, userdata, flags, rc, properties=None, *args, **kwargs):
     global is_mqtt_connected
     is_mqtt_connected = False
-    print("⚠️ Control MQTT (HiveMQ) disconnected")
+    print("⚠️ Control MQTT (Mosquitto VPS) disconnected")
 
 client_id = f"Inhydro_Mon_{DEVICE_NAME.strip()}_{uuid.uuid4().hex[:6]}"
 control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id)
@@ -277,9 +279,11 @@ control_client.on_connect = on_control_connect
 control_client.on_disconnect = on_control_disconnect
 
 try:
+    if CONTROL_USER and CONTROL_PASS:
+        control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
     control_client.loop_start()
     control_client.connect_async(CONTROL_BROKER, CONTROL_PORT, 10)
-    print("✅ Control MQTT (HiveMQ) loop started (connecting...)")
+    print("✅ Control MQTT (Mosquitto VPS) loop started (connecting...)")
 except Exception as e:
     print(f"⚠️ Control MQTT startup failed: {e}")
 

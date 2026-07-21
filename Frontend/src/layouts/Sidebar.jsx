@@ -65,7 +65,7 @@ const Sidebar = ({ collapsed, isMobile = false, isOpen = true, onItemClick, user
           backgroundPosition: 'top',
         }} >
 
-          <img className='w-45 h-15 p-2' style={{ rotate: '-15deg', }} src={logo} alt="" srcset="" />
+          <img className='w-45 h-15 p-2' style={{ rotate: '-15deg', }} src={logo} alt="" srcSet="" />
         </div>
       </div>
 

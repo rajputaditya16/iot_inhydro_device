@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Save, AlertCircle, CheckCircle2, RefreshCw, Zap, Wifi, Radio, ToggleLeft, ToggleRight, Clock, ChevronDown, X } from 'lucide-react';
-import mqtt from 'mqtt';
+import { createMqttClient } from '../../utils/mqtt';
 
 // ─── Day picker ───────────────────────────────────────────────────────────────
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -282,7 +282,7 @@ const LightMotorPumpSettings = () => {
     setStatus('disconnected');
 
     // 3. Connect to MQTT
-    const mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+    const mqttClient = createMqttClient();
 
     mqttClient.on('connect', () => {
       setStatus('connected');

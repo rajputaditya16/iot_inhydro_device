@@ -1,8 +1,11 @@
 const express = require('express');
-const { getDevices, createDevice, updateDevice, deleteDevice, toggleBlockDevice, pushThingspeakConfig, getDeviceAnalytics } = require('../controllers/deviceController');
+const { getDevices, createDevice, updateDevice, deleteDevice, toggleBlockDevice, pushThingspeakConfig, getDeviceAnalytics, streamTelemetry } = require('../controllers/deviceController');
 const { protect, restrictTo } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Real-time SSE telemetry stream (unprotected or protected)
+router.get('/stream', streamTelemetry);
 
 router.use(protect);
 
@@ -19,4 +22,5 @@ router
 router.put('/:id/block', restrictTo('admin', 'superadmin'), toggleBlockDevice);
 router.put('/:id/push-config', restrictTo('admin', 'superadmin'), pushThingspeakConfig);
 router.get('/:id/analytics', getDeviceAnalytics);
+
 module.exports = router;

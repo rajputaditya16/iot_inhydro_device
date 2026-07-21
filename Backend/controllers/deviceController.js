@@ -3,6 +3,8 @@ const SensorPacket = require('../models/SensorPacket');
 const MqttPacket = require('../models/MqttPacket');
 const { getTelemetryModel } = require('../models/TelemetryLog');
 const { publishToDevice } = require('../utils/mqttPublisher');
+const { telemetryEmitter } = require('../utils/mqttSubscriber');
+
 
 // @route   GET /api/devices
 // @desc    Get all devices
@@ -544,4 +546,39 @@ exports.getDeviceAnalytics = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server Error fetching analytics' });
   }
 };
+
+// @route   GET /api/devices/stream
+// @desc    Real-time Server-Sent Events (SSE) telemetry stream directly from Mosquitto TCP
+// @access  Public / Private
+exports.streamTelemetry = (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization',
+    'Access-Control-Allow-Credentials': 'true'
+  });
+
+  if (typeof res.flushHeaders === 'function') {
+    res.flushHeaders();
+  }
+  res.write(': connected\n\n');
+
+  const onTelemetry = (payload) => {
+    try {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    } catch (e) {
+      // client disconnected
+    }
+  };
+
+  telemetryEmitter.on('telemetry', onTelemetry);
+
+  req.on('close', () => {
+    telemetryEmitter.off('telemetry', onTelemetry);
+  });
+};
+
+
 

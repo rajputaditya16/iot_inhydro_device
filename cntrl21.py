@@ -98,7 +98,7 @@ def set_relay(channel, state):
             working_relay_id = r_id
             return True 
         except Exception:
-            pass 
+            pass i
         finally:
             if 'instrument' in locals() and hasattr(instrument, 'serial') and instrument.serial:
                 try: instrument.serial.close()
@@ -193,6 +193,8 @@ def default_setpoints():
         "CLIENT ID": "", "USERNAME": "", "PASSWORD": "",
         "CHANNEL ID": "", "PORT": 1883,
         "READ API KEY": "", "WRITE API KEY": "",
+        "EC SLOPE": 1.0, "EC OFFSET": 0.0,
+        "PH SLOPE": 1.0, "PH OFFSET": 0.0,
     }
 
 setpoints = {1: default_setpoints(), 2: default_setpoints()}
@@ -295,8 +297,10 @@ def publish_telemetry(d1, d2):
 
 
 
-CONTROL_BROKER = "broker.hivemq.com"
+CONTROL_BROKER = "147.93.106.142"
 CONTROL_PORT   = 1883
+CONTROL_USER   = "Inhydro@5598"
+CONTROL_PASS   = "MGPL@5598"
 
 def on_control_message(client, userdata, msg):
     try:
@@ -387,7 +391,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
-        print("✅ Control MQTT (HiveMQ) connected/reconnected")
+        print("✅ Control MQTT (Mosquitto VPS) connected/reconnected")
         for room in [1, 2]:
             client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/update")
             client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/request_sync")
@@ -404,7 +408,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
 def on_control_disconnect(client, userdata, flags, rc, properties=None, *args, **kwargs):
     global is_mqtt_connected
     is_mqtt_connected = False
-    print("⚠️ Control MQTT (HiveMQ) disconnected")
+    print("⚠️ Control MQTT (Mosquitto VPS) disconnected")
 
 import uuid
 client_id = f"Inhydro_Dual_{DEVICE_NAME.strip()}_{uuid.uuid4().hex[:6]}"
@@ -414,9 +418,11 @@ control_client.on_connect = on_control_connect
 control_client.on_disconnect = on_control_disconnect
 
 try:
+    if CONTROL_USER and CONTROL_PASS:
+        control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
     control_client.loop_start()
     control_client.connect_async(CONTROL_BROKER, CONTROL_PORT, 10)
-    print("✅ Control MQTT (HiveMQ) loop started (connecting...)")
+    print("✅ Control MQTT (Mosquitto VPS) loop started (connecting...)")
 except Exception as e:
     print(f"⚠️  Control MQTT startup failed: {e}")
 
@@ -424,59 +430,95 @@ except Exception as e:
 
 def read_soil(inst, label):
     if not inst: return None
-    try:
-        inst.serial.reset_input_buffer()
-        moist = inst.read_register(0x0012, 1)
-        temp  = inst.read_register(0x0013, 1, signed=True)
-        ec    = inst.read_register(0x0015, 0)
-        ph    = inst.read_register(0x0006, 2)
-        return {"soil_temp": temp, "moisture": moist, "ec": ec, "ph": ph}
-    except Exception as e:
-        print(f"⚠️ [{label}] Soil read failed: {e}")
-        return None
+    for attempt in range(3):
+        try:
+            inst.serial.reset_input_buffer()
+            moist = inst.read_register(0x0012, 1)
+            temp  = inst.read_register(0x0013, 1, signed=True)
+            ec    = inst.read_register(0x0015, 0)
+            ph    = inst.read_register(0x0006, 2)
+            
+            # Plausibility / Port Swapping check
+            if temp < -15.0 or temp > 75.0 or moist < 0.0 or moist > 100.0 or ph < 2.5 or ph > 12.0:
+                print(f"⚠️ [{label}] Plausibility check failed (Temp={temp}, Moist={moist}, pH={ph}). Possible port misalignment or sensor fault.")
+                return None
+                
+            return {"soil_temp": temp, "moisture": moist, "ec": ec, "ph": ph}
+        except Exception as e:
+            if attempt == 2:
+                print(f"⚠️ [{label}] Soil read failed after 3 attempts: {e}")
+            time.sleep(0.05)
+    return None
 
 def read_md02(inst, label):
     if not inst: return None
-    try:
-        inst.serial.reset_input_buffer()
+    for attempt in range(3):
         try:
-            rt = inst.read_register(1, 1, signed=True, functioncode=4)
-            rh = inst.read_register(2, 1, functioncode=4)
-        except Exception:
-            rt = inst.read_register(1, 1, signed=True, functioncode=3)
-            rh = inst.read_register(2, 1, functioncode=3)
-        if rt is not None:
-            rt = round(rt - 5.0, 1)
-        if rh is not None:
-            rh = round(rh - 3.0, 1)
-        return {"room_temp": rt, "room_humi": rh}
-    except Exception as e:
-        print(f"⚠️ [{label} MD02] Read failed: {e}")
-        return None
+            inst.serial.reset_input_buffer()
+            try:
+                rt = inst.read_register(1, 1, signed=True, functioncode=4)
+                rh = inst.read_register(2, 1, functioncode=4)
+            except Exception:
+                rt = inst.read_register(1, 1, signed=True, functioncode=3)
+                rh = inst.read_register(2, 1, functioncode=3)
+            if rt is not None:
+                rt = round(rt - 5.0, 1)
+            if rh is not None:
+                rh = round(rh - 3.0, 1)
+            
+            # Plausibility check
+            if rt < -20.0 or rt > 80.0 or rh < 0.0 or rh > 100.0:
+                print(f"⚠️ [{label} MD02] Plausibility check failed (rt={rt}, rh={rh})")
+                return None
+                
+            return {"room_temp": rt, "room_humi": rh}
+        except Exception as e:
+            if attempt == 2:
+                print(f"⚠️ [{label} MD02] Read failed after 3 attempts: {e}")
+            time.sleep(0.05)
+    return None
 
 def read_orp(inst, label):
     if not inst: return None
-    try:
-        inst.serial.reset_input_buffer()
+    for attempt in range(3):
         try:
-            return inst.read_register(0x0000, 1, signed=True, functioncode=4)
-        except Exception:
-            return inst.read_register(0x0000, 1, signed=True, functioncode=3)
-    except Exception as e:
-        print(f"⚠️ [{label} ORP] Read failed: {e}")
-        return None
+            inst.serial.reset_input_buffer()
+            try:
+                val = inst.read_register(0x0000, 1, signed=True, functioncode=4)
+            except Exception:
+                val = inst.read_register(0x0000, 1, signed=True, functioncode=3)
+            
+            # ORP is typically between -2000 mV and 2000 mV
+            if val < -2000 or val > 2000:
+                print(f"⚠️ [{label} ORP] Plausibility check failed (val={val})")
+                return None
+            return val
+        except Exception as e:
+            if attempt == 2:
+                print(f"⚠️ [{label} ORP] Read failed after 3 attempts: {e}")
+            time.sleep(0.05)
+    return None
 
 def read_co2(inst, label):
     if not inst: return None
-    try:
-        inst.serial.reset_input_buffer()
+    for attempt in range(3):
         try:
-            return inst.read_register(0x0000, 0, functioncode=4)
-        except Exception:
-            return inst.read_register(0x0000, 0, functioncode=3)
-    except Exception as e:
-        print(f"⚠️ [{label} CO2] Read failed: {e}")
-        return None
+            inst.serial.reset_input_buffer()
+            try:
+                val = inst.read_register(0x0000, 0, functioncode=4)
+            except Exception:
+                val = inst.read_register(0x0000, 0, functioncode=3)
+                
+            # CO2 is typically between 0 and 15000 ppm
+            if val < 0 or val > 15000:
+                print(f"⚠️ [{label} CO2] Plausibility check failed (val={val})")
+                return None
+            return val
+        except Exception as e:
+            if attempt == 2:
+                print(f"⚠️ [{label} CO2] Read failed after 3 attempts: {e}")
+            time.sleep(0.05)
+    return None
 
 def read_all_sensors(room):
     """Read Soil, Room, ORP, and CO2 sensors as requested."""
@@ -499,9 +541,11 @@ def read_all_sensors(room):
 
 state = {
     1: {"ec_active": False, "ph_active": False, "ac_active": False,
-        "humi_active": False, "last_ec": 0.0, "last_ph": 0.0},
+        "humi_active": False, "last_ec": 0.0, "last_ph": 0.0,
+        "ec_start_time": 0.0, "ec_lockout": False, "ph_start_time": 0.0, "ph_lockout": False},
     2: {"ec_active": False, "ph_active": False, "ac_active": False,
-        "humi_active": False, "last_ec": 0.0, "last_ph": 0.0},
+        "humi_active": False, "last_ec": 0.0, "last_ph": 0.0,
+        "ec_start_time": 0.0, "ec_lockout": False, "ph_start_time": 0.0, "ph_lockout": False},
 }
 
 ROOM_CHANNELS = {
@@ -522,35 +566,77 @@ def control_room(room, data):
     room_env = data.get("room")
 
     if soil:
-        raw_ec = soil["ec"]
-        ec = (raw_ec * 0.85) / 1000 if raw_ec is not None else 0.0
-        ph = soil["ph"]
+        raw_ec = soil.get("ec")
+        raw_ph = soil.get("ph")
 
-        if not st["ec_active"] and ec < sp["EC MIN"]:
-            st["ec_active"] = True
-            relay_on(ch["ec1"]); relay_on(ch["ec2"])
-            st["last_ec"] = now
-            warnings.append("⚠ EC LOW — DOSING")
-
-        if st["ec_active"]:
-            if ec >= sp["EC MAX"]:
+        if raw_ec is None:
+            if st["ec_active"] or relay_is_on(ch["ec1"]):
                 relay_off(ch["ec1"]); relay_off(ch["ec2"])
                 st["ec_active"] = False
-            elif now - st["last_ec"] >= 10:
-                relay_on(ch["ec1"]); relay_on(ch["ec2"])
-                st["last_ec"] = now
+            warnings.append("⚠ EC READING ERROR")
+            ec = None
+        else:
+            ec_base = (raw_ec * 0.85) / 1000
+            ec = ec_base * sp.get("EC SLOPE", 1.0) + sp.get("EC OFFSET", 0.0)
 
-        if not st["ph_active"] and ph > sp["PH HIGH"]:
-            st["ph_active"] = True
-            relay_on(ch["ph"])
-            st["last_ph"] = now
-            warnings.append("⚠ pH HIGH — CORRECTING")
+        if raw_ph is None:
+            if st["ph_active"] or relay_is_on(ch["ph"]):
+                relay_off(ch["ph"])
+                st["ph_active"] = False
+            warnings.append("⚠ pH READING ERROR")
+            ph = None
+        else:
+            ph = raw_ph * sp.get("PH SLOPE", 1.0) + sp.get("PH OFFSET", 0.0)
 
-        if st["ph_active"]:
-            if ph <= sp["PH LOW"]:
-                relay_off(ch["ph"]); st["ph_active"] = False
-            elif now - st["last_ph"] >= 10:
-                relay_on(ch["ph"]); st["last_ph"] = now
+        if ec is not None:
+            if st["ec_lockout"]:
+                warnings.append("⚠ EC DOSING TIMEOUT LOCK")
+                if relay_is_on(ch["ec1"]):
+                    relay_off(ch["ec1"]); relay_off(ch["ec2"])
+            else:
+                if not st["ec_active"] and ec < sp["EC MIN"]:
+                    st["ec_active"] = True
+                    st["ec_start_time"] = now
+                    relay_on(ch["ec1"]); relay_on(ch["ec2"])
+                    st["last_ec"] = now
+                    warnings.append("⚠ EC LOW — DOSING")
+
+                if st["ec_active"]:
+                    if ec >= sp["EC MAX"]:
+                        relay_off(ch["ec1"]); relay_off(ch["ec2"])
+                        st["ec_active"] = False
+                    elif now - st["ec_start_time"] >= 180: # 3 minutes max safety
+                        relay_off(ch["ec1"]); relay_off(ch["ec2"])
+                        st["ec_active"] = False
+                        st["ec_lockout"] = True
+                        print(f"Room{room} EC Dosing SAFETY TIMEOUT reached! Dosing locked.")
+                    elif now - st["last_ec"] >= 10:
+                        relay_on(ch["ec1"]); relay_on(ch["ec2"])
+                        st["last_ec"] = now
+
+        if ph is not None:
+            if st["ph_lockout"]:
+                warnings.append("⚠ pH DOSING TIMEOUT LOCK")
+                if relay_is_on(ch["ph"]):
+                    relay_off(ch["ph"])
+            else:
+                if not st["ph_active"] and ph > sp["PH HIGH"]:
+                    st["ph_active"] = True
+                    st["ph_start_time"] = now
+                    relay_on(ch["ph"])
+                    st["last_ph"] = now
+                    warnings.append("⚠ pH HIGH — CORRECTING")
+
+                if st["ph_active"]:
+                    if ph <= sp["PH LOW"]:
+                        relay_off(ch["ph"]); st["ph_active"] = False
+                    elif now - st["ph_start_time"] >= 180: # 3 minutes max safety
+                        relay_off(ch["ph"])
+                        st["ph_active"] = False
+                        st["ph_lockout"] = True
+                        print(f"Room{room} pH Dosing SAFETY TIMEOUT reached! Dosing locked.")
+                    elif now - st["last_ph"] >= 10:
+                        relay_on(ch["ph"]); st["last_ph"] = now
     else:
         # Safety: Sensor offline, turn off dosing ONLY if they were active
         if st["ec_active"] or st["ph_active"] or relay_is_on(ch["ec1"]):
@@ -796,6 +882,7 @@ def start_bluetooth_server():
 
 
 root = tk.Tk()
+root.update()
 root.attributes("-fullscreen", True)
 root.configure(bg="white")
 root.bind("<Escape>", lambda e: root.destroy())
@@ -1357,6 +1444,7 @@ def stop_room(room):
         relay_off(c)
     st = state[room]
     st["ec_active"] = st["ph_active"] = st["ac_active"] = st["humi_active"] = False
+    st["ec_lockout"] = st["ph_lockout"] = False
     for ts in timer_state[room]: ts["state"] = "OFF"; ts["last"] = 0.0
     if room in room_detail_labels:
         room_detail_labels[room]["warn"].config(text=" ROOM STOPPED")
@@ -1489,17 +1577,26 @@ def update_home_summary(room, data):
 
 # Global cache for sensor readings
 sensor_data_cache = {
-    1: {"soil": None, "room": None, "orp": None, "co2": None},
-    2: {"soil": None, "room": None, "orp": None, "co2": None}
+    1: {"soil": None, "room": None, "orp": None, "co2": None, "timestamp": 0.0},
+    2: {"soil": None, "room": None, "orp": None, "co2": None, "timestamp": 0.0}
 }
 
 def sensor_polling_worker():
     """Background thread: Polling sensors at their own pace."""
     while True:
         try:
-            sensor_data_cache[1] = read_all_sensors(1)
+            r1_data = read_all_sensors(1)
+            if r1_data:
+                r1_data["timestamp"] = time.time()
+                sensor_data_cache[1] = r1_data
+            
             time.sleep(0.5)
-            sensor_data_cache[2] = read_all_sensors(2)
+            
+            r2_data = read_all_sensors(2)
+            if r2_data:
+                r2_data["timestamp"] = time.time()
+                sensor_data_cache[2] = r2_data
+            
             time.sleep(1.0)
         except Exception as e:
             time.sleep(2)
@@ -1896,8 +1993,17 @@ def sync_offline_data_worker():
 
 def update():
     """Main UI Thread: Handles Timers and Relay Control (Never blocks)."""
+    now = time.time()
     d1 = sensor_data_cache[1]
     d2 = sensor_data_cache[2]
+
+    is_fresh1 = (now - d1.get("timestamp", 0.0)) < 15.0
+    is_fresh2 = (now - d2.get("timestamp", 0.0)) < 15.0
+
+    if not is_fresh1:
+        d1 = {"soil": None, "room": None, "orp": None, "co2": None, "timestamp": 0.0}
+    if not is_fresh2:
+        d2 = {"soil": None, "room": None, "orp": None, "co2": None, "timestamp": 0.0}
 
     w1 = control_room(1, d1)
     w2 = control_room(2, d2)

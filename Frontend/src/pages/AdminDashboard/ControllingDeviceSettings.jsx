@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Save, AlertCircle, CheckCircle2, RefreshCw, Cpu, ChevronDown, Radio, Thermometer, Droplets, Activity, Gauge } from 'lucide-react';
-import mqtt from 'mqtt';
+import { createMqttClient } from '../../utils/mqtt';
 
 const defaultSetpoints = {
   "EC MIN": 1.2,
@@ -177,10 +177,10 @@ const ControllingDeviceSettings = () => {
 
   // ── MQTT Connection ────────────────────────────────────────────────────────
   useEffect(() => {
-    const mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+    const mqttClient = createMqttClient();
 
     mqttClient.on('connect', () => {
-      console.log('Connected to MQTT Cloud Broker (controlling.py configuration)');
+      console.log('Connected to Mosquitto VPS Broker (controlling.py configuration)');
       setStatus('connected');
 
       const topic = currentTopicRef.current;

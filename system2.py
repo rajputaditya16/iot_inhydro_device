@@ -399,9 +399,11 @@ def init_mqtt_client():
 
 init_mqtt_client()
 
-# CONTROL MQTT SETUP (HiveMQ Public Broker - Remote Control In)
-CONTROL_BROKER = "broker.hivemq.com"
+# CONTROL MQTT SETUP (Mosquitto VPS Broker - Remote Control In)
+CONTROL_BROKER = "147.93.106.142"
 CONTROL_PORT = 1883
+CONTROL_USER = "Inhydro@5598"
+CONTROL_PASS = "MGPL@5598"
 CONTROL_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/update"
 CURRENT_SETP_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/current"
 CONTROL_SYNC_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/request_sync"
@@ -460,11 +462,13 @@ def on_control_message(client, userdata, msg):
 control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "Inhydro_Device_Client_001")
 control_client.on_message = on_control_message
 try:
+    if CONTROL_USER and CONTROL_PASS:
+        control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
     control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
     control_client.subscribe(CONTROL_TOPIC)
     control_client.subscribe(CONTROL_SYNC_TOPIC)
     control_client.loop_start()
-    print("Connected to Control MQTT Broker")
+    print("Connected to Control MQTT Broker (Mosquitto VPS)")
     
     # Push initial values right away on connect
     control_client.publish(CURRENT_SETP_TOPIC, json.dumps(setpoints), retain=True)

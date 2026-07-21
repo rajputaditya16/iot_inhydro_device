@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Edit3, Radio } from 'lucide-react';
-import mqtt from 'mqtt';
+import { createMqttClient } from '../../utils/mqtt';
 
 const defaultSetpoints = {
   "EC MIN": 1200,
@@ -101,7 +101,7 @@ const AlmoraSettings = () => {
   useEffect(() => {
     if (!deviceRoot) return;
     setStatus('disconnected');
-    const mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+    const mqttClient = createMqttClient();
 
     // Merge database ThingSpeak config if it exists
     const initialSetpoints = { ...defaultSetpoints };

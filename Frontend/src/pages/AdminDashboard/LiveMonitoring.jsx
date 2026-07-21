@@ -6,7 +6,6 @@ import LiveChart from '../../components/LiveChart';
 import { SkeletonCard } from '../../components/Skeleton';
 import { useAnimatedCounter } from '../../hooks/useAnimatedCounter';
 import { getStatusBg, getStatusDot, getMetricStatus, getMetricColor, formatTimestamp } from '../../utils/helpers';
-import mqtt from 'mqtt';
 
 const BigMetric = ({ label, value, unit, icon: Icon, type }) => {
   const safeValue = Number.isFinite(value) ? value : 0;
@@ -293,132 +292,123 @@ const LiveMonitoring = () => {
     }
 
     setLoading(true);
-    const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
-    mqttClientRef.current = client;
 
-    client.on('connect', () => {
-      console.log(`Connected to HiveMQ for ${deviceMeta.deviceType} Live Data`);
+    // ── Helper to process incoming packet payload ────────────────────────────────
+    const processTelemetryPacket = (topic, payload) => {
       if (isMultiSensor) {
-        client.subscribe(`inhydro/${mqttId}/telemetry/live`);
-      } else if (isOfficeControl) {
-        client.subscribe(`inhydro/${mqttId}/room1/telemetry/live`);
-        client.subscribe(`inhydro/${mqttId}/room2/telemetry/live`);
-        client.subscribe(`inhydro/${mqttId}/room3/telemetry/live`);
-      } else if (isControlling) {
-        client.subscribe(`inhydro/${mqttId}/monitor/telemetry/live`);
-      }
-    });
-
-    client.on('message', (topic, message) => {
-      try {
-        const payload = JSON.parse(message.toString());
-
-        if (isMultiSensor) {
-          setMultiSensorData(payload);
-          // Update history for sparklines (keep last 20 points)
-          setSensorHistory(prev => {
-            const newHist = { ...prev };
-            Object.keys(payload).forEach(sId => {
-              const prevState = newHist[sId] && !Array.isArray(newHist[sId]) ? newHist[sId] : { t: [], h: [] };
-              newHist[sId] = {
-                t: [...prevState.t, payload[sId].t].slice(-20),
-                h: [...prevState.h, payload[sId].h].slice(-20)
-              };
-            });
-            return newHist;
-          });
-        } else if (isOfficeControl) {
-          // Determine room from topic (inhydro/{mqttId}/room{N}/telemetry/live)
-          const parts = topic.split('/');
-          const roomPart = parts.find(p => p.startsWith('room'));
-          const room = roomPart ? parseInt(roomPart.replace('room', '')) : 1;
-
-          setOfficeControlData(prev => ({ ...prev, [room]: payload }));
-
-          // Update history for graphs
-          const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          setOfficeControlHistory(prev => {
-            const roomHist = { ...prev[room] };
-            let metrics = {};
-            if (room === 3) {
-              metrics = {
-                md02_1_temp: payload.md02_1?.room_temp,
-                md02_1_humi: payload.md02_1?.room_humi,
-                md02_2_temp: payload.md02_2?.room_temp,
-                md02_2_humi: payload.md02_2?.room_humi,
-                co2: payload.co2
-              };
-            } else {
-              metrics = {
-                soil_temp: payload.soil?.soil_temp,
-                moisture: payload.soil?.moisture,
-                ec: payload.soil?.ec,
-                ph: payload.soil?.ph,
-                room_temp: payload.room?.room_temp,
-                room_humi: payload.room?.room_humi,
-                orp: payload.orp,
-                co2: payload.co2
-              };
-            }
-            Object.keys(metrics).forEach(key => {
-              const val = metrics[key] !== undefined && metrics[key] !== null ? parseFloat(metrics[key]) : 0;
-              roomHist[key] = [...(roomHist[key] || []), { time: timeStr, value: val }].slice(-24);
-            });
-            return { ...prev, [room]: roomHist };
-          });
-        } else if (isControlling) {
-          const tel = payload.telemetry || payload || {};
-          setControllingData(tel);
-
-          // Update history for graphs
-          const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          setControllingHistory(prev => {
-            const nextHist = { ...prev };
-            const metrics = {
-              water_temp: tel.water_temp,
-              moisture: tel.moisture,
-              ec: tel.ec,
-              ph: tel.ph,
-              room_temp: tel.room_temp,
-              room_humi: tel.room_humi,
-              orp: tel.orp,
-              co2: tel.co2,
-              vpd: tel.vpd,
-              dli: tel.dli,
-              wind_speed: tel.wind_speed,
-              wind_dir: tel.wind_dir,
-              do: tel.do,
-              ppfd: tel.ppfd,
-              n: tel.n,
-              p: tel.p,
-              k: tel.k
+        setMultiSensorData(payload);
+        setSensorHistory(prev => {
+          const newHist = { ...prev };
+          Object.keys(payload).forEach(sId => {
+            const prevState = newHist[sId] && !Array.isArray(newHist[sId]) ? newHist[sId] : { t: [], h: [] };
+            newHist[sId] = {
+              t: [...(prevState.t || []), payload[sId].t].slice(-20),
+              h: [...(prevState.h || []), payload[sId].h].slice(-20)
             };
-            Object.keys(metrics).forEach(key => {
-              const val = metrics[key] !== undefined && metrics[key] !== null ? parseFloat(metrics[key]) : 0;
-              nextHist[key] = [...(nextHist[key] || []), { time: timeStr, value: val }].slice(-24);
-            });
-            return nextHist;
           });
-        }
-
-        setLiveDevice({
-          id: selectedDeviceId,
-          name: deviceMeta?.name || 'Live Sensor Data',
-          location: deviceMeta?.location || 'MQTT Stream',
-          status: 'online',
-          lastUpdated: new Date().toISOString(),
+          return newHist;
         });
+      } else if (isOfficeControl) {
+        const parts = topic.split('/');
+        const roomPart = parts.find(p => p.startsWith('room'));
+        const room = roomPart ? parseInt(roomPart.replace('room', '')) : 1;
 
-        setLoading(false);
-        setHasNewData(true);
-        setTimeout(() => setHasNewData(false), 2000);
-      } catch (e) {
-        console.error('MQTT Parse Error', e);
+        setOfficeControlData(prev => ({ ...prev, [room]: payload }));
+
+        const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setOfficeControlHistory(prev => {
+          const roomHist = { ...(prev[room] || {}) };
+          let metrics = {};
+          if (room === 3) {
+            metrics = {
+              md02_1_temp: payload.md02_1?.room_temp,
+              md02_1_humi: payload.md02_1?.room_humi,
+              md02_2_temp: payload.md02_2?.room_temp,
+              md02_2_humi: payload.md02_2?.room_humi,
+              co2: payload.co2
+            };
+          } else {
+            metrics = {
+              soil_temp: payload.soil?.soil_temp,
+              moisture: payload.soil?.moisture,
+              ec: payload.soil?.ec,
+              ph: payload.soil?.ph,
+              room_temp: payload.room?.room_temp,
+              room_humi: payload.room?.room_humi,
+              orp: payload.orp,
+              co2: payload.co2
+            };
+          }
+          Object.keys(metrics).forEach(key => {
+            const val = metrics[key] !== undefined && metrics[key] !== null ? parseFloat(metrics[key]) : 0;
+            roomHist[key] = [...(roomHist[key] || []), { time: timeStr, value: val }].slice(-24);
+          });
+          return { ...prev, [room]: roomHist };
+        });
+      } else if (isControlling) {
+        const tel = payload.telemetry || payload || {};
+        setControllingData(tel);
+
+        const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setControllingHistory(prev => {
+          const nextHist = { ...prev };
+          const metrics = {
+            water_temp: tel.water_temp,
+            moisture: tel.moisture,
+            ec: tel.ec,
+            ph: tel.ph,
+            room_temp: tel.room_temp,
+            room_humi: tel.room_humi,
+            orp: tel.orp,
+            co2: tel.co2,
+            vpd: tel.vpd,
+            dli: tel.dli,
+            wind_speed: tel.wind_speed,
+            wind_dir: tel.wind_dir,
+            do: tel.do,
+            ppfd: tel.ppfd,
+            n: tel.n,
+            p: tel.p,
+            k: tel.k
+          };
+          Object.keys(metrics).forEach(key => {
+            const val = metrics[key] !== undefined && metrics[key] !== null ? parseFloat(metrics[key]) : 0;
+            nextHist[key] = [...(nextHist[key] || []), { time: timeStr, value: val }].slice(-24);
+          });
+          return nextHist;
+        });
       }
-    });
+
+      setLiveDevice({
+        id: selectedDeviceId,
+        name: deviceMeta?.name || 'Live Sensor Data',
+        location: deviceMeta?.location || 'Live Stream',
+        status: 'online',
+        lastUpdated: new Date().toISOString(),
+      });
+
+      setLoading(false);
+      setHasNewData(true);
+      setTimeout(() => setHasNewData(false), 2000);
+    };
+
+    // ── 1. Connect to Backend Real-Time SSE Stream (Sub-second real-time streaming, 0 DB load) ──
+    const sseUrl = `${API_BASE}/api/devices/stream`;
+    const eventSource = new EventSource(sseUrl);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const packet = JSON.parse(event.data);
+        if (packet.mqttId === mqttId || packet.deviceId === selectedDeviceId || packet.mqttId === 'control1' || packet.mqttId === 'system2') {
+          processTelemetryPacket(packet.topic, packet.data);
+        }
+      } catch (e) {
+        console.error('SSE packet parse error:', e);
+      }
+    };
 
     return () => {
-      if (client) client.end();
+      eventSource.close();
     };
   }, [deviceMeta, selectedDeviceId]);
 
@@ -426,6 +416,7 @@ const LiveMonitoring = () => {
     setLoading(true);
     fetchLiveData();
   };
+
 
 
   // ── Loading State ──────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import os, sys, json, time, datetime, atexit
+import os, sys, json, time, datetime, atexit, queue
 import socket, subprocess, threading
 import urllib.request, urllib.parse
 from datetime import timezone
@@ -122,13 +122,27 @@ def set_relay(channel, state):
                 except: pass
     return False
 
+relay_write_queue = queue.Queue()
+
+def relay_writer_worker():
+    while True:
+        try:
+            channel, state = relay_write_queue.get()
+            success = set_relay(channel, state)
+            if not success:
+                print(f"⚠️ Failed to write relay channel {channel} to {state}")
+            relay_write_queue.task_done()
+        except Exception as e:
+            print(f"Error in relay_writer_worker: {e}")
+            time.sleep(1)
+
 def relay_on(ch):
     _relay_state[ch] = True
-    set_relay(ch, True)
+    relay_write_queue.put((ch, True))
 
 def relay_off(ch):
     _relay_state[ch] = False
-    set_relay(ch, False)
+    relay_write_queue.put((ch, False))
 
 def relay_is_on(ch):
     return _relay_state.get(ch, False)
@@ -138,22 +152,13 @@ ALL_CHANNELS = [R1_CH_EC1, R1_CH_EC2, R1_CH_PH, R1_CH_AC, R1_CH_HUMI, R1_CH_TMR1
                 R3_CH_AC1, R3_CH_AC2, R3_CH_HUMI1, R3_CH_HUMI2, R3_CH_TMR1, R3_CH_TMR2, R3_CH_TMR3, R3_CH_SPARE]
 
 def all_relays_off():
-    for ch in ALL_CHANNELS: relay_off(ch)
+    for ch in ALL_CHANNELS:
+        _relay_state[ch] = False
+        set_relay(ch, False)
 
 atexit.register(all_relays_off)
 
 #
-def read_md02(port):
-    try:
-        inst = minimalmodbus.Instrument(port, SENSOR_SLAVE_ID)
-        inst.serial.baudrate = 9600
-        inst.serial.timeout  = 1.0
-        # Fix: Removing /10.0 as per user feedback (31 shows as 3.1)
-        temp = inst.read_register(1) 
-        humi = inst.read_register(2)
-        return {"room_temp": temp, "room_humi": humi}
-    except:
-        return None
 
 def _open_sensor(port, label, baudrate=9600):
     try:
@@ -197,9 +202,6 @@ def default_setpoints(room=1):
         "D T Max": 35.0, "DT Min": 15.0,
         "N T Max": 35.0, "N T Min": 15.0,
         "H Max": 80.0, "H Min": 30.0,
-        "CLIENT ID": "", "USERNAME": "", "PASSWORD": "",
-        "CHANNEL ID": "", "PORT": 1883,
-        "READ API KEY": "", "WRITE API KEY": "",
     }
     if room == 3:
         sp.update({
@@ -294,88 +296,14 @@ def save_setpoints(room):
     except: pass
 
 
-MQTT_BROKER = "mqtt3.thingspeak.com"
-mqtt_client = None
-MQTT_TOPIC  = ""
-
-def init_mqtt_client():
-    global mqtt_client, MQTT_TOPIC
-    if mqtt_client is not None:
-        try: mqtt_client.disconnect(); mqtt_client.loop_stop()
-        except: pass
-    sp = setpoints[1]
-    cid  = str(sp.get("CLIENT ID",  ""))
-    user = str(sp.get("USERNAME",   ""))
-    pwd  = str(sp.get("PASSWORD",   ""))
-    chid = str(sp.get("CHANNEL ID", ""))
-    if not all([cid, user, pwd, chid]):
-        print("⚠️  ThingSpeak credentials incomplete"); return
-    try: port = int(sp.get("PORT", 1883))
-    except: port = 1883
-    MQTT_TOPIC  = f"channels/{chid}/publish"
-    mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, cid)
-    mqtt_client.username_pw_set(user, pwd)
-    try:
-        mqtt_client.connect(MQTT_BROKER, port, 60)
-        mqtt_client.loop_start()
-        print(f"✅ ThingSpeak MQTT → {MQTT_TOPIC}")
-    except Exception as e:
-        print(f"⚠️  ThingSpeak offline: {e}")
-
-init_mqtt_client()
+# ThingSpeak client logic removed.
 
 
 
-def _v(val): return val if val is not None else ""
-
-last_cloud_publish_time = 0
-
-def publish_telemetry(d1, d2, d3):
-    """d1 = Room1 sensor dict, d2 = Room2 sensor dict, d3 = Room3 sensor dict. Each field = JSON array."""
-    global last_cloud_publish_time
-    current_time = time.time()
-    if current_time - last_cloud_publish_time < 35:
-        return
-        
-    def arr(a, b, c): return json.dumps([a, b, c])
-    s1 = d1.get("soil"); s2 = d2.get("soil"); s3 = d3.get("soil")
-    r1 = d1.get("room"); r2 = d2.get("room"); r3 = d3.get("room")
-    if not r3 and d3.get("md02_1"):
-        r3 = {"room_temp": d3["md02_1"].get("room_temp"), "room_humi": d3["md02_1"].get("room_humi")}
-    fields = {
-        "field1": arr(_v(s1['soil_temp'] if s1 else None), _v(s2['soil_temp'] if s2 else None), _v(s3['soil_temp'] if s3 else None)),
-        "field2": arr(_v(s1['moisture']  if s1 else None), _v(s2['moisture']  if s2 else None), _v(s3['moisture']  if s3 else None)),
-        "field3": arr(_v((s1['ec'] * 0.85)/1000 if s1 and s1.get('ec') is not None else None), _v((s2['ec'] * 0.85)/1000 if s2 and s2.get('ec') is not None else None), _v((s3['ec'] * 0.85)/1000 if s3 and s3.get('ec') is not None else None)),
-        "field4": arr(_v(s1['ph']        if s1 else None), _v(s2['ph']        if s2 else None), _v(s3['ph']        if s3 else None)),
-        "field5": arr(_v(r1['room_temp'] if r1 else None), _v(r2['room_temp'] if r2 else None), _v(r3['room_temp'] if r3 else None)),
-        "field6": arr(_v(r1['room_humi'] if r1 else None), _v(r2['room_humi'] if r2 else None), _v(r3['room_humi'] if r3 else None)),
-        "field7": arr(_v(d1.get('orp')), _v(d2.get('orp')), _v(d3.get('orp'))),
-        "field8": arr(_v(d1.get('co2')), _v(d2.get('co2')), _v(d3.get('co2'))),
-    }
-
-
-    try:
-        connected = mqtt_client.is_connected() if mqtt_client else False
-    except:
-        connected = False
-
-    if connected:
-        try:
-            payload = "&".join(f"{k}={v}" for k, v in fields.items())
-            mqtt_client.publish(MQTT_TOPIC, payload)
-            last_cloud_publish_time = current_time
-            print("🚀 Telemetry published directly to Cloud successfully.")
-        except Exception as e:
-            print(f"❌ ThingSpeak publish error: {e}")
-            last_cloud_publish_time = current_time
-    else:
-        print("⚠️ ThingSpeak disconnected, skipping publish")
-        last_cloud_publish_time = current_time
-
-
-
-CONTROL_BROKER = "broker.hivemq.com"
+CONTROL_BROKER = "147.93.106.142"
 CONTROL_PORT   = 1883
+CONTROL_USER   = "Inhydro@5598"
+CONTROL_PASS   = "MGPL@5598"
 
 def on_control_message(client, userdata, msg):
     try:
@@ -389,20 +317,9 @@ def on_control_message(client, userdata, msg):
             print(f"✅ Synced setpoints for Room {room} (requested)")
             return
 
-        new_data = json.loads(msg.payload.decode())
-        if not isinstance(new_data, dict):
+        new_sp = json.loads(msg.payload.decode())
+        if not isinstance(new_sp, dict):
             return
-
-        key_map  = {
-            "clientId": "CLIENT ID",
-            "username": "USERNAME",
-            "password": "PASSWORD",
-            "channelId": "CHANNEL ID",
-            "port": "PORT",
-            "readApiKey": "READ API KEY",
-            "writeApiKey": "WRITE API KEY"
-        }
-        new_sp   = {key_map.get(k, k): v for k, v in new_data.items()}
 
         # Also validate formatting of any updated time values
         time_keys = [
@@ -411,7 +328,11 @@ def on_control_message(client, userdata, msg):
             "Timer3 D_Start", "Timer3 D_Stop",
             "Timer3 N_Start", "Timer3 N_Stop",
             "Timer4 D_Start", "Timer4 D_Stop",
-            "Timer4 N_Start", "Timer4 N_Stop"
+            "Timer4 N_Start", "Timer4 N_Stop",
+            "AC1 D_Start", "AC1 D_Stop", "AC1 N_Start", "AC1 N_Stop",
+            "AC2 D_Start", "AC2 D_Stop", "AC2 N_Start", "AC2 N_Stop",
+            "HUMI1 D_Start", "HUMI1 D_Stop", "HUMI1 N_Start", "HUMI1 N_Stop",
+            "HUMI2 D_Start", "HUMI2 D_Stop", "HUMI2 N_Start", "HUMI2 N_Stop"
         ]
         for k in time_keys:
             if k in new_sp:
@@ -421,8 +342,9 @@ def on_control_message(client, userdata, msg):
                     print(f"⚠️ Remote setpoint reject: invalid time format for {k}")
                     return
 
-        # Validate day/night timer bounds for Timer 3 and Timer 4 to avoid conflicts
-        for prefix in ["Timer3", "Timer4"]:
+        # Validate day/night timer bounds to avoid conflicts
+        prefixes_to_check = ["Timer3", "AC1", "AC2", "HUMI1", "HUMI2"] if room == 3 else ["Timer3", "Timer4"]
+        for prefix in prefixes_to_check:
             d_start = new_sp.get(f"{prefix} D_Start", setpoints[room].get(f"{prefix} D_Start", "10:00"))
             d_stop  = new_sp.get(f"{prefix} D_Stop", setpoints[room].get(f"{prefix} D_Stop", "17:00"))
             n_start = new_sp.get(f"{prefix} N_Start", setpoints[room].get(f"{prefix} N_Start", "17:01"))
@@ -444,14 +366,8 @@ def on_control_message(client, userdata, msg):
                 print(f"⚠️ Remote setpoint reject: Day/Night timer conflict for {prefix}")
                 return
 
-        ts_changed = any(
-            str(new_sp.get(k)) != str(setpoints[room].get(k))
-            for k in ["PORT", "CLIENT ID", "USERNAME", "PASSWORD", "CHANNEL ID", "READ API KEY", "WRITE API KEY"]
-            if k in new_sp
-        )
         setpoints[room].update(new_sp)
         save_setpoints(room)
-        if ts_changed: init_mqtt_client()
 
         if "root" in globals():
             try: root.after(0, lambda r=room, ns=new_sp: refresh_labels(r, ns))
@@ -466,7 +382,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
-        print("✅ Control MQTT (HiveMQ) connected/reconnected")
+        print("✅ Control MQTT (Mosquitto VPS) connected/reconnected")
         for room in [1, 2, 3]:
             client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/update")
             client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/request_sync")
@@ -483,7 +399,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
 def on_control_disconnect(client, userdata, flags, rc, properties=None, *args, **kwargs):
     global is_mqtt_connected
     is_mqtt_connected = False
-    print("⚠️ Control MQTT (HiveMQ) disconnected")
+    print("⚠️ Control MQTT (Mosquitto VPS) disconnected")
 
 import uuid
 client_id = f"Inhydro_Dual_{DEVICE_NAME.strip()}_{uuid.uuid4().hex[:6]}"
@@ -493,9 +409,11 @@ control_client.on_connect = on_control_connect
 control_client.on_disconnect = on_control_disconnect
 
 try:
+    if CONTROL_USER and CONTROL_PASS:
+        control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
     control_client.loop_start()
     control_client.connect_async(CONTROL_BROKER, CONTROL_PORT, 10)
-    print("✅ Control MQTT (HiveMQ) loop started (connecting...)")
+    print("✅ Control MQTT (Mosquitto VPS) loop started (connecting...)")
 except Exception as e:
     print(f"⚠️  Control MQTT startup failed: {e}")
 
@@ -770,7 +688,7 @@ def control_room(room, data):
 
         if ac_timer_on:
             in_day = is_within_window(sp.get("Timer4 D_Start", "10:00"), sp.get("Timer4 D_Stop", "17:00"))
-            in_night = is_within_window(sp.get("Timer4 N_Start", "10:00"), sp.get("Timer4 N_Stop", "17:00"))
+            in_night = is_within_window(sp.get("Timer4 N_Start", "17:05"), sp.get("Timer4 N_Stop", "09:55"))
             
             if in_day:
                 t_max = sp.get("D T Max", 35.0)
@@ -869,7 +787,7 @@ def run_timers(room):
 
         if is_day_night:
             in_day = is_within_window(sp.get(f"{prefix} D_Start", "10:00"), sp.get(f"{prefix} D_Stop", "17:00"))
-            in_night = is_within_window(sp.get(f"{prefix} N_Start", "17:00"), sp.get(f"{prefix} N_Stop", "17:00"))
+            in_night = is_within_window(sp.get(f"{prefix} N_Start", "17:05"), sp.get(f"{prefix} N_Stop", "09:55"))
             in_window = in_day or in_night
             
             if in_night and not in_day:
@@ -2157,32 +2075,32 @@ def pack_entry(ts, d1, d2, d3):
         row.extend([1 if state_val == "ON" else 0, last_val])
         
     # Pack Room 3 Sensors
-    s3 = d3.get("soil") if d3 else None
-    s3_ec = None
-    if s3 and s3.get("ec") is not None:
-        s3_ec = round((s3["ec"] * 0.85) / 1000, 2)
-    s3_ph = s3.get("ph") if s3 else None
-    s3_temp = s3.get("soil_temp") if s3 else None
-    s3_moist = s3.get("moisture") if s3 else None
+    m1 = d3.get("md02_1") if d3 else None
+    m2 = d3.get("md02_2") if d3 else None
     
-    r3 = d3.get("room") if d3 else None
-    r3_temp = r3.get("room_temp") if r3 else None
-    r3_humi = r3.get("room_humi") if r3 else None
+    # Repurpose soil_temp/moisture for md02_2 and room_temp/humi for md02_1
+    s3_ec = None
+    s3_ph = None
+    s3_temp = m2.get("room_temp") if m2 else None
+    s3_moist = m2.get("room_humi") if m2 else None
+    
+    r3_temp = m1.get("room_temp") if m1 else None
+    r3_humi = m1.get("room_humi") if m1 else None
     
     row.extend([
         s3_ec, s3_ph, s3_temp, s3_moist,
         r3_temp, r3_humi,
-        d3.get("orp") if d3 else None,
+        None,  # ORP placeholder (always None)
         d3.get("co2") if d3 else None
     ])
     
     # Pack Room 3 Relays
     row.extend([
-        1 if relay_is_on(ROOM_CHANNELS[3]["ec1"]) else 0,
-        1 if relay_is_on(ROOM_CHANNELS[3]["ec2"]) else 0,
-        1 if relay_is_on(ROOM_CHANNELS[3]["ph"]) else 0,
-        1 if relay_is_on(ROOM_CHANNELS[3]["ac"]) else 0,
-        1 if relay_is_on(ROOM_CHANNELS[3]["humi"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[3]["ac1"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[3]["ac2"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[3]["humi1"]) else 0,
+        1 if relay_is_on(ROOM_CHANNELS[3]["humi2"]) else 0,
+        0,  # placeholder
         1 if relay_is_on(TIMER_CHANNELS[3][0]) else 0,
         1 if relay_is_on(TIMER_CHANNELS[3][1]) else 0,
         1 if relay_is_on(TIMER_CHANNELS[3][2]) else 0
@@ -2282,19 +2200,17 @@ def unpack_row(row):
     }
 
     # Unpack Room 3 Sensors
-    s3 = None
-    if any(row[i] is not None for i in [49, 50, 51, 52]):
-        s3 = {
-            "ec": row[49],
-            "ph": row[50],
-            "soil_temp": row[51],
-            "moisture": row[52]
-        }
-    rm3 = None
+    m1 = None
     if any(row[i] is not None for i in [53, 54]):
-        rm3 = {
+        m1 = {
             "room_temp": row[53],
             "room_humi": row[54]
+        }
+    m2 = None
+    if any(row[i] is not None for i in [51, 52]):
+        m2 = {
+            "room_temp": row[51],
+            "room_humi": row[52]
         }
     r3_timers = []
     for i in range(4):
@@ -2304,17 +2220,15 @@ def unpack_row(row):
         
     p3 = {
         "timestamp": ts,
-        "soil": s3,
-        "room": rm3,
-        "orp": row[55],
+        "md02_1": m1,
+        "md02_2": m2,
         "co2": row[56],
         "timer_state": r3_timers,
         "relay_status": {
-            "ec1": bool(row[57]),
-            "ec2": bool(row[58]),
-            "ph": bool(row[59]),
-            "ac": bool(row[60]),
-            "humi": bool(row[61]),
+            "ac1": bool(row[57]),
+            "ac2": bool(row[58]),
+            "humi1": bool(row[59]),
+            "humi2": bool(row[60]),
             "tmr1": bool(row[62]),
             "tmr2": bool(row[63]),
             "tmr3": bool(row[64])
@@ -2508,7 +2422,6 @@ def update():
     update_room_detail(2, d2, w2)
     update_room_detail(3, d3, w3)
 
-    publish_telemetry(d1, d2, d3)
     publish_live_telemetry(d1, d2, d3)
     save_local_telemetry(d1, d2, d3)
 
@@ -2520,6 +2433,7 @@ def main_loop():
     threading.Thread(target=start_bluetooth_server, daemon=True).start()
     threading.Thread(target=sensor_polling_worker, daemon=True).start()
     threading.Thread(target=sync_offline_data_worker, daemon=True).start()
+    threading.Thread(target=relay_writer_worker, daemon=True).start()
 
     
     show(frame_home)

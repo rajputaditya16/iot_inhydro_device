@@ -43,7 +43,7 @@ setpoints = {
     "PH LOW": 5.8,
     "PH HIGH": 6.5,
     "D T Max": 35.0,
-    "DT Min": 15.0,
+    "D T Min": 15.0,
     "N T Max": 35.0,
     "N T Min": 15.0,
     "H Max": 80.0,
@@ -184,9 +184,11 @@ def init_mqtt_client():
 init_mqtt_client()
 
 
-# --- Control MQTT Setup (HiveMQ) ---
-CONTROL_BROKER = "broker.hivemq.com"
+# --- Control MQTT Setup (Private Mosquitto) ---
+CONTROL_BROKER = "147.93.106.142"
 CONTROL_PORT = 1883
+CONTROL_USER = "Inhydro@5598"
+CONTROL_PASS = "MGPL@5598"
 
 def on_control_message(client, userdata, msg):
     try:
@@ -232,7 +234,7 @@ def on_control_message(client, userdata, msg):
                 try:
                     datetime.datetime.strptime(str(new_sp[k]), "%H:%M")
                 except ValueError:
-                    print(f"⚠️ Rejecting invalid time format for {k}: {new_sp[k]}")
+                    print(f" Rejecting invalid time format for {k}: {new_sp[k]}")
                     return
 
         # Validate Day/Night conflict for Timers 4, 8, 9, 10
@@ -250,7 +252,7 @@ def on_control_message(client, userdata, msg):
                     t_n_start < t_d_stop or
                     t_d_start < t_n_stop or
                     t_n_start == t_n_stop):
-                    print(f"⚠️ Rejecting setpoint update due to Timer{t_idx} Day/Night conflict")
+                    print(f" Rejecting setpoint update due to Timer{t_idx} Day/Night conflict")
                     return
             except Exception:
                 return
@@ -275,21 +277,21 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
-        print("✅ Control MQTT (HiveMQ) connected/reconnected")
+        print(" Control MQTT (Mosquitto VPS) connected/reconnected")
         try:
             client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/update")
             client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/request_sync")
             client.publish(f"inhydro/{DEVICE_NAME}/monitor/setpoints/current", json.dumps(setpoints), retain=True)
         except Exception as e:
-            print(f"⚠️ Error during control MQTT sub/pub: {e}")
+            print(f" Error during control MQTT sub/pub: {e}")
     else:
         is_mqtt_connected = False
-        print(f"⚠️ Control MQTT connection failed with code {rc}")
+        print(f" Control MQTT connection failed with code {rc}")
 
 def on_control_disconnect(client, userdata, flags, rc, properties=None, *args, **kwargs):
     global is_mqtt_connected
     is_mqtt_connected = False
-    print("⚠️ Control MQTT (HiveMQ) disconnected")
+    print(" Control MQTT (Mosquitto VPS) disconnected")
 
 client_id = f"Inhydro_Mon_{DEVICE_NAME.strip()}_{uuid.uuid4().hex[:6]}"
 control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id)
@@ -298,11 +300,13 @@ control_client.on_connect = on_control_connect
 control_client.on_disconnect = on_control_disconnect
 
 try:
+    if CONTROL_USER and CONTROL_PASS:
+        control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
     control_client.loop_start()
     control_client.connect_async(CONTROL_BROKER, CONTROL_PORT, 10)
-    print("✅ Control MQTT (HiveMQ) loop started (connecting...)")
+    print(" Control MQTT (Mosquitto VPS) loop started (connecting...)")
 except Exception as e:
-    print(f"⚠️ Control MQTT startup failed: {e}")
+    print(f" Control MQTT startup failed: {e}")
 
 
 # --- Modbus RTU Relay Setup ---
@@ -545,111 +549,6 @@ def control_room(room, data):
             st["do_active"] = False
         warnings.append(" WATER SENSOR ERROR")
 
-    if room_env:
-        rt = room_env.get("room_temp")
-        rh = room_env.get("room_humi")
-        
-        ac_timer_on = (timer_state[room][3]["state"] == "ON")
-        
-        if ac_timer_on:
-            in_day = is_within_window(sp.get("Timer4 D_Start", "10:00"), sp.get("Timer4 D_Stop", "17:00"))
-            in_night = is_within_window(sp.get("Timer4 N_Start", "10:00"), sp.get("Timer4 N_Stop", "17:00"))
-            
-            if in_day:
-                t_max = sp.get("D T Max", 35.0)
-                t_min = sp.get("DT Min", 15.0)
-                mode_str = "Day"
-            elif in_night:
-                t_max = sp.get("N T Max", 35.0)
-                t_min = sp.get("N T Min", 15.0)
-                mode_str = "Night"
-            else:
-                t_max = sp.get("D T Max", 35.0)
-                t_min = sp.get("DT Min", 15.0)
-                mode_str = "Day"
-                
-            if not st["ac_active"] and rt >= t_max:
-                st["ac_active"] = True
-                relay_on(ch["ac"])
-                warnings.append(f"⚠ TEMP HIGH ({mode_str} AC ON)")
-                print(f"Room{room} AC ON — {rt}°C >= {t_max}°C ({mode_str})")
-                
-            if st["ac_active"] and rt <= t_min:
-                st["ac_active"] = False
-                relay_off(ch["ac"])
-                print(f"Room{room} AC OFF — {rt}°C <= {t_min}°C ({mode_str})")
-        else:
-            if st["ac_active"] or relay_is_on(ch["ac"]):
-                st["ac_active"] = False
-                relay_off(ch["ac"])
-                print(f"Room{room} AC OFF — Cyclic Timer window OFF")
-                
-        # Humidity control
-        if not st["humi_active"] and rh >= sp.get("H Max", 80.0):
-            st["humi_active"] = True
-            relay_on(ch["humi"])
-            warnings.append("⚠ HUMI HIGH (HUM ON)")
-            print(f"Room{room} Humidifier ON — {rh}% >= {sp.get('H Max', 80.0)}%")
-            
-        if st["humi_active"] and rh <= sp.get("H Min", 30.0):
-            st["humi_active"] = False
-            relay_off(ch["humi"])
-            print(f"Room{room} Humidifier OFF — {rh}% <= {sp.get('H Min', 30.0)}%")
-
-        # CO2 Dosing control
-        co2 = room_env.get("co2")
-        ppfd = room_env.get("ppfd")
-        if co2 is not None:
-            # Only dose CO2 if grow lights are actively on (PPFD > 50)
-            lights_on = (ppfd is not None and ppfd > 50)
-            if lights_on:
-                if not st.get("co2_active", False) and co2 < sp.get("CO2 MIN", 800):
-                    st["co2_active"] = True
-                    relay_on(ch["co2"])
-                    warnings.append("⚠ CO2 LOW — DOSING")
-                    print(f"Room{room} CO2 Dosing ON — {co2}ppm < {sp.get('CO2 MIN', 800)}ppm")
-                    
-                if st.get("co2_active", False) and co2 >= sp.get("CO2 MAX", 1200):
-                    st["co2_active"] = False
-                    relay_off(ch["co2"])
-                    print(f"Room{room} CO2 Dosing OFF — {co2}ppm >= {sp.get('CO2 MAX', 1200)}ppm")
-            else:
-                if st.get("co2_active", False) or relay_is_on(ch["co2"]):
-                    st["co2_active"] = False
-                    relay_off(ch["co2"])
-                    print(f"Room{room} CO2 Dosing OFF — Lights are OFF (PPFD: {ppfd})")
-        else:
-            if st.get("co2_active", False) or relay_is_on(ch["co2"]):
-                st["co2_active"] = False
-                relay_off(ch["co2"])
-        # Wind Vent protection control
-        wind_speed = room_env.get("wind_speed")
-        if wind_speed is not None:
-            if not st.get("vent_active", False) and wind_speed >= sp.get("WIND SPEED MAX", 10.0):
-                st["vent_active"] = True
-                relay_on(ch["vent"])
-                warnings.append("⚠ HIGH WIND — VENTS CLOSED")
-                print(f"Room{room} Vents CLOSED — Wind Speed: {wind_speed} m/s >= {sp.get('WIND SPEED MAX', 10.0)} m/s")
-            elif st.get("vent_active", False) and wind_speed <= sp.get("WIND SPEED MIN", 2.0):
-                st["vent_active"] = False
-                relay_off(ch["vent"])
-                print(f"Room{room} Vents OPEN — Wind Speed: {wind_speed} m/s <= {sp.get('WIND SPEED MIN', 2.0)} m/s")
-        else:
-            if st.get("vent_active", False) or relay_is_on(ch["vent"]):
-                st["vent_active"] = False
-                relay_off(ch["vent"])
-    else:
-        if st["ac_active"] or st["humi_active"] or st["co2_active"] or st.get("vent_active", False) or relay_is_on(ch["ac"]) or relay_is_on(ch["humi"]) or relay_is_on(ch["co2"]) or relay_is_on(ch["vent"]):
-            relay_off(ch["ac"])
-            relay_off(ch["humi"])
-            relay_off(ch["co2"])
-            relay_off(ch["vent"])
-            st["ac_active"] = False
-            st["humi_active"] = False
-            st["co2_active"] = False
-            st["vent_active"] = False
-        warnings.append(" ROOM SENSOR ERROR")
-        
     return warnings
 
 
@@ -1124,11 +1023,11 @@ def save_local_telemetry():
     try:
         new_row = pack_entry(ts_str, raw_data)
     except Exception as e:
-        print(f"⚠️ Error packing local telemetry entry: {e}")
+        print(f"Error packing local telemetry entry: {e}")
         last_local_save_time = current_time
         return
 
-    print(f"📝 Saving local telemetry offline: {ts_str}")
+    print(f"Saving local telemetry offline: {ts_str}")
 
     def write_thread():
         with local_log_lock:
@@ -1144,7 +1043,7 @@ def save_local_telemetry():
                 if os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 1500000:
                     rot_name = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
                     os.rename(ACTIVE_LOG_FILE, rot_name)
-                print(f"✅ Offline telemetry written successfully to {ACTIVE_LOG_FILE}")
+                print(f"Offline telemetry written successfully to {ACTIVE_LOG_FILE}")
             except Exception as e:
                 print(f"Local JSON save error: {e}")
 
@@ -1305,27 +1204,45 @@ def get_logo_image():
     global logo_img
     if logo_img is not None:
         return logo_img
-    LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
+    logo_path = "logo.png"
+    if not os.path.exists(logo_path):
+        logo_path = os.path.join(BASE_DIR, "logo.png")
     try:
-        logo_raw = Image.open(LOGO_PATH).resize((100, 63), Image.LANCZOS)
+        logo_raw = Image.open(logo_path).resize((100, 63), Image.LANCZOS)
         logo_img = ImageTk.PhotoImage(logo_raw)
         return logo_img
     except Exception as e:
         print("Logo loading error:", e)
         return None
 
+def draw_logo(parent, bg_color="white", side="right", padx=10):
+    logo = get_logo_image()
+    if logo:
+        lbl_logo = tk.Label(parent, image=logo, bg=bg_color)
+        lbl_logo.image = logo
+        lbl_logo.pack(side=side, padx=padx)
+        return lbl_logo
+    else:
+        # Vector droplet canvas fallback
+        logo_width = 100
+        logo_height = 63
+        logo_canvas = tk.Canvas(parent, width=logo_width, height=logo_height, bg=bg_color, highlightthickness=0)
+        logo_canvas.pack(side=side, padx=padx)
+        cx, cy = logo_width / 2, logo_height / 2
+        logo_canvas.create_oval(cx - 24, cy - 24, cx + 24, cy + 24, fill="white", outline="#1565c0", width=1.5)
+        points = [cx, cy - 16, cx + 12, cy + 6, cx - 12, cy + 6]
+        logo_canvas.create_polygon(points, fill="#1565c0", outline="#1565c0", smooth=True)
+        logo_canvas.create_oval(cx - 12, cy - 3, cx + 12, cy + 13, fill="#1565c0", outline="#1565c0")
+        dia_points = [cx, cy - 4, cx + 4, cy + 2, cx, cy + 8, cx - 4, cy + 2]
+        logo_canvas.create_polygon(dia_points, fill="#F59E0B", outline="#F59E0B")
+        logo_canvas.create_oval(cx - 1.5, cy - 1.5, cx + 1.5, cy + 1.5, fill="white")
+        return logo_canvas
+
 def request_setpoints_access(parent_to_close=None):
     win = tk.Toplevel()
     win.title("Security Authentication")
-    win.geometry("400x450")
     win.configure(bg="#f8fafc")
-    win.resizable(False, False)
-    
-    # Center the Toplevel window
-    win.update_idletasks()
-    x = (win.winfo_screenwidth() - 400) // 2
-    y = (win.winfo_screenheight() - 450) // 2
-    win.geometry(f"+{x}+{y}")
+    win.attributes("-fullscreen", True)
     
     # Grab focus so they can't click main window behind it
     win.transient(root)
@@ -1334,15 +1251,19 @@ def request_setpoints_access(parent_to_close=None):
     password_entered = ""
     correct_password = str(setpoints.get("SYSTEM PASSWORD", "1234"))
 
+    # Center container frame to hold all dialog widgets in fullscreen mode
+    main_container = tk.Frame(win, bg="#f8fafc")
+    main_container.place(relx=0.5, rely=0.5, anchor="center")
+
     # Header
-    tk.Label(win, text="SECURITY LOCK", font=("Arial", 14, "bold"), fg="#1e293b", bg="#f8fafc").pack(pady=(20, 5))
-    tk.Label(win, text="Please enter your authorization PIN to access settings:", font=("Arial", 9), fg="#64748b", bg="#f8fafc").pack(pady=2)
+    tk.Label(main_container, text="SECURITY LOCK", font=("Arial", 14, "bold"), fg="#1e293b", bg="#f8fafc").pack(pady=(20, 5))
+    tk.Label(main_container, text="Please enter your authorization PIN to access settings:", font=("Arial", 9), fg="#64748b", bg="#f8fafc").pack(pady=2)
 
     # Display entry for password (shows bullets/asterisks)
-    display_lbl = tk.Label(win, text="", font=("Arial", 20, "bold"), fg="#0f172a", bg="white", width=12, relief="sunken", bd=2, anchor="center")
+    display_lbl = tk.Label(main_container, text="", font=("Arial", 20, "bold"), fg="#0f172a", bg="white", width=12, relief="sunken", bd=2, anchor="center")
     display_lbl.pack(pady=15)
 
-    error_lbl = tk.Label(win, text="", font=("Arial", 10, "bold"), fg="#dc2626", bg="#f8fafc")
+    error_lbl = tk.Label(main_container, text="", font=("Arial", 10, "bold"), fg="#dc2626", bg="#f8fafc")
     error_lbl.pack(pady=2)
 
     def kp_press(char):
@@ -1379,7 +1300,7 @@ def request_setpoints_access(parent_to_close=None):
             kp_clear()
 
     # Keypad Grid
-    kp_frame = tk.Frame(win, bg="#f8fafc")
+    kp_frame = tk.Frame(main_container, bg="#f8fafc")
     kp_frame.pack(pady=10)
 
     buttons = [
@@ -1405,7 +1326,7 @@ def request_setpoints_access(parent_to_close=None):
         btn.grid(row=r, column=c, padx=4, pady=4)
 
     # Confirm & Cancel
-    action_frame = tk.Frame(win, bg="#f8fafc")
+    action_frame = tk.Frame(main_container, bg="#f8fafc")
     action_frame.pack(fill="x", side="bottom", pady=15, padx=20)
 
     tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#cbd5e1", fg="#1e293b", width=12, height=2, bd=0,
@@ -1417,15 +1338,8 @@ def request_setpoints_access(parent_to_close=None):
 def open_setpoints_window():
     win = tk.Toplevel()
     win.title("System Configuration")
-    win.geometry("1280x720")
     win.configure(bg="white")
-    win.resizable(False, False)
-    
-    # Center the Toplevel window
-    win.update_idletasks()
-    x = (win.winfo_screenwidth() - 1280) // 2
-    y = (win.winfo_screenheight() - 720) // 2
-    win.geometry(f"+{x}+{y}")
+    win.attributes("-fullscreen", True)
     
     color = "#1565c0"
     labels_s = {}
@@ -1439,11 +1353,7 @@ def open_setpoints_window():
              font=("Arial", 14, "bold"), fg=color, bg="white").pack(side="left", pady=10)
              
     # Logo
-    logo = get_logo_image()
-    if logo:
-        lbl_logo = tk.Label(header, image=logo, bg="white")
-        lbl_logo.image = logo
-        lbl_logo.pack(side="right", padx=10)
+    draw_logo(header, bg_color="white")
              
     # Canvas Container for Scrollability
     canvas_container = tk.Frame(win, bg="white")
@@ -1581,34 +1491,7 @@ def open_setpoints_window():
     make_cell(grid_dosing, "PH LOW", "pH Low:").grid(row=1, column=0, padx=10, pady=4)
     make_cell(grid_dosing, "PH HIGH", "pH High:").grid(row=1, column=1, padx=10, pady=4)
 
-    # CO2 Control Card (Left Pane, below card_dosing)
-    card_co2 = tk.LabelFrame(left_pane, text=" CO2 SETPOINTS ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
-    card_co2.pack(fill="x", pady=5, padx=5)
-    
-    grid_co2 = tk.Frame(card_co2, bg="white")
-    grid_co2.pack(pady=4, padx=5)
-    
-    make_cell(grid_co2, "CO2 MIN", "CO2 Min:").grid(row=0, column=0, padx=10, pady=4)
-    make_cell(grid_co2, "CO2 MAX", "CO2 Max:").grid(row=0, column=1, padx=10, pady=4)
-
-    # Climate Control Card (Left Pane)
-    card_climate = tk.LabelFrame(left_pane, text=" CLIMATE CONTROL ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
-    card_climate.pack(fill="x", pady=5, padx=5)
-    
-    grid_climate = tk.Frame(card_climate, bg="white")
-    grid_climate.pack(pady=4, padx=5)
-    
-    make_cell(grid_climate, "D T Max", "Day T Max:").grid(row=0, column=0, padx=10, pady=4)
-    make_cell(grid_climate, "DT Min", "Day T Min:").grid(row=0, column=1, padx=10, pady=4)
-    make_cell(grid_climate, "N T Max", "Night T Max:").grid(row=1, column=0, padx=10, pady=4)
-    make_cell(grid_climate, "N T Min", "Night T Min:").grid(row=1, column=1, padx=10, pady=4)
-    make_cell(grid_climate, "H Max", "Humid Max:").grid(row=2, column=0, padx=10, pady=4)
-    make_cell(grid_climate, "H Min", "Humid Min:").grid(row=2, column=1, padx=10, pady=4)
-
-
-
-    # Day/Night Timer 4 (AC) (Left Pane)
-    make_dn_timer_card(left_pane, 4, "TIMER 4 / AC").pack(fill="x", pady=8, padx=5)
+    # Climate control setpoints UI removed
 
     # Timers 1-3 Card (Right Pane)
     card_timers = tk.LabelFrame(right_pane, text=" CYCLIC TIMERS 1-3 ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
@@ -1705,9 +1588,7 @@ def open_setpoints_window():
     
     make_cell(grid_adv, "WATER TEMP MAX", "Water Temp Max:", width_lbl=13).grid(row=0, column=0, padx=10, pady=4)
     make_cell(grid_adv, "WATER TEMP MIN", "Water Temp Min:", width_lbl=13).grid(row=0, column=1, padx=10, pady=4)
-    make_cell(grid_adv, "WIND SPEED MAX", "Wind Spd Max:", width_lbl=13).grid(row=1, column=0, padx=10, pady=4)
-    make_cell(grid_adv, "WIND SPEED MIN", "Wind Spd Min:", width_lbl=13).grid(row=1, column=1, padx=10, pady=4)
-    make_cell(grid_adv, "SYSTEM PASSWORD", "Sys PIN/Pass:", width_lbl=13).grid(row=2, column=0, padx=10, pady=4)
+    make_cell(grid_adv, "SYSTEM PASSWORD", "Sys PIN/Pass:", width_lbl=13).grid(row=1, column=0, padx=10, pady=4)
 
     # DO Control Card (Right Pane, below card_adv)
     card_do = tk.LabelFrame(right_pane, text=" DISSOLVED OXYGEN (DO) ", font=("Arial", 10, "bold"), fg=color, bg="white", bd=2, relief="groove")
@@ -1982,20 +1863,12 @@ def update_live_timers_ui():
     st = state[1]
     set_lbl_state("ec_mode", st["ec_active"])
     set_lbl_state("ph_mode", st["ph_active"])
-    set_lbl_state("ac_mode", st["ac_active"])
-    set_lbl_state("humi_mode", st["humi_active"])
-    set_lbl_state("co2_mode", st.get("co2_active", False))
     set_lbl_state("do_mode", st.get("do_active", False))
-    set_lbl_state("vent_mode", st.get("vent_active", False))
 
     set_lbl_state("r_ec1", relay_is_on(1), "ON", "OFF")
     set_lbl_state("r_ec2", relay_is_on(2), "ON", "OFF")
     set_lbl_state("r_ph", relay_is_on(3), "ON", "OFF")
-    set_lbl_state("r_ac", relay_is_on(4), "ON", "OFF")
-    set_lbl_state("r_humi", relay_is_on(5), "ON", "OFF")
-    set_lbl_state("r_co2", relay_is_on(15), "ON", "OFF")
     set_lbl_state("r_aerator", relay_is_on(16), "ON", "OFF")
-    set_lbl_state("r_vent", relay_is_on(15), "ON", "OFF")
     
     timer_channels = [6, 7, 8, 4, 9, 10, 11, 12, 13, 14]
     for idx in range(10):
@@ -2023,14 +1896,8 @@ def open_timers_status_window():
     global timers_ui_labels
     win = tk.Toplevel()
     win.title("Timers & Relays Live Dashboard")
-    win.geometry("1280x720")
     win.configure(bg="white")
-    win.resizable(False, False)
-    
-    win.update_idletasks()
-    x = (win.winfo_screenwidth() - 1280) // 2
-    y = (win.winfo_screenheight() - 720) // 2
-    win.geometry(f"+{x}+{y}")
+    win.attributes("-fullscreen", True)
     
     color = "#1565c0"
     timers_ui_labels.clear()
@@ -2046,12 +1913,8 @@ def open_timers_status_window():
         fg=color,
         bg="white"
     ).pack(side="left", pady=10)
-    
-    logo = get_logo_image()
-    if logo:
-        lbl_logo = tk.Label(header, image=logo, bg="white")
-        lbl_logo.image = logo
-        lbl_logo.pack(side="right", padx=10)
+    # Logo
+    draw_logo(header, bg_color="white")
         
     # Canvas Container for Scrollability
     canvas_container = tk.Frame(win, bg="#f8fafc")
@@ -2167,11 +2030,7 @@ def open_timers_status_window():
     modes_rows = [
         ("EC Control Mode", "ec_mode"),
         ("pH Control Mode", "ph_mode"),
-        ("AC Control Mode", "ac_mode"),
-        ("Humi Control Mode", "humi_mode"),
-        ("CO2 Dosing Mode", "co2_mode"),
         ("DO Control Mode", "do_mode"),
-        ("Wind Vent Mode", "vent_mode"),
     ]
     for lbl_text, key in modes_rows:
         f = tk.Frame(card_modes, bg="white")
@@ -2189,11 +2048,7 @@ def open_timers_status_window():
         ("EC1 Feed (Ch 1)", "r_ec1"),
         ("EC2 Feed (Ch 2)", "r_ec2"),
         ("pH Dose (Ch 3)", "r_ph"),
-        ("AC Cooler (Ch 4)", "r_ac"),
-        ("Humidifier (Ch 5)", "r_humi"),
-        ("CO2 Valve (Ch 15)", "r_co2"),
         ("DO Aerator (Ch 16)", "r_aerator"),
-        ("Wind Vent (Ch 15)", "r_vent"),
     ]
     for lbl_text, key in primary_rows:
         f = tk.Frame(card_primary, bg="white")
@@ -2247,7 +2102,7 @@ def open_timers_window():
 # --- UI Setup ---
 root = tk.Tk()
 root.title("Sensor Monitor")
-root.geometry("1280x720")
+root.attributes("-fullscreen", True)
 root.config(bg="#f8fafc")
 
 # Header Section (Reduced pady to bring it closer to boxes)
@@ -2275,11 +2130,7 @@ tk.Label(
 ).pack(anchor="w", pady=(2, 0))"""
 
 # Right: Brand Image Logo in the last upside right corner (Scaled down to 100x63 for compact height)
-logo_img_main = get_logo_image()
-if logo_img_main:
-    lbl_logo = tk.Label(header, image=logo_img_main, bg="#f8fafc")
-    lbl_logo.image = logo_img_main
-    lbl_logo.pack(side="right", padx=(30,10))
+draw_logo(header, bg_color="#f8fafc", padx=(30, 10))
 
 # Footer Section
 footer = tk.Frame(root, bg="#f8fafc")

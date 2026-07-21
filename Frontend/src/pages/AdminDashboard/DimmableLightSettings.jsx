@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Save, AlertCircle, CheckCircle2, RefreshCw, Zap, Radio, ChevronDown, X } from 'lucide-react';
-import mqtt from 'mqtt';
+import { createMqttClient } from '../../utils/mqtt';
 import DimmableLightControl from '../../components/DimmableLightControl';
 
 const DEFAULT_CONFIG = {
@@ -66,7 +66,7 @@ const DimmableLightSettings = () => {
 
   const selectedDevice = devices.find(d => (d.mqttId || d._id) === deviceRoot);
 
-  // Sync state and connect to HiveMQ MQTT
+  // Sync state and connect to Mosquitto Private Broker
   useEffect(() => {
     if (!deviceRoot) return;
 
@@ -75,7 +75,7 @@ const DimmableLightSettings = () => {
     setSavedConfig(DEFAULT_CONFIG);
     setStatus('disconnected');
 
-    const mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+    const mqttClient = createMqttClient();
 
     mqttClient.on('connect', () => {
       setStatus('connected');

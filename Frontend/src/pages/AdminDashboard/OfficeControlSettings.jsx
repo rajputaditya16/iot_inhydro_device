@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Edit3, Radio } from 'lucide-react';
-import mqtt from 'mqtt';
+import { createMqttClient } from '../../utils/mqtt';
 
 const defaultSetpointsRoom12 = {
   "EC MIN": 1.2, "EC MAX": 1.8,
@@ -214,7 +214,7 @@ const OfficeControlSettings = () => {
   useEffect(() => {
     if (!deviceRoot) return;
     setStatus('disconnected');
-    const mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+    const mqttClient = createMqttClient();
 
     const initialSetpoints = {
       1: { ...defaultSetpointsRoom12 },

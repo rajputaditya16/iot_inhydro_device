@@ -274,6 +274,7 @@ class KeypadDialog(tk.Toplevel):
         self.callback = callback
         self.is_numeric = is_numeric
         self.show_masked = show_masked
+        self.keyboard_mode = "lowercase"
         
         self.title(title_text)
         self.configure(bg=BG_COLOR)
@@ -369,42 +370,144 @@ class KeypadDialog(tk.Toplevel):
             parent.rowconfigure(row, weight=1)
 
     def build_qwerty_layout(self, parent):
-        row0_keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
-        for col, key in enumerate(row0_keys):
-            btn = tk.Button(parent, text=key, font=("Arial", 12, "bold"), bg=CARD_BG, fg=TEXT_COLOR, activebackground=BTN_HOVER, relief="flat", bd=1, command=lambda k=key: self.press_key(k))
-            btn.grid(row=0, column=col, padx=2, pady=2, sticky="nsew")
-            
-        row1_keys = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P']
-        for col, key in enumerate(row1_keys):
-            btn = tk.Button(parent, text=key, font=("Arial", 12, "bold"), bg=CARD_BG, fg=TEXT_COLOR, activebackground=BTN_HOVER, relief="flat", bd=1, command=lambda k=key: self.press_key(k))
-            btn.grid(row=1, column=col, padx=2, pady=2, sticky="nsew")
+        self.parent_frame = parent
+        self.keyboard_mode = "lowercase"
+        self.draw_keyboard()
 
-        row2_keys = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':']
-        for col, key in enumerate(row2_keys):
-            btn = tk.Button(parent, text=key, font=("Arial", 12, "bold"), bg=CARD_BG, fg=TEXT_COLOR, activebackground=BTN_HOVER, relief="flat", bd=1, command=lambda k=key: self.press_key(k))
-            btn.grid(row=2, column=col, padx=2, pady=2, sticky="nsew")
+    def draw_keyboard(self):
+        # Clear previous keyboard buttons
+        for w in self.parent_frame.winfo_children():
+            w.destroy()
 
-        row3_keys = ['Z', 'X', 'C', 'V', 'B', 'N', 'M']
-        for col, key in enumerate(row3_keys):
-            btn = tk.Button(parent, text=key, font=("Arial", 12, "bold"), bg=CARD_BG, fg=TEXT_COLOR, activebackground=BTN_HOVER, relief="flat", bd=1, command=lambda k=key: self.press_key(k))
-            btn.grid(row=3, column=col, padx=2, pady=2, sticky="nsew")
-            
-        btn_space = tk.Button(parent, text="SPC", font=("Arial", 12, "bold"), bg=CARD_BG, fg=TEXT_COLOR, activebackground=BTN_HOVER, relief="flat", bd=1, command=lambda: self.press_key(" "))
-        btn_space.grid(row=3, column=7, columnspan=3, padx=2, pady=2, sticky="nsew")
+        if self.keyboard_mode == "lowercase":
+            rows = [
+                ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+                ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+                ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', '-'],
+                ['z', 'x', 'c', 'v', 'b', 'n', 'm', '.', '_', '@']
+            ]
+        elif self.keyboard_mode == "uppercase":
+            rows = [
+                ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+                ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+                ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':'],
+                ['Z', 'X', 'C', 'V', 'B', 'N', 'M', ',', '/', '?']
+            ]
+        else: # "symbols"
+            rows = [
+                ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')'],
+                ['~', '`', '+', '=', '{', '}', '[', ']', '|', '\\'],
+                [';', '\'', '"', '<', '>', '?', '/', '*', '-', '_'],
+                ['[', ']', '{', '}', '(', ')', '<', '>', ',', '.']
+            ]
 
-        btn_back = tk.Button(parent, text="⌫ DEL", font=("Arial", 11, "bold"), bg="#f97316", fg="white", activebackground="#ea580c", relief="flat", bd=1, command=self.press_back)
-        btn_back.grid(row=4, column=0, columnspan=3, padx=2, pady=2, sticky="nsew")
+        # Draw rows 0-3
+        for r_idx, keys in enumerate(rows):
+            for c_idx, key in enumerate(keys):
+                btn = tk.Button(
+                    self.parent_frame, 
+                    text=key, 
+                    font=("Arial", 12, "bold"), 
+                    bg=CARD_BG, 
+                    fg=TEXT_COLOR, 
+                    activebackground=BTN_HOVER, 
+                    relief="flat", 
+                    bd=1, 
+                    command=lambda k=key: self.press_key(k)
+                )
+                btn.grid(row=r_idx, column=c_idx, padx=2, pady=2, sticky="nsew")
 
-        btn_clear = tk.Button(parent, text="CLR", font=("Arial", 11, "bold"), bg="#dc2626", fg="white", activebackground="#b91c1c", relief="flat", bd=1, command=self.press_clear)
-        btn_clear.grid(row=4, column=3, columnspan=3, padx=2, pady=2, sticky="nsew")
+        # Row 4: Mode toggles and actions
+        if self.keyboard_mode == "lowercase":
+            shift_text = "⇧ SHIFT"
+            shift_mode = "uppercase"
+        elif self.keyboard_mode == "uppercase":
+            shift_text = "⇩ shift"
+            shift_mode = "lowercase"
+        else:
+            shift_text = "ABC"
+            shift_mode = "lowercase"
 
-        btn_done = tk.Button(parent, text="OK ✓", font=("Arial", 11, "bold"), bg="#10b981", fg="white", activebackground="#059669", relief="flat", bd=1, command=self.press_ok)
-        btn_done.grid(row=4, column=6, columnspan=4, padx=2, pady=2, sticky="nsew")
+        btn_shift = tk.Button(
+            self.parent_frame,
+            text=shift_text,
+            font=("Arial", 10, "bold"),
+            bg="#3b82f6",
+            fg="white",
+            activebackground="#2563eb",
+            relief="flat",
+            bd=1,
+            command=lambda: self.toggle_keyboard_mode(shift_mode)
+        )
+        btn_shift.grid(row=4, column=0, columnspan=2, padx=2, pady=2, sticky="nsew")
+
+        if self.keyboard_mode == "symbols":
+            sym_text = "ABC"
+            sym_mode = "lowercase"
+        else:
+            sym_text = "?123"
+            sym_mode = "symbols"
+
+        btn_sym = tk.Button(
+            self.parent_frame,
+            text=sym_text,
+            font=("Arial", 10, "bold"),
+            bg="#6b7280",
+            fg="white",
+            activebackground="#4b5563",
+            relief="flat",
+            bd=1,
+            command=lambda: self.toggle_keyboard_mode(sym_mode)
+        )
+        btn_sym.grid(row=4, column=2, columnspan=2, padx=2, pady=2, sticky="nsew")
+
+        btn_space = tk.Button(
+            self.parent_frame,
+            text="SPACE",
+            font=("Arial", 11, "bold"),
+            bg=CARD_BG,
+            fg=TEXT_COLOR,
+            activebackground=BTN_HOVER,
+            relief="flat",
+            bd=1,
+            command=lambda: self.press_key(" ")
+        )
+        btn_space.grid(row=4, column=4, columnspan=2, padx=2, pady=2, sticky="nsew")
+
+        btn_back = tk.Button(
+            self.parent_frame,
+            text="⌫ DEL",
+            font=("Arial", 10, "bold"),
+            bg="#f97316",
+            fg="white",
+            activebackground="#ea580c",
+            relief="flat",
+            bd=1,
+            command=self.press_back
+        )
+        btn_back.grid(row=4, column=6, columnspan=2, padx=2, pady=2, sticky="nsew")
+
+        btn_done = tk.Button(
+            self.parent_frame,
+            text="OK ✓",
+            font=("Arial", 11, "bold"),
+            bg="#10b981",
+            fg="white",
+            activebackground="#059669",
+            relief="flat",
+            bd=1,
+            command=self.press_ok
+        )
+        btn_done.grid(row=4, column=8, columnspan=2, padx=2, pady=2, sticky="nsew")
 
         for c in range(10):
-            parent.columnconfigure(c, weight=1)
+            self.parent_frame.columnconfigure(c, weight=1)
         for r in range(5):
-            parent.rowconfigure(r, weight=1)
+            self.parent_frame.rowconfigure(r, weight=1)
+
+    def toggle_keyboard_mode(self, mode):
+        self.keyboard_mode = mode
+        self.draw_keyboard()
 
     def press_key(self, char):
         self.entered_value += char
@@ -570,9 +673,11 @@ class MainControllerApp:
             text="● Wi-Fi: Disconnected",
             fg=RED_ACCENT,
             bg=BG_COLOR,
-            font=("Helvetica", 10, "bold")
+            font=("Helvetica", 10, "bold"),
+            cursor="hand2"
         )
         self.lbl_local_status.pack(side="left", padx=(0, 15))
+        self.lbl_local_status.bind("<Button-1>", lambda e: self.open_wifi_manager())
 
 
 
@@ -1634,6 +1739,272 @@ class MainControllerApp:
             pass
 
         self.root.destroy()
+
+    def open_wifi_manager(self):
+        # Open Toplevel window
+        wifi_win = tk.Toplevel(self.root)
+        wifi_win.title("Wi-Fi Settings")
+        wifi_win.attributes("-fullscreen", True)
+        wifi_win.configure(bg=BG_COLOR)
+        
+        # Header Panel
+        header = tk.Frame(wifi_win, bg=BG_COLOR)
+        header.pack(fill="x", padx=30, pady=(15, 10))
+        
+        lbl_title = tk.Label(
+            header,
+            text="WI-FI CONNECTION MANAGER",
+            fg="#0f172a",
+            bg=BG_COLOR,
+            font=("Helvetica", 20, "bold")
+        )
+        lbl_title.pack(side="left", anchor="center")
+        
+        btn_back = tk.Button(
+            header,
+            text="← BACK TO HOME",
+            font=("Helvetica", 11, "bold"),
+            bg=BTN_SECONDARY,
+            fg=TEXT_COLOR,
+            activebackground=BTN_HOVER,
+            activeforeground=TEXT_COLOR,
+            relief="flat",
+            bd=0,
+            padx=15,
+            pady=8,
+            cursor="hand2",
+            command=wifi_win.destroy
+        )
+        btn_back.pack(side="right", anchor="center")
+        
+        # Main container
+        main_content = tk.Frame(wifi_win, bg=BG_COLOR)
+        main_content.pack(fill="both", expand=True, padx=30, pady=10)
+        
+        # Status Message Label
+        lbl_status = tk.Label(
+            main_content,
+            text="Scanning for nearby networks...",
+            fg=MUTED_TEXT,
+            bg=BG_COLOR,
+            font=("Helvetica", 13, "bold"),
+            pady=10
+        )
+        lbl_status.pack()
+        
+        # Scrollable area for networks
+        canvas = tk.Canvas(main_content, bg=BG_COLOR, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(main_content, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg=BG_COLOR)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all")
+            )
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=800)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Drag to scroll bindings (for touchscreens)
+        canvas.bind("<ButtonPress-1>", lambda e: canvas.scan_mark(e.x, e.y))
+        canvas.bind("<B1-Motion>", lambda e: canvas.scan_dragto(e.x, e.y, gain=1))
+        
+        def start_wifi_scan(list_container, status_lbl):
+            status_lbl.config(text="Scanning nearby networks...", fg=MUTED_TEXT)
+            
+            def scan_thread():
+                try:
+                    import subprocess
+                    cmd = ['sudo', 'nmcli', '-t', '-f', 'SSID,SIGNAL', 'dev', 'wifi']
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                    lines = result.stdout.strip().split('\n')
+                    
+                    # Parse and deduplicate
+                    networks = []
+                    seen = set()
+                    for line in lines:
+                        if not line:
+                            continue
+                        parts = line.split(':')
+                        if len(parts) >= 1:
+                            ssid = parts[0].strip()
+                            if not ssid or ssid in seen:
+                                continue
+                            seen.add(ssid)
+                            # Signal strength
+                            signal = 100
+                            if len(parts) >= 2:
+                                try:
+                                    signal = int(parts[1])
+                                except ValueError:
+                                    pass
+                            networks.append((ssid, signal))
+                    
+                    # Sort by signal strength (highest first)
+                    networks.sort(key=lambda x: x[1], reverse=True)
+                    
+                    # Update UI on main thread
+                    self.root.after(0, lambda: populate_networks(networks))
+                except Exception as ex:
+                    err_msg = str(ex)
+                    self.root.after(0, lambda: status_lbl.config(text=f"Scan failed: {err_msg}", fg=RED_ACCENT))
+                    
+            import threading
+            threading.Thread(target=scan_thread, daemon=True).start()
+
+        def populate_networks(networks):
+            # Clear previous widgets
+            for w in scrollable_frame.winfo_children():
+                w.destroy()
+                
+            if not networks:
+                lbl_status.config(text="No Wi-Fi networks found. Rescan to try again.", fg=RED_ACCENT)
+                return
+                
+            lbl_status.config(text="Select a Wi-Fi network to connect:", fg=TEXT_COLOR)
+            
+            for ssid, signal in networks:
+                # Network Row Card Frame
+                card = tk.Frame(
+                    scrollable_frame,
+                    bg=CARD_BG,
+                    bd=1,
+                    relief="solid",
+                    highlightbackground=BORDER_COLOR,
+                    highlightthickness=1,
+                    pady=12,
+                    padx=15
+                )
+                card.pack(fill="x", pady=6, padx=10)
+                
+                # SSID and signal Label
+                sig_symbol = "📶"
+                if signal < 30:
+                    sig_symbol = "📶 (Weak)"
+                elif signal < 60:
+                    sig_symbol = "📶 (Fair)"
+                elif signal < 85:
+                    sig_symbol = "📶 (Good)"
+                else:
+                    sig_symbol = "📶 (Excellent)"
+                    
+                lbl_net = tk.Label(
+                    card,
+                    text=f"{ssid}  ({signal}% {sig_symbol})",
+                    font=("Helvetica", 13, "bold"),
+                    bg=CARD_BG,
+                    fg=TEXT_COLOR
+                )
+                lbl_net.pack(side="left")
+                
+                # Connect Button
+                btn_conn = tk.Button(
+                    card,
+                    text="CONNECT",
+                    font=("Helvetica", 11, "bold"),
+                    bg=ACCENT_BLUE,
+                    fg="white",
+                    activebackground=BTN_HOVER_PRIMARY,
+                    activeforeground="white",
+                    relief="flat",
+                    bd=0,
+                    padx=15,
+                    pady=6,
+                    cursor="hand2"
+                )
+                
+                def make_connect_handler(selected_ssid):
+                    return lambda: prompt_password(selected_ssid)
+                    
+                btn_conn.config(command=make_connect_handler(ssid))
+                btn_conn.pack(side="right")
+
+        def prompt_password(ssid):
+            def on_password_entered(password):
+                if password is not None: # User didn't cancel
+                    attempt_connection(ssid, password)
+            
+            KeypadDialog(
+                wifi_win,
+                title_text=f"Enter Password for '{ssid}'",
+                initial_value="",
+                callback=on_password_entered,
+                is_numeric=False,
+                show_masked=True
+            )
+
+        def attempt_connection(ssid, password):
+            lbl_status.config(text=f"Connecting to '{ssid}'...", fg=ACCENT_BLUE)
+            
+            def connect_thread():
+                try:
+                    import subprocess
+                    if password:
+                        cmd = ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password]
+                    else:
+                        cmd = ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid]
+                        
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+                    
+                    if result.returncode == 0:
+                        self.wifi_connected = True
+                        self.wifi_ssid = ssid
+                        
+                        def on_success():
+                            lbl_status.config(text=f"Successfully connected to '{ssid}'!", fg=ACCENT_GREEN)
+                            wifi_win.after(2000, wifi_win.destroy)
+                            
+                        self.root.after(0, on_success)
+                    else:
+                        err = result.stderr.strip() or result.stdout.strip()
+                        if len(err) > 100:
+                            err = err[:100] + "..."
+                        def on_failure():
+                            lbl_status.config(text=f"Failed to connect: {err}", fg=RED_ACCENT)
+                        self.root.after(0, on_failure)
+                        
+                except Exception as ex:
+                    err_msg = str(ex)
+                    def on_exception():
+                        lbl_status.config(text=f"Error connecting: {err_msg}", fg=RED_ACCENT)
+                    self.root.after(0, on_exception)
+                    
+            import threading
+            threading.Thread(target=connect_thread, daemon=True).start()
+
+        def trigger_scan():
+            for w in scrollable_frame.winfo_children():
+                w.destroy()
+            start_wifi_scan(scrollable_frame, lbl_status)
+
+        # Footer Rescan button
+        footer = tk.Frame(wifi_win, bg=BG_COLOR)
+        footer.pack(fill="x", side="bottom", padx=30, pady=15)
+        
+        btn_rescan = tk.Button(
+            footer,
+            text="🔄 RESCAN",
+            font=("Helvetica", 12, "bold"),
+            bg=BTN_PRIMARY,
+            fg="white",
+            activebackground=BTN_HOVER_PRIMARY,
+            activeforeground="white",
+            relief="flat",
+            bd=0,
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            command=trigger_scan
+        )
+        btn_rescan.pack(anchor="center")
+
+        # Start initial scan
+        trigger_scan()
 
 # --- ENTRY POINT ---
 if __name__ == "__main__":

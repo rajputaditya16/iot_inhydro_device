@@ -188,7 +188,7 @@ init_mqtt_client()
 CONTROL_BROKER = "147.93.106.142"          # Change to your Oracle VPS IP or Domain name
 CONTROL_PORT = 1883                     # Change to 8883 if you set up Let's Encrypt TLS
 CONTROL_USER = "Inhydro@5598"         # Mosquitto username
-CONTROL_PASS = "MySecretPassword123"     # Mosquitto password
+CONTROL_PASS = "MGPL@5598"     # Mosquitto password
 
 
 def on_control_message(client, userdata, msg):
@@ -278,7 +278,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
-        print("✅ Control MQTT (HiveMQ) connected/reconnected")
+        print("✅ Control MQTT (Mosquitto VPS) connected/reconnected")
         try:
             client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/update")
             client.subscribe(f"inhydro/{DEVICE_NAME}/monitor/setpoints/request_sync")
@@ -292,7 +292,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
 def on_control_disconnect(client, userdata, flags, rc, properties=None, *args, **kwargs):
     global is_mqtt_connected
     is_mqtt_connected = False
-    print("⚠️ Control MQTT (HiveMQ) disconnected")
+    print("⚠️ Control MQTT (Mosquitto VPS) disconnected")
 
 client_id = f"Inhydro_Mon_{DEVICE_NAME.strip()}_{uuid.uuid4().hex[:6]}"
 control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id)
@@ -1317,27 +1317,45 @@ def get_logo_image():
     global logo_img
     if logo_img is not None:
         return logo_img
-    LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
+    logo_path = "logo.png"
+    if not os.path.exists(logo_path):
+        logo_path = os.path.join(BASE_DIR, "logo.png")
     try:
-        logo_raw = Image.open(LOGO_PATH).resize((100, 63), Image.LANCZOS)
+        logo_raw = Image.open(logo_path).resize((100, 63), Image.LANCZOS)
         logo_img = ImageTk.PhotoImage(logo_raw)
         return logo_img
     except Exception as e:
         print("Logo loading error:", e)
         return None
 
+def draw_logo(parent, bg_color="white", side="right", padx=10):
+    logo = get_logo_image()
+    if logo:
+        lbl_logo = tk.Label(parent, image=logo, bg=bg_color)
+        lbl_logo.image = logo
+        lbl_logo.pack(side=side, padx=padx)
+        return lbl_logo
+    else:
+        # Vector droplet canvas fallback
+        logo_width = 100
+        logo_height = 63
+        logo_canvas = tk.Canvas(parent, width=logo_width, height=logo_height, bg=bg_color, highlightthickness=0)
+        logo_canvas.pack(side=side, padx=padx)
+        cx, cy = logo_width / 2, logo_height / 2
+        logo_canvas.create_oval(cx - 24, cy - 24, cx + 24, cy + 24, fill="white", outline="#1565c0", width=1.5)
+        points = [cx, cy - 16, cx + 12, cy + 6, cx - 12, cy + 6]
+        logo_canvas.create_polygon(points, fill="#1565c0", outline="#1565c0", smooth=True)
+        logo_canvas.create_oval(cx - 12, cy - 3, cx + 12, cy + 13, fill="#1565c0", outline="#1565c0")
+        dia_points = [cx, cy - 4, cx + 4, cy + 2, cx, cy + 8, cx - 4, cy + 2]
+        logo_canvas.create_polygon(dia_points, fill="#F59E0B", outline="#F59E0B")
+        logo_canvas.create_oval(cx - 1.5, cy - 1.5, cx + 1.5, cy + 1.5, fill="white")
+        return logo_canvas
+
 def request_setpoints_access(parent_to_close=None):
     win = tk.Toplevel()
     win.title("Security Authentication")
-    win.geometry("400x450")
     win.configure(bg="#f8fafc")
-    win.resizable(False, False)
-    
-    # Center the Toplevel window
-    win.update_idletasks()
-    x = (win.winfo_screenwidth() - 400) // 2
-    y = (win.winfo_screenheight() - 450) // 2
-    win.geometry(f"+{x}+{y}")
+    win.attributes("-fullscreen", True)
     
     # Grab focus so they can't click main window behind it
     win.transient(root)
@@ -1346,15 +1364,19 @@ def request_setpoints_access(parent_to_close=None):
     password_entered = ""
     correct_password = str(setpoints.get("SYSTEM PASSWORD", "1234"))
 
+    # Center container frame to hold all dialog widgets in fullscreen mode
+    main_container = tk.Frame(win, bg="#f8fafc")
+    main_container.place(relx=0.5, rely=0.5, anchor="center")
+
     # Header
-    tk.Label(win, text="SECURITY LOCK", font=("Arial", 14, "bold"), fg="#1e293b", bg="#f8fafc").pack(pady=(20, 5))
-    tk.Label(win, text="Please enter your authorization PIN to access settings:", font=("Arial", 9), fg="#64748b", bg="#f8fafc").pack(pady=2)
+    tk.Label(main_container, text="SECURITY LOCK", font=("Arial", 14, "bold"), fg="#1e293b", bg="#f8fafc").pack(pady=(20, 5))
+    tk.Label(main_container, text="Please enter your authorization PIN to access settings:", font=("Arial", 9), fg="#64748b", bg="#f8fafc").pack(pady=2)
 
     # Display entry for password (shows bullets/asterisks)
-    display_lbl = tk.Label(win, text="", font=("Arial", 20, "bold"), fg="#0f172a", bg="white", width=12, relief="sunken", bd=2, anchor="center")
+    display_lbl = tk.Label(main_container, text="", font=("Arial", 20, "bold"), fg="#0f172a", bg="white", width=12, relief="sunken", bd=2, anchor="center")
     display_lbl.pack(pady=15)
 
-    error_lbl = tk.Label(win, text="", font=("Arial", 10, "bold"), fg="#dc2626", bg="#f8fafc")
+    error_lbl = tk.Label(main_container, text="", font=("Arial", 10, "bold"), fg="#dc2626", bg="#f8fafc")
     error_lbl.pack(pady=2)
 
     def kp_press(char):
@@ -1391,7 +1413,7 @@ def request_setpoints_access(parent_to_close=None):
             kp_clear()
 
     # Keypad Grid
-    kp_frame = tk.Frame(win, bg="#f8fafc")
+    kp_frame = tk.Frame(main_container, bg="#f8fafc")
     kp_frame.pack(pady=10)
 
     buttons = [
@@ -1417,7 +1439,7 @@ def request_setpoints_access(parent_to_close=None):
         btn.grid(row=r, column=c, padx=4, pady=4)
 
     # Confirm & Cancel
-    action_frame = tk.Frame(win, bg="#f8fafc")
+    action_frame = tk.Frame(main_container, bg="#f8fafc")
     action_frame.pack(fill="x", side="bottom", pady=15, padx=20)
 
     tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#cbd5e1", fg="#1e293b", width=12, height=2, bd=0,
@@ -1429,15 +1451,8 @@ def request_setpoints_access(parent_to_close=None):
 def open_setpoints_window():
     win = tk.Toplevel()
     win.title("System Configuration")
-    win.geometry("1280x720")
     win.configure(bg="white")
-    win.resizable(False, False)
-    
-    # Center the Toplevel window
-    win.update_idletasks()
-    x = (win.winfo_screenwidth() - 1280) // 2
-    y = (win.winfo_screenheight() - 720) // 2
-    win.geometry(f"+{x}+{y}")
+    win.attributes("-fullscreen", True)
     
     color = "#1565c0"
     labels_s = {}
@@ -1451,11 +1466,7 @@ def open_setpoints_window():
              font=("Arial", 14, "bold"), fg=color, bg="white").pack(side="left", pady=10)
              
     # Logo
-    logo = get_logo_image()
-    if logo:
-        lbl_logo = tk.Label(header, image=logo, bg="white")
-        lbl_logo.image = logo
-        lbl_logo.pack(side="right", padx=10)
+    draw_logo(header, bg_color="white")
              
     # Canvas Container for Scrollability
     canvas_container = tk.Frame(win, bg="white")
@@ -2035,14 +2046,8 @@ def open_timers_status_window():
     global timers_ui_labels
     win = tk.Toplevel()
     win.title("Timers & Relays Live Dashboard")
-    win.geometry("1280x720")
     win.configure(bg="white")
-    win.resizable(False, False)
-    
-    win.update_idletasks()
-    x = (win.winfo_screenwidth() - 1280) // 2
-    y = (win.winfo_screenheight() - 720) // 2
-    win.geometry(f"+{x}+{y}")
+    win.attributes("-fullscreen", True)
     
     color = "#1565c0"
     timers_ui_labels.clear()
@@ -2058,12 +2063,8 @@ def open_timers_status_window():
         fg=color,
         bg="white"
     ).pack(side="left", pady=10)
-    
-    logo = get_logo_image()
-    if logo:
-        lbl_logo = tk.Label(header, image=logo, bg="white")
-        lbl_logo.image = logo
-        lbl_logo.pack(side="right", padx=10)
+    # Logo
+    draw_logo(header, bg_color="white")
         
     # Canvas Container for Scrollability
     canvas_container = tk.Frame(win, bg="#f8fafc")
@@ -2259,7 +2260,7 @@ def open_timers_window():
 # --- UI Setup ---
 root = tk.Tk()
 root.title("Sensor Monitor")
-root.geometry("1280x720")
+root.attributes("-fullscreen", True)
 root.config(bg="#f8fafc")
 
 # Header Section (Reduced pady to bring it closer to boxes)
@@ -2287,11 +2288,7 @@ tk.Label(
 ).pack(anchor="w", pady=(2, 0))"""
 
 # Right: Brand Image Logo in the last upside right corner (Scaled down to 100x63 for compact height)
-logo_img_main = get_logo_image()
-if logo_img_main:
-    lbl_logo = tk.Label(header, image=logo_img_main, bg="#f8fafc")
-    lbl_logo.image = logo_img_main
-    lbl_logo.pack(side="right", padx=(30,10))
+draw_logo(header, bg_color="#f8fafc", padx=(30, 10))
 
 # Footer Section
 footer = tk.Frame(root, bg="#f8fafc")

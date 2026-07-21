@@ -145,9 +145,11 @@ def init_mqtt_client():
 
 init_mqtt_client()
 
-# HiveMQ Two-Way Sync Control setup
-CONTROL_BROKER = "broker.hivemq.com"
+# Mosquitto VPS Two-Way Sync Control setup
+CONTROL_BROKER = "147.93.106.142"
 CONTROL_PORT = 1883
+CONTROL_USER = "Inhydro@5598"
+CONTROL_PASS = "MGPL@5598"
 CONTROL_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/update"
 CURRENT_SETP_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/current"
 CONTROL_SYNC_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/request_sync"
@@ -219,7 +221,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
-        print(f"✅ Connected to HiveMQ Control Broker (broker.hivemq.com:1883)")
+        print(f"✅ Connected to Mosquitto VPS Control Broker ({CONTROL_BROKER}:{CONTROL_PORT})")
         print(f"   Subscribing to: {CONTROL_TOPIC}")
         print(f"   Subscribing to: {CONTROL_SYNC_TOPIC}")
         client.subscribe(CONTROL_TOPIC)
@@ -229,21 +231,23 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
         print(f"   ✓ Ready to receive credential updates from web dashboard")
     else:
         is_mqtt_connected = False
-        print(f"❌ Failed to connect to HiveMQ: rc={rc}")
+        print(f"❌ Failed to connect to Mosquitto VPS: rc={rc}")
 
 def on_control_disconnect(client, userdata, rc, properties=None):
     global is_mqtt_connected
     is_mqtt_connected = False
     if rc != 0:
-        print(f"⚠️ Unexpected disconnection from HiveMQ: rc={rc}")
+        print(f"⚠️ Unexpected disconnection from Mosquitto VPS: rc={rc}")
     else:
-        print(f"ℹ️ Disconnected from HiveMQ (normal)")
+        print(f"ℹ️ Disconnected from Mosquitto VPS (normal)")
 
 control_client.on_connect = on_control_connect
 control_client.on_disconnect = on_control_disconnect
 
 try:
-    print("🔌 Attempting to connect to HiveMQ Control Broker (broker.hivemq.com)...")
+    print(f"🔌 Attempting to connect to Mosquitto VPS Control Broker ({CONTROL_BROKER})...")
+    if CONTROL_USER and CONTROL_PASS:
+        control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
     control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
     control_client.loop_start()
     print("   Connection initiated...")
@@ -735,7 +739,7 @@ def update():
         lbl_warn.config(text="\n".join(warn))
         lbl_relay.config(text=relay_status())
 
-        # Live Web Dashboard Sync (Fast Update over HiveMQ)
+        # Live Web Dashboard Sync (Fast Update over Private Mosquitto)
         try:
             import datetime
             ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
