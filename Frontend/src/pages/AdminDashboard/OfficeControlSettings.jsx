@@ -66,8 +66,25 @@ const InputRow = ({ label, objKey, type = "number", data, onChange }) => (
   </div>
 );
 
-const StandardTimerCard = ({ prefix, label, data, onChange }) => (
-  <div className="space-y-4 border border-slate-700/50 p-4 rounded-xl">
+const StandardTimerCard = ({ prefix, label, data, onChange, liveRelay, liveCycle }) => (
+  <div className="space-y-4 border border-slate-700/50 p-4 rounded-xl relative bg-slate-900/10">
+    <div className="flex items-center justify-between border-b border-slate-700/40 pb-2">
+      <h4 className="text-sm font-bold text-white">{data[`${prefix} Name`] || label}</h4>
+      <div className="flex gap-2">
+        {liveCycle !== undefined && (
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${liveCycle === 'ON' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-500/10 text-slate-400 border border-slate-700/50'}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${liveCycle === 'ON' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+            {liveCycle}
+          </span>
+        )}
+        {liveRelay !== undefined && (
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${liveRelay ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-500/10 text-slate-400 border border-slate-700/50'}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${liveRelay ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+            RELAY: {liveRelay ? 'ON' : 'OFF'}
+          </span>
+        )}
+      </div>
+    </div>
     <InputRow data={data} onChange={onChange} label={`${label} Name`} objKey={`${prefix} Name`} type="text" />
     <div className="grid grid-cols-2 gap-4">
       <InputRow data={data} onChange={onChange} label="Start Time (HH:MM)" objKey={`${prefix} Start`} type="text" />
@@ -78,8 +95,25 @@ const StandardTimerCard = ({ prefix, label, data, onChange }) => (
   </div>
 );
 
-const DayNightTimerCard = ({ prefix, label, data, onChange, isAC = false, isHumi = false }) => (
+const DayNightTimerCard = ({ prefix, label, data, onChange, isAC = false, isHumi = false, liveRelay, liveCycle }) => (
   <div className="space-y-4 border border-slate-700/50 p-4 rounded-xl bg-slate-900/10">
+    <div className="flex items-center justify-between border-b border-slate-700/40 pb-2">
+      <h4 className="text-sm font-bold text-white">{data[`${prefix} Name`] || label}</h4>
+      <div className="flex gap-2">
+        {liveCycle !== undefined && (
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${liveCycle === 'ON' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-500/10 text-slate-400 border border-slate-700/50'}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${liveCycle === 'ON' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+            {liveCycle}
+          </span>
+        )}
+        {liveRelay !== undefined && (
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${liveRelay ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-500/10 text-slate-400 border border-slate-700/50'}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${liveRelay ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+            RELAY: {liveRelay ? 'ON' : 'OFF'}
+          </span>
+        )}
+      </div>
+    </div>
     <InputRow data={data} onChange={onChange} label={`${label} Name`} objKey={`${prefix} Name`} type="text" />
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       {/* Day Settings */}
@@ -137,7 +171,12 @@ const OfficeControlSettings = () => {
 
   const [setpoints, setSetpoints] = useState({ 1: { ...defaultSetpointsRoom12 }, 2: { ...defaultSetpointsRoom12 }, 3: { ...defaultSetpointsRoom3 } });
 
+  useEffect(() => {
+    console.log('--- Current Setpoints State (All Rooms) ---', setpoints);
+  }, [setpoints]);
+
   const [status, setStatus] = useState('disconnected');
+  const [liveTelemetry, setLiveTelemetry] = useState({ 1: null, 2: null, 3: null });
   const [loading, setLoading] = useState(true);
   const [client, setClient] = useState(null);
   const [toast, setToast] = useState({ show: false, type: 'success', message: '' });
@@ -169,6 +208,7 @@ const OfficeControlSettings = () => {
         const data = await res.json();
         if (data.success) {
           const filtered = data.data.filter(d => d.deviceType === 'office_control' || d.deviceType === 'system2');
+          console.log('--- DB API: Fetched Devices ---', filtered);
           setDevices(filtered);
           if (filtered.length > 0 && !deviceRoot) {
             setDeviceRoot(filtered[0].mqttId || filtered[0]._id);
@@ -188,7 +228,12 @@ const OfficeControlSettings = () => {
   useEffect(() => {
     setTempName(selectedDevice?.name || 'Office Control');
     setIsEditingName(false);
+    console.log('--- Active Selected Device from Database ---', selectedDevice);
   }, [deviceRoot, selectedDevice]);
+
+  useEffect(() => {
+    console.log('--- MQTT Connection Status ---', status);
+  }, [status]);
 
   const handleNameSave = async () => {
     if (!tempName.trim() || !selectedDevice) return;
@@ -239,6 +284,7 @@ const OfficeControlSettings = () => {
       setStatus('connected');
       [1, 2, 3].forEach(room => {
         mqttClient.subscribe(`inhydro/${deviceRoot}/room${room}/setpoints/current`);
+        mqttClient.subscribe(`inhydro/${deviceRoot}/room${room}/telemetry/live`);
         mqttClient.publish(`inhydro/${deviceRoot}/room${room}/setpoints/request_sync`, '1');
       });
     });
@@ -252,6 +298,7 @@ const OfficeControlSettings = () => {
       if (topic.endsWith('setpoints/current')) {
         try {
           const incomingData = JSON.parse(message.toString());
+          console.log(`--- MQTT Message [${topic}]: Incoming Setpoints for Room ${room} ---`, incomingData);
           setSetpoints(prev => {
             const merged = { ...prev[room], ...incomingData };
             const credKeys = ["CLIENT ID", "USERNAME", "PASSWORD", "CHANNEL ID", "PORT", "READ API KEY", "WRITE API KEY"];
@@ -267,6 +314,17 @@ const OfficeControlSettings = () => {
           });
         } catch (error) {
           console.error("Error parsing current setpoints from device", error);
+        }
+      } else if (topic.endsWith('telemetry/live')) {
+        try {
+          const incomingTelemetry = JSON.parse(message.toString());
+          console.log(`--- MQTT Message [${topic}]: Incoming Telemetry for Room ${room} ---`, incomingTelemetry);
+          setLiveTelemetry(prev => ({
+            ...prev,
+            [room]: incomingTelemetry
+          }));
+        } catch (e) {
+          console.error("Error parsing telemetry from device", e);
         }
       }
     });
@@ -478,10 +536,11 @@ const OfficeControlSettings = () => {
                         setDeviceRoot(dev.mqttId || dev._id);
                         setIsDropdownOpen(false);
                       }}
-                      className={`flex items-center w-full justify-start px-4 py-3 text-sm transition-colors hover:bg-slate-800 ${deviceRoot === (dev.mqttId || dev._id) ? 'bg-green-500/10 text-green-400 font-semibold' : 'text-slate-300'
+                      className={`flex items-center w-full justify-between px-4 py-3 text-sm transition-colors hover:bg-slate-800 ${deviceRoot === (dev.mqttId || dev._id) ? 'bg-green-500/10 text-green-400 font-semibold' : 'text-slate-300'
                         }`}
                     >
                       <span className="truncate">{dev.name}</span>
+                      <span className={`h-1.5 w-1.5 rounded-full ${dev.status === 'online' ? 'bg-emerald-400' : 'bg-slate-500'}`} title={dev.status} />
                     </button>
                   ))}
                 </div>
@@ -490,11 +549,31 @@ const OfficeControlSettings = () => {
           </div>
 
           <div className="min-w-[140px] flex justify-end">
-            {status === 'connected' && <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Cloud Connected</span>}
-            {status === 'disconnected' && <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400"><RefreshCw className="h-4 w-4 animate-spin" /> Connecting...</span>}
-            {status === 'saving' && <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400"><RefreshCw className="h-4 w-4 animate-spin" /> Pushing...</span>}
-            {status === 'saved' && <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Live Successfully</span>}
-            {status === 'error' && <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400"><AlertCircle className="h-4 w-4" /> Connection Error</span>}
+            {status === 'connected' && selectedDevice?.status === 'online' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
+              </span>
+            )}
+            {(status !== 'connected' || selectedDevice?.status !== 'online') && status !== 'saving' && status !== 'saved' && status !== 'error' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
+              </span>
+            )}
+            {status === 'saving' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400">
+                <RefreshCw className="h-4 w-4 animate-spin" /> Pushing...
+              </span>
+            )}
+            {status === 'saved' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" /> Live Successfully
+              </span>
+            )}
+            {status === 'error' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
+                <AlertCircle className="h-4 w-4" /> Connection Error
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -523,7 +602,55 @@ const OfficeControlSettings = () => {
       <div className="space-y-6">
         {activeRoom !== 3 && (
           <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
-            <h4 className="mb-4 text-sm font-semibold text-green-400">Core Limits</h4>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4 pb-4 border-b border-slate-700/50">
+              <h4 className="text-sm font-semibold text-green-400">Core Limits</h4>
+              
+              {/* Real-time Relay and Dosing Statuses */}
+              {selectedDevice && selectedDevice.status === 'online' && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-300 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50">
+                    <span className="text-slate-500 font-bold uppercase">pH Mode:</span>
+                    <span className={`h-1.5 w-1.5 rounded-full ${liveTelemetry[activeRoom]?.relay_status?.ph ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                    <span className="font-semibold text-white">{liveTelemetry[activeRoom]?.relay_status?.ph ? 'ON' : 'OFF'}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-300 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50">
+                    <span className="text-slate-500 font-bold uppercase">pH:</span>
+                    <span className="font-semibold text-white">{liveTelemetry[activeRoom]?.relay_status?.ph ? 'ON' : 'OFF'}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-300 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50">
+                    <span className="text-slate-500 font-bold uppercase">EC Mode:</span>
+                    <span className={`h-1.5 w-1.5 rounded-full ${(liveTelemetry[activeRoom]?.relay_status?.ec1 || liveTelemetry[activeRoom]?.relay_status?.ec2) ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                    <span className="font-semibold text-white">{(liveTelemetry[activeRoom]?.relay_status?.ec1 || liveTelemetry[activeRoom]?.relay_status?.ec2) ? 'ON' : 'OFF'}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-300 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50">
+                    <span className="text-slate-500 font-bold uppercase">EC1:</span>
+                    <span className="font-semibold text-white">{liveTelemetry[activeRoom]?.relay_status?.ec1 ? 'ON' : 'OFF'}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-300 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50">
+                    <span className="text-slate-500 font-bold uppercase">EC2:</span>
+                    <span className="font-semibold text-white">{liveTelemetry[activeRoom]?.relay_status?.ec2 ? 'ON' : 'OFF'}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-300 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50">
+                    <span className="text-slate-500 font-bold uppercase">AC Mode:</span>
+                    <span className={`h-1.5 w-1.5 rounded-full ${liveTelemetry[activeRoom]?.relay_status?.ac ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                    <span className="font-semibold text-white">{liveTelemetry[activeRoom]?.relay_status?.ac ? 'ON' : 'OFF'}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-300 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50">
+                    <span className="text-slate-500 font-bold uppercase">AC:</span>
+                    <span className="font-semibold text-white">{liveTelemetry[activeRoom]?.relay_status?.ac ? 'ON' : 'OFF'}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-300 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50">
+                    <span className="text-slate-500 font-bold uppercase">Humi Mode:</span>
+                    <span className={`h-1.5 w-1.5 rounded-full ${liveTelemetry[activeRoom]?.relay_status?.humi ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                    <span className="font-semibold text-white">{liveTelemetry[activeRoom]?.relay_status?.humi ? 'ON' : 'OFF'}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-300 bg-slate-900/50 px-2 py-0.5 rounded border border-slate-700/50">
+                    <span className="text-slate-500 font-bold uppercase">Humi:</span>
+                    <span className="font-semibold text-white">{liveTelemetry[activeRoom]?.relay_status?.humi ? 'ON' : 'OFF'}</span>
+                  </span>
+                </div>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
               <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="EC Minimum (mS/cm)" objKey="EC MIN" />
               <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="EC Maximum (mS/cm)" objKey="EC MAX" />
@@ -538,7 +665,7 @@ const OfficeControlSettings = () => {
             </div>
           </div>
         )}
-
+ 
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
           <h4 className="mb-4 text-sm font-semibold text-green-400">Cyclic Timers</h4>
           
@@ -546,74 +673,154 @@ const OfficeControlSettings = () => {
             <div className="space-y-6">
               {/* Row 1: Timer 1 & Timer 2 */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <StandardTimerCard prefix="Timer1" label="Timer 1" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
-                <StandardTimerCard prefix="Timer2" label="Timer 2" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
+                <StandardTimerCard
+                  prefix="Timer1"
+                  label="Timer 1"
+                  data={currentSetpoints}
+                  onChange={(k, v) => handleChange(activeRoom, k, v)}
+                  liveRelay={liveTelemetry[activeRoom]?.relay_status?.tmr1}
+                  liveCycle={liveTelemetry[activeRoom]?.timer_state?.[0]?.state}
+                />
+                <StandardTimerCard
+                  prefix="Timer2"
+                  label="Timer 2"
+                  data={currentSetpoints}
+                  onChange={(k, v) => handleChange(activeRoom, k, v)}
+                  liveRelay={liveTelemetry[activeRoom]?.relay_status?.tmr2}
+                  liveCycle={liveTelemetry[activeRoom]?.timer_state?.[1]?.state}
+                />
               </div>
-
+ 
               {/* Row 2: Timer 3 (Full Width Day/Night) */}
-              <DayNightTimerCard prefix="Timer3" label="Timer 3" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
-
+              <DayNightTimerCard
+                prefix="Timer3"
+                label="Timer 3"
+                data={currentSetpoints}
+                onChange={(k, v) => handleChange(activeRoom, k, v)}
+                liveRelay={liveTelemetry[activeRoom]?.relay_status?.tmr3}
+                liveCycle={liveTelemetry[activeRoom]?.timer_state?.[2]?.state}
+              />
+ 
               {/* Separator Line */}
               <div className="border-t border-slate-700/50 my-6" />
-
+ 
               {/* Climate Control Header */}
               <h4 className="text-sm font-semibold text-green-400">Climate Control Timers</h4>
-
+ 
               {/* Row 3: AC Timers vs Humidifier Timers (Side by side with vertical separator) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative">
                 {/* AC Timers (Left side) */}
                 <div className="space-y-6">
                   <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider text-center border-b border-slate-700/50 pb-2">AC Timers</h5>
-                  <DayNightTimerCard prefix="AC1" label="AC 1" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} isAC={true} />
+                  <DayNightTimerCard
+                    prefix="AC1"
+                    label="AC 1"
+                    data={currentSetpoints}
+                    onChange={(k, v) => handleChange(activeRoom, k, v)}
+                    isAC={true}
+                    liveRelay={liveTelemetry[activeRoom]?.relay_status?.ac1}
+                    liveCycle={liveTelemetry[activeRoom]?.timer_state?.[3]?.state}
+                  />
                   
                   {/* Internal Separator */}
                   <div className="border-t border-slate-700/30 my-4" />
                   
-                  <DayNightTimerCard prefix="AC2" label="AC 2" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} isAC={true} />
+                  <DayNightTimerCard
+                    prefix="AC2"
+                    label="AC 2"
+                    data={currentSetpoints}
+                    onChange={(k, v) => handleChange(activeRoom, k, v)}
+                    isAC={true}
+                    liveRelay={liveTelemetry[activeRoom]?.relay_status?.ac2}
+                    liveCycle={liveTelemetry[activeRoom]?.timer_state?.[4]?.state}
+                  />
                 </div>
-
+ 
                 {/* Vertical Separator Line (visible on md screens and up) */}
                 <div className="hidden md:block absolute left-1/2 top-0 bottom-0 border-l border-slate-700/50" />
-
+ 
                 {/* Humidifier Timers (Right side) */}
                 <div className="space-y-6">
                   <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider text-center border-b border-slate-700/50 pb-2">Humidifier Timers</h5>
-                  <DayNightTimerCard prefix="HUMI1" label="HUMI 1" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} isHumi={true} />
+                  <DayNightTimerCard
+                    prefix="HUMI1"
+                    label="HUMI 1"
+                    data={currentSetpoints}
+                    onChange={(k, v) => handleChange(activeRoom, k, v)}
+                    isHumi={true}
+                    liveRelay={liveTelemetry[activeRoom]?.relay_status?.humi1}
+                    liveCycle={liveTelemetry[activeRoom]?.timer_state?.[5]?.state}
+                  />
                   
                   {/* Internal Separator */}
                   <div className="border-t border-slate-700/30 my-4" />
                   
-                  <DayNightTimerCard prefix="HUMI2" label="HUMI 2" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} isHumi={true} />
+                  <DayNightTimerCard
+                    prefix="HUMI2"
+                    label="HUMI 2"
+                    data={currentSetpoints}
+                    onChange={(k, v) => handleChange(activeRoom, k, v)}
+                    isHumi={true}
+                    liveRelay={liveTelemetry[activeRoom]?.relay_status?.humi2}
+                    liveCycle={liveTelemetry[activeRoom]?.timer_state?.[6]?.state}
+                  />
                 </div>
               </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <StandardTimerCard prefix="Timer1" label="Timer 1" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
-              <StandardTimerCard prefix="Timer2" label="Timer 2" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
+              <StandardTimerCard
+                prefix="Timer1"
+                label="Timer 1"
+                data={currentSetpoints}
+                onChange={(k, v) => handleChange(activeRoom, k, v)}
+                liveRelay={liveTelemetry[activeRoom]?.relay_status?.tmr1}
+                liveCycle={liveTelemetry[activeRoom]?.timer_state?.[0]?.state}
+              />
+              <StandardTimerCard
+                prefix="Timer2"
+                label="Timer 2"
+                data={currentSetpoints}
+                onChange={(k, v) => handleChange(activeRoom, k, v)}
+                liveRelay={liveTelemetry[activeRoom]?.relay_status?.tmr2}
+                liveCycle={liveTelemetry[activeRoom]?.timer_state?.[1]?.state}
+              />
               <div className="md:col-span-2">
-                <DayNightTimerCard prefix="Timer3" label="Timer 3" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
+                <DayNightTimerCard
+                  prefix="Timer3"
+                  label="Timer 3"
+                  data={currentSetpoints}
+                  onChange={(k, v) => handleChange(activeRoom, k, v)}
+                  liveRelay={liveTelemetry[activeRoom]?.relay_status?.tmr3}
+                  liveCycle={liveTelemetry[activeRoom]?.timer_state?.[2]?.state}
+                />
               </div>
               <div className="md:col-span-2">
-                <DayNightTimerCard prefix="Timer4" label="Timer 4 (AC TIMER)" data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} />
+                <DayNightTimerCard
+                  prefix="Timer4"
+                  label="Timer 4 (AC TIMER)"
+                  data={currentSetpoints}
+                  onChange={(k, v) => handleChange(activeRoom, k, v)}
+                  liveRelay={liveTelemetry[activeRoom]?.relay_status?.ac}
+                  liveCycle={liveTelemetry[activeRoom]?.timer_state?.[3]?.state}
+                />
               </div>
             </div>
           )}
         </div>
-
+ 
         {isSuperadmin && (
           <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 shadow-lg shadow-blue-500/5">
             <h4 className="mb-4 flex items-center gap-2 text-sm font-semibold text-blue-400">
              
             </h4>
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-
               <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="MQTT Port" objKey="PORT" />
             </div>
           </div>
         )}
       </div>
-
+ 
       <div className="pt-4">
         <button
           onClick={handleSave}
@@ -626,5 +833,5 @@ const OfficeControlSettings = () => {
     </div>
   );
 };
-
+ 
 export default OfficeControlSettings;

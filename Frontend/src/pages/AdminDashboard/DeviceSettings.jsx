@@ -363,11 +363,11 @@ const DeviceSettings = () => {
                 <select
                   value={selectedDeviceId}
                   onChange={(e) => handleDeviceChange(e.target.value)}
-                  className="appearance-none rounded-xl border border-slate-700 bg-slate-800 pl-9 pr-8 py-2 text-sm font-medium text-white outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 cursor-pointer transition-all min-w-[200px]"
+                  className="appearance-none rounded-xl border border-slate-700 bg-slate-800 pl-9 pr-8 py-2 text-sm font-medium text-white outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 cursor-pointer transition-all min-w-[240px]"
                 >
                   {allDevices.map((d) => (
                     <option key={d._id} value={d._id}>
-                      {d.name} — {d.location}
+                      {d.name} ({d.status === 'online' ? 'Online' : 'Offline'}) — {d.location}
                     </option>
                   ))}
                 </select>
@@ -378,14 +378,14 @@ const DeviceSettings = () => {
 
             {/* Connection status */}
             <div>
-              {status === 'connected' && (
+              {status === 'connected' && selectedDevice?.status === 'online' && (
                 <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Cloud Connected
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
                 </span>
               )}
-              {status === 'disconnected' && (
-                <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Connecting...
+              {(status !== 'connected' || selectedDevice?.status !== 'online') && status !== 'saving' && status !== 'saved' && status !== 'error' && (
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                  <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
                 </span>
               )}
               {status === 'saving' && (

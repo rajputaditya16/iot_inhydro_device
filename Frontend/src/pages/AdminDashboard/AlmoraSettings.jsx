@@ -315,10 +315,11 @@ const AlmoraSettings = () => {
                         setDeviceRoot(dev.mqttId || dev._id);
                         setIsDropdownOpen(false);
                       }}
-                      className={`flex items-center w-full justify-start px-4 py-3 text-sm transition-colors hover:bg-slate-800 ${deviceRoot === (dev.mqttId || dev._id) ? 'bg-green-500/10 text-green-400 font-semibold' : 'text-slate-300'
+                      className={`flex items-center w-full justify-between px-4 py-3 text-sm transition-colors hover:bg-slate-800 ${deviceRoot === (dev.mqttId || dev._id) ? 'bg-green-500/10 text-green-400 font-semibold' : 'text-slate-300'
                         }`}
                     >
                       <span className="truncate">{dev.name}</span>
+                      <span className={`h-1.5 w-1.5 rounded-full ${dev.status === 'online' ? 'bg-emerald-400' : 'bg-slate-500'}`} title={dev.status} />
                     </button>
                   ))}
                   {almoraDevices.length === 0 && (
@@ -330,11 +331,31 @@ const AlmoraSettings = () => {
           </div>
 
           <div className="min-w-[140px] flex justify-end">
-            {status === 'connected' && <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Cloud Connected</span>}
-            {status === 'disconnected' && <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400"><RefreshCw className="h-4 w-4 animate-spin" /> Connecting...</span>}
-            {status === 'saving' && <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400"><RefreshCw className="h-4 w-4 animate-spin" /> Pushing...</span>}
-            {status === 'saved' && <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Live Successfully</span>}
-            {status === 'error' && <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400"><AlertCircle className="h-4 w-4" /> Check Connection</span>}
+            {status === 'connected' && selectedDevice?.status === 'online' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
+              </span>
+            )}
+            {(status !== 'connected' || selectedDevice?.status !== 'online') && status !== 'saving' && status !== 'saved' && status !== 'error' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
+              </span>
+            )}
+            {status === 'saving' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400">
+                <RefreshCw className="h-4 w-4 animate-spin" /> Pushing...
+              </span>
+            )}
+            {status === 'saved' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" /> Live Successfully
+              </span>
+            )}
+            {status === 'error' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
+                <AlertCircle className="h-4 w-4" /> Connection Error
+              </span>
+            )}
           </div>
         </div>
       </div>

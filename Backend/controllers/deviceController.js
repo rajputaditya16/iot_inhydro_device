@@ -181,8 +181,9 @@ exports.pushThingspeakConfig = async (req, res) => {
     }
 
     const isControlling = device.deviceType === 'controlling';
+    const isOfficeOrSystem2 = device.deviceType === 'office_control' || device.deviceType === 'system2';
     const { channelId, readApiKey, writeApiKey, port, username, password, clientId } = device.thingspeak || {};
-    if (!isControlling && (!channelId || !readApiKey || !writeApiKey || !port || !username || !password || !clientId)) {
+    if (!isControlling && !isOfficeOrSystem2 && (!channelId || !readApiKey || !writeApiKey || !port || !username || !password || !clientId)) {
       return res.status(400).json({
         success: false,
         message: 'Device does not have complete ThingSpeak configuration (all fields required)',

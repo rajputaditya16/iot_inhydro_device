@@ -167,11 +167,23 @@ const DimmableLightSettings = () => {
 
   // Status mapping
   const statusMap = {
-    connected: <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Connected</span>,
-    disconnected: <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400"><RefreshCw className="h-4 w-4 animate-spin" /> Connecting…</span>,
-    saving: <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-400"><RefreshCw className="h-4 w-4 animate-spin" /> Pushing…</span>,
+    connected: selectedDevice?.status === 'online' ? (
+      <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+        <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
+      </span>
+    ) : (
+      <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+        <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
+      </span>
+    ),
+    disconnected: (
+      <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+        <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
+      </span>
+    ),
+    saving: <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-400"><RefreshCw className="h-4 w-4 animate-spin" /> Pushing...</span>,
     saved: <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Pushed Config</span>,
-    error: <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400"><AlertCircle className="h-4 w-4" /> Comm Error</span>,
+    error: <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400"><AlertCircle className="h-4 w-4" /> Connection Error</span>,
   };
 
   if (loading) {
@@ -231,14 +243,16 @@ const DimmableLightSettings = () => {
                       <button
                         key={d._id}
                         onClick={() => { setDeviceRoot(id); setIsDropdownOpen(false); }}
-                        className={`w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left transition-all ${id === deviceRoot
+                        className={`w-full flex items-center justify-between px-4 py-2.5 text-sm transition-all ${id === deviceRoot
                           ? 'bg-amber-500/10 text-amber-400'
                           : 'text-slate-300 hover:bg-slate-800'
                           }`}
                       >
-                        <Zap className="h-3 w-3 shrink-0" />
-                        <span className="truncate">{d.name}</span>
-                        {d.mqttId && <span className="ml-auto text-[10px] text-slate-500 font-mono">{d.mqttId}</span>}
+                        <div className="flex items-center gap-2 truncate">
+                          <Zap className="h-3 w-3 shrink-0" />
+                          <span className="truncate">{d.name}</span>
+                        </div>
+                        <span className={`h-1.5 w-1.5 rounded-full ${d.status === 'online' ? 'bg-emerald-400' : 'bg-slate-500'}`} title={d.status} />
                       </button>
                     );
                   })}

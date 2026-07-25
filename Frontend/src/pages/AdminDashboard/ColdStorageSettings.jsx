@@ -250,35 +250,54 @@ const ColdStorageSettings = () => {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h3 className="text-base font-semibold text-white flex items-center gap-2">
-            Cold Storage Management Hub
-            {status === 'connected' && <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
+            {selectedDevice?.name || 'Cold Storage Management Hub'}
           </h3>
           <p className="text-[11px] text-slate-400">Universal Two-Way Sync: Control settings globally</p>
         </div>
         
-        <div className="relative"> 
-          <button 
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-xs font-medium text-white hover:border-green-500 transition-all"
-          >
-            <Server className="h-3.5 w-3.5 text-green-400" />
-            <span className="max-w-[120px] truncate">{selectedDevice?.name || 'Select Hub'}</span>
-            <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-          
-          {isDropdownOpen && (
-            <div className="absolute right-0 top-full z-50 mt-1 flex w-48 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
-              {multiSensorDevices.map((dev) => (
-                <button
-                  key={dev._id}
-                  onClick={() => { setDeviceRoot(dev.mqttId || dev._id); setIsDropdownOpen(false); }}
-                  className="px-4 py-2.5 text-left text-xs text-slate-300 hover:bg-slate-800 transition-colors"
-                >
-                  {dev.name}
-                </button>
-              ))}
-            </div>
-          )}
+        <div className="flex items-center gap-4">
+          <div className="relative"> 
+            <button 
+              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+              className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-xs font-medium text-white hover:border-green-500 transition-all"
+            >
+              <Server className="h-3.5 w-3.5 text-green-400" />
+              <span className="max-w-[120px] truncate">{selectedDevice?.name || 'Select Hub'}</span>
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+            
+            {isDropdownOpen && (
+              <div className="absolute right-0 top-full z-50 mt-1 flex w-48 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+                {multiSensorDevices.map((dev) => (
+                  <button
+                    key={dev._id}
+                    onClick={() => { setDeviceRoot(dev.mqttId || dev._id); setIsDropdownOpen(false); }}
+                    className="flex items-center justify-between px-4 py-2.5 text-left text-xs text-slate-300 hover:bg-slate-800 transition-colors"
+                  >
+                    <span className="truncate">{dev.name}</span>
+                    <span className={`h-1.5 w-1.5 rounded-full ${dev.status === 'online' ? 'bg-emerald-400' : 'bg-slate-500'}`} title={dev.status} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="min-w-[120px] flex justify-end">
+            {status === 'connected' && selectedDevice?.status === 'online' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
+              </span>
+            )}
+            {(status !== 'connected' || selectedDevice?.status !== 'online') && status !== 'saving' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
+              </span>
+            )}
+            {status === 'saving' && (
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400">
+                <RefreshCw className="h-4 w-4 animate-spin" /> Pushing...
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

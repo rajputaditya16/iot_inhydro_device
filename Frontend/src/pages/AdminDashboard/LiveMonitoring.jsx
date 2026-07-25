@@ -399,7 +399,7 @@ const LiveMonitoring = () => {
     eventSource.onmessage = (event) => {
       try {
         const packet = JSON.parse(event.data);
-        if (packet.mqttId === mqttId || packet.deviceId === selectedDeviceId || packet.mqttId === 'control1' || packet.mqttId === 'system2') {
+        if (packet.mqttId === mqttId || packet.deviceId === selectedDeviceId) {
           processTelemetryPacket(packet.topic, packet.data);
         }
       } catch (e) {
