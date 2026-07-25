@@ -207,7 +207,7 @@ const OfficeControlSettings = () => {
         });
         const data = await res.json();
         if (data.success) {
-          const filtered = data.data.filter(d => d.deviceType === 'office_control' || d.deviceType === 'system2');
+          const filtered = data.data.filter(d => d.deviceType === 'office_control');
           console.log('--- DB API: Fetched Devices ---', filtered);
           setDevices(filtered);
           if (filtered.length > 0 && !deviceRoot) {
