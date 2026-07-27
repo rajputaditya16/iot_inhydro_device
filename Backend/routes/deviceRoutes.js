@@ -19,7 +19,7 @@ router
   .put(restrictTo('admin', 'superadmin'), updateDevice)
   .delete(restrictTo('admin', 'superadmin'), deleteDevice);
 
-router.put('/:id/block', restrictTo('admin', 'superadmin'), toggleBlockDevice);
+router.put('/:id/block', restrictTo('superadmin'), toggleBlockDevice);
 router.put('/:id/push-config', restrictTo('admin', 'superadmin'), pushThingspeakConfig);
 router.get('/:id/analytics', getDeviceAnalytics);
 

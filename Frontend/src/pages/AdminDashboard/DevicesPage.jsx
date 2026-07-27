@@ -84,6 +84,7 @@ const DevicesPage = () => {
   const token = localStorage.getItem('token');
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const isAdmin = user.accountType === 'admin' || user.accountType === 'superadmin';
+  const isSuperAdmin = user.accountType === 'superadmin';
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
   // Fetch devices
@@ -201,7 +202,7 @@ const DevicesPage = () => {
 
   // Toggle Block Status
   const handleToggleBlock = async (id) => {
-    if (!isAdmin) return;
+    if (!isSuperAdmin) return;
     try {
       const res = await fetch(`${API_BASE}/api/devices/${id}/block`, {
         method: 'PUT',
@@ -389,13 +390,15 @@ const DevicesPage = () => {
                           <>
                             <div className="w-px h-4 bg-slate-700/50 mx-1"></div>
 
-                            <button
-                              onClick={() => handleToggleBlock(deviceId)}
-                              className={`rounded-lg p-2 transition-colors ${isBlocked ? 'text-orange-400 hover:bg-orange-500/10' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
-                              title={isBlocked ? "Unblock Device" : "Block Device"}
-                            >
-                              <PowerOff className="h-4 w-4" />
-                            </button>
+                            {isSuperAdmin && (
+                              <button
+                                onClick={() => handleToggleBlock(deviceId)}
+                                className={`rounded-lg p-2 transition-colors ${isBlocked ? 'text-orange-400 hover:bg-orange-500/10' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+                                title={isBlocked ? "Unblock Device" : "Block Device"}
+                              >
+                                <PowerOff className="h-4 w-4" />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleOpenModal(device)}
                               className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-blue-500/10 hover:text-blue-400"

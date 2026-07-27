@@ -2,8 +2,6 @@ const mqtt = require('mqtt');
 const mongoose = require('mongoose');
 const Device = require('../models/Device');
 const { getTelemetryModel } = require('../models/TelemetryLog');
-const { checkCriticalAlerts, checkStatusChange, checkSetpointChange, updateSetpointCache } = require('./emailNotificationService');
-
 const EventEmitter = require('events');
 const telemetryEmitter = new EventEmitter();
 telemetryEmitter.setMaxListeners(100);
@@ -95,16 +93,6 @@ const startMqttSubscriber = () => {
       if (err) console.error('[MQTT Subscriber] Failed to subscribe to office_control topic:', err);
       else console.log('[MQTT Subscriber] Subscribed to inhydro/+/+/telemetry/live');
     });
-
-    // Subscribe to setpoint topics for email notifications
-    client.subscribe('inhydro/+/+/setpoints/current', (err) => {
-      if (err) console.error('[MQTT Subscriber] Failed to subscribe to setpoints/current:', err);
-      else console.log('[MQTT Subscriber] Subscribed to inhydro/+/+/setpoints/current (for email alerts)');
-    });
-    client.subscribe('inhydro/+/+/setpoints/update', (err) => {
-      if (err) console.error('[MQTT Subscriber] Failed to subscribe to setpoints/update:', err);
-      else console.log('[MQTT Subscriber] Subscribed to inhydro/+/+/setpoints/update (for email alerts)');
-    });
   });
 
   client.on('message', async (topic, message) => {
@@ -126,14 +114,19 @@ const startMqttSubscriber = () => {
         return;
       }
 
+      // Check if device is blocked
+      const deviceCheck = await Device.findById(deviceId).select('status');
+      if (deviceCheck && deviceCheck.status === 'blocked') {
+        return; // Device is blocked, ignore telemetry
+      }
+
       // Update status to online and lastUpdated to now
+
       try {
         await Device.findByIdAndUpdate(deviceId, {
           status: 'online',
           lastUpdated: new Date()
         });
-        // Notify admins if device just came online
-        checkStatusChange(deviceId, 'online').catch(e => console.error('[EmailNotification] Status check error:', e.message));
       } catch (err) {
         console.error(`[MQTT Subscriber] Failed to update device online status: ${err.message}`);
       }
@@ -148,31 +141,8 @@ const startMqttSubscriber = () => {
         payloadData = { raw: payloadString };
       }
 
-      // ── Email Notification Hooks ──────────────────────────────────────────
-      // Handle setpoints/current → cache for critical alert comparison
-      if (topic.endsWith('setpoints/current')) {
-        const roomPart = topic.split('/').find(p => p.startsWith('room')) || 'room1';
-        updateSetpointCache(mqttId, roomPart, payloadData);
-        // Don't save setpoint messages to telemetry DB, just cache them
-        return;
-      }
-
-      // Handle setpoints/update → someone changed setpoints, notify admins
-      if (topic.endsWith('setpoints/update')) {
-        const roomPart = topic.split('/').find(p => p.startsWith('room')) || 'room1';
-        checkSetpointChange(mqttId, deviceId, roomPart, payloadData)
-          .catch(e => console.error('[EmailNotification] Setpoint change check error:', e.message));
-        // Don't save setpoint updates to telemetry DB
-        return;
-      }
-
-      // Handle telemetry/live → check for critical sensor breaches
-      if (topic.endsWith('telemetry/live') && typeof payloadData === 'object' && !Array.isArray(payloadData)) {
-        checkCriticalAlerts(mqttId, deviceId, topic, payloadData)
-          .catch(e => console.error('[EmailNotification] Critical alert check error:', e.message));
-      }
-
       // Get the correct dynamic model for this device's collection
+
       const TelemetryModel = getTelemetryModel(mqttId);
 
       if (Array.isArray(payloadData)) {

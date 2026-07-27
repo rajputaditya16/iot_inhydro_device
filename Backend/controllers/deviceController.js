@@ -4,7 +4,6 @@ const MqttPacket = require('../models/MqttPacket');
 const { getTelemetryModel } = require('../models/TelemetryLog');
 const { publishToDevice } = require('../utils/mqttPublisher');
 const { telemetryEmitter } = require('../utils/mqttSubscriber');
-const { checkStatusChange } = require('../utils/emailNotificationService');
 
 
 // @route   GET /api/devices
@@ -42,8 +41,6 @@ exports.getDevices = async (req, res) => {
           status = 'offline';
           device.status = 'offline';
           await device.save();
-          // Notify admins that device went offline
-          checkStatusChange(device._id, 'offline').catch(e => console.error('[EmailNotification] Offline check error:', e.message));
         }
 
         // Fetch latest telemetry packet from the dynamic collection
