@@ -1,5 +1,5 @@
-import os, sys, json, time, datetime, atexit, queue
 import socket, subprocess, threading
+import os, sys, json, time, datetime, atexit, queue
 import urllib.request, urllib.parse
 from datetime import timezone
 import tkinter as tk
@@ -16,7 +16,8 @@ R1_PORT_ORP  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.3:1.0-port0"
 R1_PORT_CO2  = "/dev/serial/by-path/usb-0:1.4-port0"
 
 # Room 2 sensor ports
-R2_PORT_SOIL = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.6:1.0-port0"
+R2_PORT_EC   = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.6:1.0-port0"
+R2_PORT_PH   = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.11:1.0-port0" # Adjust to your actual pH USB by-path
 R2_PORT_MD02 = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.5:1.0-port0"
 R2_PORT_ORP  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.4:1.0-port0"
 R2_PORT_CO2  = "/dev/serial/by-path/platform-3f98000.usb-usb-0:1:2:1:0-port0"
@@ -160,34 +161,31 @@ atexit.register(all_relays_off)
 
 #
 
-def _open_sensor(port, label, baudrate=9600):
+def _open_sensor(port, label, slave_id=1, baudrate=9600):
     try:
-        inst = minimalmodbus.Instrument(port, SENSOR_SLAVE_ID)
+        inst = minimalmodbus.Instrument(port, slave_id)
         inst.serial.baudrate = baudrate
         inst.serial.bytesize = 8
         inst.serial.parity   = serial.PARITY_NONE
         inst.serial.stopbits = 1
-        inst.serial.timeout  = 1.5
+        inst.serial.timeout  = 0.5
         inst.mode            = minimalmodbus.MODE_RTU
-        inst.clear_buffers_before_each_transaction = True
-
-        inst.serial.reset_input_buffer()
-        inst.serial.reset_output_buffer()
-        print(f"✅ [{label}] initialized on {port} at {baudrate} baud")
+        print(f"✅ [{label}] initialized on {port} at {baudrate} baud (Slave ID: {slave_id})")
         return inst
     except Exception as e:
         print(f"⚠️ [{label}] initialization error on {port} at {baudrate} baud: {e}")
         return None
 
-R1_soil = _open_sensor(R1_PORT_SOIL, "R1 Soil", baudrate=9600)
-R1_md02 = _open_sensor(R1_PORT_MD02, "R1 MD02", baudrate=9600)
-R1_orp  = _open_sensor(R1_PORT_ORP,  "R1 ORP",  baudrate=4800)
-R1_co2  = _open_sensor(R1_PORT_CO2,  "R1 CO2",  baudrate=9600)
+R1_soil = _open_sensor(R1_PORT_SOIL, "R1 Soil", slave_id=1, baudrate=9600)
+R1_md02 = _open_sensor(R1_PORT_MD02, "R1 MD02", slave_id=1, baudrate=9600)
+R1_orp  = _open_sensor(R1_PORT_ORP,  "R1 ORP",  slave_id=1, baudrate=4800)
+R1_co2  = _open_sensor(R1_PORT_CO2,  "R1 CO2",  slave_id=1, baudrate=9600)
 
-R2_soil = _open_sensor(R2_PORT_SOIL, "R2 Soil", baudrate=9600)
-R2_md02 = _open_sensor(R2_PORT_MD02, "R2 MD02", baudrate=9600)
-R2_orp  = _open_sensor(R2_PORT_ORP,  "R2 ORP",  baudrate=4800)
-R2_co2  = _open_sensor(R2_PORT_CO2,  "R2 CO2",  baudrate=9600)
+R2_soil_ec = _open_sensor(R2_PORT_EC, "R2 Soil EC", slave_id=1, baudrate=9600)
+R2_soil_ph = _open_sensor(R2_PORT_PH, "R2 Soil pH", slave_id=1, baudrate=9600)
+R2_md02 = _open_sensor(R2_PORT_MD02, "R2 MD02", slave_id=1, baudrate=9600)
+R2_orp  = _open_sensor(R2_PORT_ORP,  "R2 ORP",  slave_id=1, baudrate=4800)
+R2_co2  = _open_sensor(R2_PORT_CO2,  "R2 CO2",  slave_id=1, baudrate=9600)
 
 R3_md02_1 = _open_sensor(R3_PORT_MD02_1, "R3 MD02 #1", baudrate=9600)
 R3_md02_2 = _open_sensor(R3_PORT_MD02_2, "R3 MD02 #2", baudrate=9600)
@@ -442,18 +440,50 @@ except Exception as e:
 
 
 
-def read_soil(inst, label):
+def read_soil_integrated(inst, label):
     if not inst: return None
     try:
-        inst.serial.reset_input_buffer()
-        moist = inst.read_register(0x0012, 1)
-        temp  = inst.read_register(0x0013, 1, signed=True)
-        ec    = inst.read_register(0x0015, 0)
-        ph    = inst.read_register(0x0006, 2)
-        return {"soil_temp": temp, "moisture": moist, "ec": ec, "ph": ph}
+        data = inst.read_registers(registeraddress=18, number_of_registers=4, functioncode=3)
+        moist = data[0] / 10.0
+        temp = data[1] / 10.0
+        raw_ec = data[2]
+        ec_val = round((raw_ec * 0.85) / 1000.0, 2)
+        ph_val = data[3] / 100.0
+        return {"soil_temp": temp, "moisture": moist, "ec": ec_val, "ph": ph_val}
     except Exception as e:
-        print(f"⚠️ [{label}] Soil read failed: {e}")
+        print(f"⚠️ [{label}] Integrated Soil read failed: {e}")
         return None
+
+def read_soil_split(inst_ec, inst_ph, label):
+    if not inst_ec and not inst_ph:
+        return None
+        
+    ec_val = None
+    ph_val = None
+    
+    if inst_ec:
+        try:
+            raw_ec = inst_ec.read_register(21, 0)
+            ec_val = round(raw_ec / 100.0, 2)
+        except Exception as e:
+            print(f"⚠️ [{label} EC] read failed: {e}")
+            
+    if inst_ph:
+        try:
+            # Read pH through the soil integrated sensor protocol (register 18, 4 registers)
+            data = inst_ph.read_registers(registeraddress=18, number_of_registers=4, functioncode=3)
+            ph_val = data[3] / 100.0
+        except Exception as e:
+            print(f"⚠️ [{label} pH] read failed: {e}")
+            
+    # No temp/moisture sensors for separate setup
+    temp = None
+    moist = None
+    
+    if ec_val is None and ph_val is None:
+        return None
+        
+    return {"soil_temp": temp, "moisture": moist, "ec": ec_val, "ph": ph_val}
 
 def read_md02(inst, label):
     if not inst: return None
@@ -502,14 +532,14 @@ def read_all_sensors(room):
     """Read Soil, Room, ORP, and CO2 sensors as requested."""
     if room == 1:
         return {
-            "soil": read_soil(R1_soil, "R1 Soil"),
+            "soil": read_soil_integrated(R1_soil, "R1 Soil"),
             "room": read_md02(R1_md02, "R1 MD02"),
             "orp": read_orp(R1_orp, "R1 ORP"),
             "co2": read_co2(R1_co2, "R1 CO2"),
         }
     elif room == 2:
         return {
-            "soil": read_soil(R2_soil, "R2 Soil"),
+            "soil": read_soil_split(R2_soil_ec, R2_soil_ph, "R2 Soil"),
             "room": read_md02(R2_md02, "R2 MD02"),
             "orp": read_orp(R2_orp, "R2 ORP"),
             "co2": read_co2(R2_co2, "R2 CO2"),
@@ -667,11 +697,9 @@ def control_room(room, data):
     soil = data.get("soil")
     room_env = data.get("room")
 
-    if soil:
-        raw_ec = soil["ec"]
-        ec = (raw_ec * 0.85) / 1000 if raw_ec is not None else 0.0
-        ph = soil["ph"]
-
+    # Separated control for EC
+    ec = soil.get("ec") if soil else None
+    if ec is not None:
         if not st["ec_active"] and ec < sp["EC MIN"]:
             st["ec_active"] = True
             relay_on(ch["ec1"]); relay_on(ch["ec2"])
@@ -685,7 +713,15 @@ def control_room(room, data):
             elif now - st["last_ec"] >= 10:
                 relay_on(ch["ec1"]); relay_on(ch["ec2"])
                 st["last_ec"] = now
+    else:
+        if st["ec_active"] or relay_is_on(ch["ec1"]):
+            relay_off(ch["ec1"]); relay_off(ch["ec2"])
+            st["ec_active"] = False
+        warnings.append("⚠️ EC SENSOR ERROR")
 
+    # Separated control for pH
+    ph = soil.get("ph") if soil else None
+    if ph is not None:
         if not st["ph_active"] and ph > sp["PH HIGH"]:
             st["ph_active"] = True
             relay_on(ch["ph"])
@@ -698,11 +734,10 @@ def control_room(room, data):
             elif now - st["last_ph"] >= 10:
                 relay_on(ch["ph"]); st["last_ph"] = now
     else:
-        # Safety: Sensor offline, turn off dosing ONLY if they were active
-        if st["ec_active"] or st["ph_active"] or relay_is_on(ch["ec1"]):
-            relay_off(ch["ec1"]); relay_off(ch["ec2"]); relay_off(ch["ph"])
-            st["ec_active"] = False; st["ph_active"] = False
-        warnings.append(" WATER SENSOR ERROR")
+        if st["ph_active"] or relay_is_on(ch["ph"]):
+            relay_off(ch["ph"])
+            st["ph_active"] = False
+        warnings.append("⚠️ pH SENSOR ERROR")
 
     if room_env:
         rt = room_env["room_temp"]; rh = room_env["room_humi"]
@@ -1003,7 +1038,7 @@ def make_home_box(room, r, c, cspan=1):
     outer = tk.Frame(home_grid, bg="#2e7d32", bd=0, padx=3, pady=3)
     outer.grid(row=r, column=c, columnspan=cspan, padx=12, pady=8, sticky="nsew")
 
-    w = 680 if room == 3 else 400
+    w = 680 if room == 3 else 460
     h = 160 if room == 3 else 220
     box = tk.Frame(outer, bg="#e0e0e0", bd=2, relief="raised", cursor="hand2", width=w, height=h)
     box.pack_propagate(False)
@@ -1022,7 +1057,7 @@ def make_home_box(room, r, c, cspan=1):
         tk.Label(parent, text=label_text, font=("Arial", 11, "bold"), fg="#444",
                  bg="#e0e0e0", anchor="w").grid(row=row_idx, column=col_offset*2, padx=4, pady=1, sticky="w")
         val_lbl = tk.Label(parent, text="NA", font=("Arial", 12, "bold"), fg="#1a237e",
-                           bg="#e0e0e0", width=25, anchor="e")
+                           bg="#e0e0e0", width=20, anchor="e")
         val_lbl.grid(row=row_idx, column=col_offset*2+1, padx=4, pady=1, sticky="e")
         sm[key] = val_lbl
 
@@ -1086,7 +1121,7 @@ def open_room(room):
 def request_setpoints_access(room):
     win = tk.Toplevel(root)
     win.title("Security Authentication")
-    win.configure(bg="#f8fafc")
+    win.configure(bg="#ffffff")
     win.focus_force()
     win.update()
     win.attributes("-fullscreen", True)
@@ -1094,68 +1129,67 @@ def request_setpoints_access(room):
 
     password_entered = ""
     selected_user = 1
+    error_active = False
     show_password = False
 
     # Center container frame to hold all dialog widgets in fullscreen mode
-    main_container = tk.Frame(win, bg="#f8fafc")
+    main_container = tk.Frame(win, bg="#ffffff")
     main_container.place(relx=0.5, rely=0.5, anchor="center")
 
     # Header Frame for Title and Logo
-    header_frame = tk.Frame(main_container, bg="#f8fafc")
-    header_frame.pack(fill="x", padx=20, pady=(20, 5))
+    header_frame = tk.Frame(main_container, bg="#ffffff")
+    header_frame.pack(fill="x", padx=20, pady=(15, 5))
     
-    title_sub_frame = tk.Frame(header_frame, bg="#f8fafc")
+    title_sub_frame = tk.Frame(header_frame, bg="#ffffff")
     title_sub_frame.pack(side="left")
     
-    tk.Label(title_sub_frame, text="SECURITY LOCK", font=("Arial", 16, "bold"), fg="#1e293b", bg="#f8fafc").pack(anchor="w")
-    tk.Label(title_sub_frame, text=f"Select user and enter authorization PIN to unlock Room {room} settings:", font=("Arial", 9), fg="#64748b", bg="#f8fafc").pack(anchor="w", pady=2)
+    tk.Label(title_sub_frame, text="SECURITY LOCK", font=("Arial", 16, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w")
+    tk.Label(title_sub_frame, text=f"Select user and enter authorization PIN to unlock Room {room} settings:", font=("Arial", 10), fg="#64748b", bg="#ffffff").pack(anchor="w", pady=2)
     
     # Load and draw logo
     LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
     if os.path.exists(LOGO_PATH):
         try:
-            logo_raw = Image.open(LOGO_PATH).resize((130, 82), Image.LANCZOS)
+            logo_raw = Image.open(LOGO_PATH).resize((120, 75), Image.LANCZOS)
             logo_img = ImageTk.PhotoImage(logo_raw)
             # Store reference to prevent garbage collection
             win.logo_img = logo_img
-            lbl_logo = tk.Label(header_frame, image=logo_img, bg="#f8fafc")
+            lbl_logo = tk.Label(header_frame, image=logo_img, bg="#ffffff")
             lbl_logo.pack(side="right", padx=10)
         except Exception as e:
             print(f"Error loading logo in authentication: {e}")
 
     # User Selection Layout
-    user_frame = tk.Frame(main_container, bg="#f8fafc")
+    user_frame = tk.Frame(main_container, bg="#ffffff")
     user_frame.pack(pady=10)
 
     user_btns = []
 
-    error_active = False
-
     def show_error_in_display(msg):
         nonlocal error_active, password_entered
         password_entered = ""
-        color = "#0f172a" if "4-8" in msg else "#dc2626"
-        display_lbl.config(text=msg, fg=color, font=("serif", 12, "bold"))
+        color = "#000000" if "4-8" in msg else "#dc2626"
+        display_lbl.config(text=msg, fg=color, font=("serif", 13, "bold"))
         error_active = True
 
     def rename_user_popup():
         nonlocal selected_user
         pop = tk.Toplevel(win)
         pop.title("Rename Operator")
-        pop.configure(bg="#f8fafc")
+        pop.configure(bg="#ffffff")
         pop.attributes("-fullscreen", True)
         pop.focus_force()
         pop.grab_set()
         
         name_entered = setpoints[room].get(f"USER {selected_user} Name", f"Operator {selected_user}")
         
-        container = tk.Frame(pop, bg="#f8fafc")
+        container = tk.Frame(pop, bg="#ffffff")
         container.place(relx=0.5, rely=0.5, anchor="center")
         
-        tk.Label(container, text="RENAME OPERATOR", font=("Arial", 14, "bold"), fg="#1e293b", bg="#f8fafc").pack(pady=10)
-        tk.Label(container, text=f"Edit name for User {selected_user}:", font=("Arial", 9), fg="#64748b", bg="#f8fafc").pack(pady=2)
+        tk.Label(container, text="RENAME OPERATOR", font=("Arial", 14, "bold"), fg="#1565c0", bg="#ffffff").pack(pady=10)
+        tk.Label(container, text=f"Edit name for User {selected_user}:", font=("Arial", 10), fg="#64748b", bg="#ffffff").pack(pady=2)
         
-        display_lbl_rename = tk.Label(container, text=name_entered, font=("Arial", 16, "bold"), fg="#0f172a", bg="white", width=20, relief="sunken", bd=2)
+        display_lbl_rename = tk.Label(container, text=name_entered, font=("Arial", 16, "bold"), fg="#e65100", bg="#f1f5f9", width=22, relief="sunken", bd=2)
         display_lbl_rename.pack(pady=10)
         
         def char_press(c):
@@ -1182,7 +1216,7 @@ def request_setpoints_access(room):
             user_btns[selected_user - 1].config(text=name_entered.strip())
             pop.destroy()
 
-        kb_frame = tk.Frame(container, bg="#f8fafc")
+        kb_frame = tk.Frame(container, bg="#ffffff")
         kb_frame.pack(pady=10)
         
         rows = [
@@ -1195,22 +1229,22 @@ def request_setpoints_access(room):
             for ci, ch in enumerate(row_k):
                 lbl = ch if ch != ' ' else 'SPC'
                 cmd = (lambda x=ch: char_press(x))
-                tk.Button(kb_frame, text=lbl, font=("Arial", 11, "bold"), width=4, height=1, bg="white", fg="#1e293b",
-                          command=cmd).grid(row=ri, column=ci, padx=2, pady=2)
+                tk.Button(kb_frame, text=lbl, font=("Arial", 11, "bold"), width=4, height=1, bg="#f1f5f9", fg="#0f172a",
+                          activebackground="#0284c7", activeforeground="white", command=cmd).grid(row=ri, column=ci, padx=2, pady=2)
                           
-        action_frame = tk.Frame(container, bg="#f8fafc")
+        action_frame = tk.Frame(container, bg="#ffffff")
         action_frame.pack(fill="x", pady=15)
         
-        tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#cbd5e1", fg="#1e293b", width=8, height=2, command=pop.destroy).pack(side="left", padx=10)
+        tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#64748b", fg="white", width=8, height=2, command=pop.destroy).pack(side="left", padx=10)
         tk.Button(action_frame, text="CLEAR", font=("Arial", 10, "bold"), bg="#dc2626", fg="white", width=8, height=2, command=char_clear).pack(side="left", padx=10)
-        tk.Button(action_frame, text="BACKSPACE", font=("Arial", 10, "bold"), bg="#f97316", fg="white", width=10, height=2, command=char_back).pack(side="left", padx=10)
+        tk.Button(action_frame, text="BACK", font=("Arial", 10, "bold"), bg="#f97316", fg="white", width=10, height=2, command=char_back).pack(side="left", padx=10)
         tk.Button(action_frame, text="SAVE", font=("Arial", 10, "bold"), bg="#0284c7", fg="white", width=10, height=2, command=char_save).pack(side="right", padx=10)
 
     def change_pin_popup():
         nonlocal selected_user
         pop = tk.Toplevel(win)
         pop.title("Change Operator PIN")
-        pop.configure(bg="#f8fafc")
+        pop.configure(bg="#ffffff")
         pop.attributes("-fullscreen", True)
         pop.focus_force()
         pop.grab_set()
@@ -1223,29 +1257,29 @@ def request_setpoints_access(room):
         show_pin = False
         pop_error_active = False
 
-        container = tk.Frame(pop, bg="#f8fafc")
+        container = tk.Frame(pop, bg="#ffffff")
         container.place(relx=0.5, rely=0.5, anchor="center")
         
-        step_lbl = tk.Label(container, text="STEP 1: ENTER OLD PIN", font=("Arial", 12, "bold"), fg="#1e293b", bg="#f8fafc")
+        step_lbl = tk.Label(container, text="STEP 1: ENTER OLD PIN", font=("Arial", 12, "bold"), fg="#1565c0", bg="#ffffff")
         step_lbl.pack(pady=10)
         
-        display_frame = tk.Frame(container, bg="#f8fafc")
+        display_frame = tk.Frame(container, bg="#ffffff")
         display_frame.pack(pady=10)
         
-        display_lbl_pin = tk.Label(display_frame, text="", font=("Arial", 20, "bold"), fg="#0f172a", bg="white", width=12, relief="sunken", bd=2, anchor="center")
+        display_lbl_pin = tk.Label(display_frame, text="", font=("Arial", 20, "bold"), fg="#2e7d32", bg="#f1f5f9", width=12, relief="sunken", bd=2, anchor="center")
         display_lbl_pin.pack(side="left", padx=5)
         
         def show_pop_err(msg):
             nonlocal pop_error_active, input_value
             input_value = ""
-            color = "#0f172a" if "4-8" in msg else "#dc2626"
-            display_lbl_pin.config(text=msg, fg=color, font=("serif", 12, "bold"))
+            color = "#000000" if "4-8" in msg else "#dc2626"
+            display_lbl_pin.config(text=msg, fg=color, font=("serif", 13, "bold"))
             pop_error_active = True
 
         def update_pin_display():
             if pop_error_active:
                 return
-            display_lbl_pin.config(fg="#0f172a", font=("Arial", 20, "bold"))
+            display_lbl_pin.config(fg="#2e7d32", font=("Arial", 20, "bold"))
             if show_pin:
                 display_lbl_pin.config(text=input_value)
             else:
@@ -1254,13 +1288,10 @@ def request_setpoints_access(room):
         def toggle_pin_show():
             nonlocal show_pin
             show_pin = not show_pin
-            if show_pin:
-                eye_btn.config(text="HIDE", bg="#0284c7", fg="white")
-            else:
-                eye_btn.config(text="SHOW", bg="#f1f5f9", fg="#1e293b")
+            eye_btn.config(text="HIDE" if show_pin else "SHOW", bg="#0284c7" if show_pin else "#64748b", fg="white")
             update_pin_display()
 
-        eye_btn = tk.Button(display_frame, text="SHOW", font=("Arial", 10, "bold"), width=6, bg="#f1f5f9", fg="#1e293b", bd=1, relief="raised", command=toggle_pin_show)
+        eye_btn = tk.Button(display_frame, text="SHOW", font=("Arial", 10, "bold"), width=6, bg="#64748b", fg="white", bd=1, relief="raised", command=toggle_pin_show)
         eye_btn.pack(side="left", padx=5)
 
         def num_press(num):
@@ -1323,7 +1354,7 @@ def request_setpoints_access(room):
                 pop.destroy()
 
         # Keypad Grid
-        kp_frame = tk.Frame(container, bg="#f8fafc")
+        kp_frame = tk.Frame(container, bg="#ffffff")
         kp_frame.pack(pady=10)
         
         buttons = [
@@ -1341,16 +1372,16 @@ def request_setpoints_access(room):
                 bg, fg = "#dc2626", "white"
             else:
                 cmd = lambda x=text: num_press(x)
-                bg, fg = "#ffffff", "#1e293b"
+                bg, fg = "#f1f5f9", "#0f172a"
                 
             btn = tk.Button(kp_frame, text=text, font=("Arial", 12, "bold"), width=6, height=2,
                             bg=bg, fg=fg, bd=1, relief="raised", command=cmd)
             btn.grid(row=r, column=c, padx=4, pady=4)
 
-        action_frame = tk.Frame(container, bg="#f8fafc")
+        action_frame = tk.Frame(container, bg="#ffffff")
         action_frame.pack(fill="x", pady=15)
         
-        tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#cbd5e1", fg="#1e293b", width=12, height=2, command=pop.destroy).pack(side="left", padx=15)
+        tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#64748b", fg="white", width=12, height=2, command=pop.destroy).pack(side="left", padx=15)
         tk.Button(action_frame, text="CONFIRM / NEXT", font=("Arial", 10, "bold"), bg="#0284c7", fg="white", width=16, height=2, command=num_confirm).pack(side="right", padx=15)
 
     def select_user(idx):
@@ -1360,51 +1391,51 @@ def request_setpoints_access(room):
             if i == idx:
                 btn.config(bg="#0284c7", fg="white", relief="sunken")
             else:
-                btn.config(bg="#e2e8f0", fg="#1e293b", relief="raised")
+                btn.config(bg="#cbd5e1", fg="#0f172a", relief="raised")
         kp_clear()
 
     # User 1 button
     u1_name = setpoints[room].get("USER 1 Name", "Operator 1")
-    btn_u1 = tk.Button(user_frame, text=u1_name, font=("Arial", 10, "bold"), width=14, height=1, bd=1)
+    btn_u1 = tk.Button(user_frame, text=u1_name, font=("Arial", 11, "bold"), width=16, height=1, bd=1)
     btn_u1.config(command=lambda: select_user(1))
-    btn_u1.pack(side="left", padx=6)
+    btn_u1.pack(side="left", padx=10)
     user_btns.append(btn_u1)
 
     # User 2 button
     u2_name = setpoints[room].get("USER 2 Name", "Operator 2")
-    btn_u2 = tk.Button(user_frame, text=u2_name, font=("Arial", 10, "bold"), width=14, height=1, bd=1)
+    btn_u2 = tk.Button(user_frame, text=u2_name, font=("Arial", 11, "bold"), width=16, height=1, bd=1)
     btn_u2.config(command=lambda: select_user(2))
-    btn_u2.pack(side="left", padx=6)
+    btn_u2.pack(side="left", padx=10)
     user_btns.append(btn_u2)
 
     # User 3 button
     u3_name = setpoints[room].get("USER 3 Name", "Operator 3")
-    btn_u3 = tk.Button(user_frame, text=u3_name, font=("Arial", 10, "bold"), width=14, height=1, bd=1)
+    btn_u3 = tk.Button(user_frame, text=u3_name, font=("Arial", 11, "bold"), width=16, height=1, bd=1)
     btn_u3.config(command=lambda: select_user(3))
-    btn_u3.pack(side="left", padx=6)
+    btn_u3.pack(side="left", padx=10)
     user_btns.append(btn_u3)
 
     # Operator Sub-actions
-    ops_frame = tk.Frame(main_container, bg="#f8fafc")
+    ops_frame = tk.Frame(main_container, bg="#ffffff")
     ops_frame.pack(pady=5)
     
-    tk.Button(ops_frame, text="✏️ RENAME USER", font=("Arial", 9, "bold"), bg="#cbd5e1", fg="#1e293b", width=14, height=1, bd=1, relief="raised",
+    tk.Button(ops_frame, text="✏️ RENAME USER", font=("Arial", 9, "bold"), bg="#64748b", fg="white", width=14, height=1, bd=1, relief="raised",
               command=rename_user_popup).pack(side="left", padx=5)
               
-    tk.Button(ops_frame, text="🔒 CHANGE PIN", font=("Arial", 9, "bold"), bg="#cbd5e1", fg="#1e293b", width=14, height=1, bd=1, relief="raised",
+    tk.Button(ops_frame, text="🔒 CHANGE PIN", font=("Arial", 9, "bold"), bg="#64748b", fg="white", width=14, height=1, bd=1, relief="raised",
               command=change_pin_popup).pack(side="left", padx=5)
 
     # Display entry for password (shows bullets/asterisks) with eye symbol
-    display_container = tk.Frame(main_container, bg="#f8fafc")
+    display_container = tk.Frame(main_container, bg="#ffffff")
     display_container.pack(pady=10)
 
-    display_lbl = tk.Label(display_container, text="", font=("Arial", 20, "bold"), fg="#0f172a", bg="white", width=12, relief="sunken", bd=2, anchor="center")
+    display_lbl = tk.Label(display_container, text="", font=("Arial", 20, "bold"), fg="#2e7d32", bg="#f1f5f9", width=12, relief="sunken", bd=2, anchor="center")
     display_lbl.pack(side="left", padx=5)
 
     def update_display():
         if error_active:
             return
-        display_lbl.config(fg="#0f172a", font=("Arial", 20, "bold"))
+        display_lbl.config(fg="#2e7d32", font=("Arial", 20, "bold"))
         if show_password:
             display_lbl.config(text=password_entered)
         else:
@@ -1413,13 +1444,10 @@ def request_setpoints_access(room):
     def toggle_show_password():
         nonlocal show_password
         show_password = not show_password
-        if show_password:
-            eye_btn.config(text="HIDE", bg="#0284c7", fg="white")
-        else:
-            eye_btn.config(text="SHOW", bg="#f1f5f9", fg="#1e293b")
+        eye_btn.config(text="HIDE" if show_password else "SHOW", bg="#0284c7" if show_password else "#64748b", fg="white")
         update_display()
 
-    eye_btn = tk.Button(display_container, text="SHOW", font=("Arial", 10, "bold"), width=6, bg="#f1f5f9", fg="#1e293b", bd=1, relief="raised",
+    eye_btn = tk.Button(display_container, text="SHOW", font=("Arial", 10, "bold"), width=6, bg="#64748b", fg="white", bd=1, relief="raised",
                         command=toggle_show_password)
     eye_btn.pack(side="left", padx=5)
 
@@ -1461,7 +1489,7 @@ def request_setpoints_access(room):
             show_error_in_display("WRONG PIN")
 
     # Keypad Grid (3x4 Layout with integrated DEL/CLR)
-    kp_frame = tk.Frame(main_container, bg="#f8fafc")
+    kp_frame = tk.Frame(main_container, bg="#ffffff")
     kp_frame.pack(pady=10)
 
     buttons = [
@@ -1480,17 +1508,17 @@ def request_setpoints_access(room):
             bg, fg = "#dc2626", "white"
         else:
             cmd = lambda x=text: kp_press(x)
-            bg, fg = "#ffffff", "#1e293b"
+            bg, fg = "#f1f5f9", "#0f172a"
             
         btn = tk.Button(kp_frame, text=text, font=("Arial", 12, "bold"), width=6, height=2,
                         bg=bg, fg=fg, bd=1, relief="raised", command=cmd)
         btn.grid(row=r, column=c, padx=4, pady=4)
 
     # Confirm & Cancel
-    action_frame = tk.Frame(main_container, bg="#f8fafc")
+    action_frame = tk.Frame(main_container, bg="#ffffff")
     action_frame.pack(fill="x", side="bottom", pady=15, padx=20)
 
-    tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#cbd5e1", fg="#1e293b", width=12, height=2, bd=1, relief="raised",
+    tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#64748b", fg="white", width=12, height=2, bd=1, relief="raised",
               command=win.destroy).pack(side="left", padx=15, anchor="s")
 
     tk.Button(action_frame, text="AUTHENTICATE", font=("Arial", 10, "bold"), bg="#0284c7", fg="white", width=14, height=2, bd=1, relief="raised",
@@ -1550,8 +1578,9 @@ def build_room_screen(room):
     else:
         tk.Label(col_L, text="WATER SENSOR", font=("Arial",12,"bold"),
                  fg="#1565c0", bg="#e0e0e0").pack(pady=(6,2))
-        srow(col_L, "soil_temp", "Water Temp")
-        srow(col_L, "moisture",  "Moisture")
+        if room == 1:
+            srow(col_L, "soil_temp", "Water Temp")
+            srow(col_L, "moisture",  "Moisture")
         srow(col_L, "ec",        "EC")
         srow(col_L, "ph",        "pH")
 
@@ -1997,11 +2026,11 @@ def build_setpoint_screen(room):
 
     sp_labels[room] = labels_s
 
-    kp_frame    = tk.Frame(fr, bg="white")
-    kp_title    = tk.Label(kp_frame, font=MED, fg=color, bg="white"); kp_title.pack()
-    kp_display  = tk.Label(kp_frame, font=("Arial",18,"bold"), fg="#2e7d32", bg="white"); kp_display.pack()
-    kp_buttons  = tk.Frame(kp_frame, bg="white"); kp_buttons.pack()
-    kp_actions  = tk.Frame(kp_frame, bg="white"); kp_actions.pack(pady=4)
+    kp_frame    = tk.Frame(fr, bg="white", bd=2, relief="solid")
+    kp_title    = tk.Label(kp_frame, font=("Arial", 14, "bold"), fg="#1565c0", bg="white"); kp_title.pack(pady=4)
+    kp_display  = tk.Label(kp_frame, font=("Arial", 18, "bold"), fg="#2e7d32", bg="#f1f5f9", width=16, relief="sunken"); kp_display.pack(pady=4)
+    kp_buttons  = tk.Frame(kp_frame, bg="white"); kp_buttons.pack(pady=5)
+    kp_actions  = tk.Frame(kp_frame, bg="white"); kp_actions.pack(pady=5)
 
     def kp_press(v):
         global sp_entered_value
@@ -2094,29 +2123,29 @@ def build_setpoint_screen(room):
     def open_keypad_room(r, key):
         global sp_selected_key, sp_entered_value, sp_active_room
         sp_selected_key = key; sp_entered_value = ""; sp_active_room = r
-        kp_display.config(text=""); kp_title.config(text=f"Set  {key}")
+        kp_display.config(text=""); kp_title.config(text=f"Editing {key}")
         for w in kp_buttons.winfo_children(): w.destroy()
         for w in kp_actions.winfo_children(): w.destroy()
 
         if key.endswith("Name"):
-            for ri, row_k in enumerate([list("1234567890"),list("QWERTYUIOP"),
-                                         list("ASDFGHJKL:"),list("ZXCVBNM._ ")]):
+            for ri, row_k in enumerate([list("1234567890"), list("QWERTYUIOP"),
+                                         list("ASDFGHJKL:"), list("ZXCVBNM._ ")]):
                 for ci, ch in enumerate(row_k):
                     tk.Button(kp_buttons, text=ch if ch!=' ' else 'SPC',
-                              font=("Arial",12,"bold"), width=3,
-                              command=lambda x=ch: kp_press(x)).grid(row=ri,column=ci,padx=2,pady=2)
-            w = 6
+                              font=("Arial", 11, "bold"), width=3, bg="#f1f5f9", fg="#0f172a",
+                              command=lambda x=ch: kp_press(x)).grid(row=ri, column=ci, padx=2, pady=2)
+            w_btn = 6
         else:
-            for text,ri,ci in [('1',0,0),('2',0,1),('3',0,2),('4',1,0),('5',1,1),('6',1,2),
+            for text, ri, ci in [('1',0,0),('2',0,1),('3',0,2),('4',1,0),('5',1,1),('6',1,2),
                                 ('7',2,0),('8',2,1),('9',2,2),('.',3,0),('0',3,1),(':',3,2)]:
-                tk.Button(kp_buttons, text=text, font=MED, width=4,
-                          command=lambda x=text: kp_press(x)).grid(row=ri,column=ci,padx=3,pady=3)
-            w = 4
+                tk.Button(kp_buttons, text=text, font=("Arial", 12, "bold"), width=4, bg="#f1f5f9", fg="#0f172a",
+                          command=lambda x=text: kp_press(x)).grid(row=ri, column=ci, padx=3, pady=3)
+            w_btn = 4
 
-        for txt,bg,fg,cmd in [("DEL","orange","black",kp_back),("CLR","#d9534f","white",kp_clear),
-                               ("OK","green","white",kp_confirm),("CAN","red","white",kp_cancel)]:
-            tk.Button(kp_actions, text=txt, font=MED, bg=bg, fg=fg,
-                      width=w, command=cmd).pack(side="left", padx=4)
+        for txt, bg, fg, cmd in [("DEL", "#f97316", "white", kp_back), ("CLR", "#dc2626", "white", kp_clear),
+                                 ("CONFIRM", "#0284c7", "white", kp_confirm), ("CANCEL", "#64748b", "white", kp_cancel)]:
+            tk.Button(kp_actions, text=txt, font=("Arial", 10, "bold"), bg=bg, fg=fg,
+                      width=w_btn+2, command=cmd).pack(side="left", padx=4)
 
         main_content_widget.pack_forget()
         kp_frame.pack(pady=4)
@@ -2144,7 +2173,7 @@ def stop_room(room):
 
 def restart_program():
     all_relays_off()
-    for inst in [R1_soil,R1_md02,R1_orp,R1_co2,R2_soil,R2_md02,R2_orp,R2_co2,R3_md02_1,R3_md02_2,R3_co2]:
+    for inst in [R1_soil,R1_md02,R1_orp,R1_co2,R2_soil_ec,R2_soil_ph,R2_md02,R2_orp,R2_co2,R3_md02_1,R3_md02_2,R3_co2]:
         try:
             if inst: inst.serial.close()
         except: pass
@@ -2214,14 +2243,28 @@ def update_room_detail(room, data, warnings):
         orp  = data.get("orp");  co2 = data.get("co2")
 
         if soil:
-            sv("soil_temp", f"{soil['soil_temp']} °C")
-            sv("moisture",  f"{soil['moisture']} %")
-            disp_ec = (soil['ec'] * 0.85) / 1000
-            tds_ec = disp_ec * 500
-            sv("ec",        f"{disp_ec:.2f} mS/cm ({tds_ec:.0f} ppm)")
-            sv("ph",        f"{soil['ph']}")
+            if room == 1:
+                sv("soil_temp", f"{soil['soil_temp']} °C" if soil['soil_temp'] is not None else "NA")
+                sv("moisture",  f"{soil['moisture']} %" if soil['moisture'] is not None else "NA")
+
+            # Check EC
+            disp_ec = soil.get('ec')
+            if disp_ec is not None:
+                tds_ec = disp_ec * 500
+                sv("ec", f"{disp_ec:.2f} mS/cm ({tds_ec:.0f} ppm)")
+            else:
+                sv("ec", "SENSOR ERROR", err=True)
+
+            # Check pH
+            disp_ph = soil.get('ph')
+            if disp_ph is not None:
+                sv("ph", f"{disp_ph}")
+            else:
+                sv("ph", "SENSOR ERROR", err=True)
         else:
-            for k in ["soil_temp","moisture","ec","ph"]: sv(k, "SENSOR ERROR", err=True)
+            if room == 1:
+                for k in ["soil_temp", "moisture"]: sv(k, "SENSOR ERROR", err=True)
+            for k in ["ec", "ph"]: sv(k, "SENSOR ERROR", err=True)
 
         if rm:
             sv("room_temp", f"{rm['room_temp']} °C")
@@ -2320,9 +2363,18 @@ def update_home_summary(room, data):
         orp  = data.get("orp");  co2 = data.get("co2")
 
         if soil:
-            disp_ec = (soil['ec'] * 0.85) / 1000
-            sv("ec", f"{disp_ec:.2f} mS/cm")
-            sv("ph", f"{soil['ph']}")
+            disp_ec = soil.get('ec')
+            if disp_ec is not None:
+                tds_ec = disp_ec * 500
+                sv("ec", f"{disp_ec:.2f} mS/cm ({tds_ec:.0f} ppm)")
+            else:
+                sv("ec", "NA", err=True)
+
+            disp_ph = soil.get('ph')
+            if disp_ph is not None:
+                sv("ph", f"{disp_ph}")
+            else:
+                sv("ph", "NA", err=True)
         else:
             sv("ec", "NA", err=True)
             sv("ph", "NA", err=True)
@@ -2393,7 +2445,7 @@ def publish_live_telemetry(d1, d2, d3):
             else:
                 soil_data = dict(d.get("soil")) if d.get("soil") else None
                 if soil_data and soil_data.get("ec") is not None:
-                    soil_data["ec"] = round((soil_data["ec"] * 0.85) / 1000, 2)
+                    soil_data["ec"] = round(soil_data["ec"], 2)
                     
                 payload = {
                     "soil": soil_data,
@@ -2464,7 +2516,7 @@ def pack_entry(ts, d1, d2, d3):
     s1 = d1.get("soil") if d1 else None
     s1_ec = None
     if s1 and s1.get("ec") is not None:
-        s1_ec = round((s1["ec"] * 0.85) / 1000, 2)
+        s1_ec = round(s1["ec"], 2)
     s1_ph = s1.get("ph") if s1 else None
     s1_temp = s1.get("soil_temp") if s1 else None
     s1_moist = s1.get("moisture") if s1 else None
@@ -2502,7 +2554,7 @@ def pack_entry(ts, d1, d2, d3):
     s2 = d2.get("soil") if d2 else None
     s2_ec = None
     if s2 and s2.get("ec") is not None:
-        s2_ec = round((s2["ec"] * 0.85) / 1000, 2)
+        s2_ec = round(s2["ec"], 2)
     s2_ph = s2.get("ph") if s2 else None
     s2_temp = s2.get("soil_temp") if s2 else None
     s2_moist = s2.get("moisture") if s2 else None
