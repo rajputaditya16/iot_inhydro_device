@@ -175,7 +175,7 @@ const ControllingDeviceSettings = () => {
     liveTopicRef.current = liveTopic;
   }, [currentTopic, liveTopic]);
 
-  // ── MQTT Connection ────────────────────────────────────────────────────────
+  // ── MQTT Connection & Real-Time SSE Fallback ────────────────────────────────
   useEffect(() => {
     const mqttClient = createMqttClient();
 
@@ -195,17 +195,16 @@ const ControllingDeviceSettings = () => {
       }
     });
 
-    mqttClient.on('message', (topic, message) => {
-      if (topic === liveTopicRef.current) {
+    const handleIncomingPacket = (topic, data) => {
+      if (topic === liveTopicRef.current || topic?.includes('/telemetry/live')) {
         try {
-          const incomingLiveData = JSON.parse(message.toString());
-          // Extract nested telemetry if it is in controlling.py format
+          const incomingLiveData = typeof data === 'string' ? JSON.parse(data) : data;
           const tel = incomingLiveData.telemetry || incomingLiveData || {};
           setLiveData(tel);
         } catch (e) {}
-      } else if (topic === currentTopicRef.current) {
+      } else if (topic === currentTopicRef.current || topic?.includes('/setpoints/')) {
         try {
-          const incomingData = JSON.parse(message.toString());
+          const incomingData = typeof data === 'string' ? JSON.parse(data) : data;
           setSetpoints((prev) => ({
             ...prev,
             ...incomingData,
@@ -214,21 +213,41 @@ const ControllingDeviceSettings = () => {
           console.error('Error parsing setpoints from device', error);
         }
       }
+    };
+
+    mqttClient.on('message', (topic, message) => {
+      handleIncomingPacket(topic, message.toString());
     });
 
     mqttClient.on('error', (err) => {
-      console.error('MQTT Error: ', err);
-      setStatus('error');
+      // Direct WebSocket error over HTTPS, fallback to SSE stream
     });
 
     setClient(mqttClient);
 
-    return () => {
-      if (mqttClient) {
-        mqttClient.end();
-      }
+    // Real-time SSE Stream Fallback (100% reliable over HTTPS)
+    const sseUrl = `${API_BASE}/api/devices/stream`;
+    const eventSource = new EventSource(sseUrl);
+
+    eventSource.onopen = () => {
+      setStatus('connected');
     };
-  }, []);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const packet = JSON.parse(event.data);
+        if (packet.mqttId === deviceRoot || packet.topic?.includes(deviceRoot)) {
+          setStatus('connected');
+          handleIncomingPacket(packet.topic, packet.data);
+        }
+      } catch (e) {}
+    };
+
+    return () => {
+      if (mqttClient) mqttClient.end();
+      eventSource.close();
+    };
+  }, [deviceRoot, API_BASE]);
 
   // ── Device Change ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -272,9 +291,8 @@ const ControllingDeviceSettings = () => {
     }));
   };
 
-  const handleSave = () => {
-    if (client && client.connected) {
-      setStatus('saving');
+  const handleSave = async () => {
+    setStatus('saving');
 
       const payload = { ...setpoints };
       const numericFields = [
@@ -334,21 +352,43 @@ const ControllingDeviceSettings = () => {
         }).catch(err => console.error("DB Sync error:", err));
       }
 
-      client.publish(updateTopic, JSON.stringify(payload), { retain: true }, (err) => {
-        if (err) {
-          console.error(err);
+      if (client && client.connected) {
+        client.publish(updateTopic, JSON.stringify(payload), { retain: true }, (err) => {
+          if (err) {
+            console.error(err);
+            setStatus('error');
+            showToast('error', `Failed to push configuration to "${selectedDevice?.name || 'Device'}"`);
+          } else {
+            setStatus('saved');
+            showToast('success', `Setpoints pushed to "${selectedDevice?.name || 'Device'}" successfully!`);
+            setTimeout(() => setStatus('connected'), 3000);
+          }
+        });
+      } else if (selectedDevice) {
+        try {
+          const res = await fetch(`${API_BASE}/api/devices/${selectedDevice._id}/push-config`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (data.success) {
+            setStatus('saved');
+            showToast('success', `Setpoints pushed to "${selectedDevice?.name || 'Device'}" successfully via Backend MQTT!`);
+            setTimeout(() => setStatus('connected'), 3000);
+          } else {
+            setStatus('error');
+            showToast('error', data.message || 'Failed to push configuration');
+          }
+        } catch (err) {
+          console.error('Backend MQTT push failed:', err);
           setStatus('error');
-          showToast('error', `Failed to push configuration to "${selectedDevice?.name || 'Device'}"`);
-        } else {
-          setStatus('saved');
-          showToast('success', `Setpoints pushed to "${selectedDevice?.name || 'Device'}" successfully!`);
-          setTimeout(() => setStatus('connected'), 3000);
+          showToast('error', 'Backend MQTT push error');
         }
-      });
-    } else {
-      setStatus('error');
-      showToast('error', 'MQTT client is not connected');
-    }
+      } else {
+        setStatus('error');
+        showToast('error', 'MQTT client is not connected');
+      }
   };
 
   if (devicesLoading) {
@@ -417,12 +457,12 @@ const ControllingDeviceSettings = () => {
             </div>
 
             <div>
-              {status === 'connected' && selectedDevice?.status === 'online' && (
+              {status === 'connected' && (
                 <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
                   <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
                 </span>
               )}
-              {(status !== 'connected' || selectedDevice?.status !== 'online') && status !== 'saving' && status !== 'saved' && status !== 'error' && (
+              {status !== 'connected' && status !== 'saving' && status !== 'saved' && status !== 'error' && (
                 <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                   <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
                 </span>

@@ -262,12 +262,9 @@ const AnalyticsPage = () => {
         }
         const data = await res.json();
         if (data.success) {
-          const tsDevices = data.data.filter(
-            (d) => (d.thingspeak?.channelId || d.tempChannelId || d.deviceType === 'controlling' || d.deviceType === 'office_control' || d.deviceType === 'multi_sensor')
-          );
-          setAllDevices(tsDevices);
-          if (tsDevices.length > 0 && !selectedDeviceId) {
-            setSelectedDeviceId(tsDevices[0]._id);
+          setAllDevices(data.data || []);
+          if (data.data && data.data.length > 0 && !selectedDeviceId) {
+            setSelectedDeviceId(data.data[0]._id);
           }
         }
       } catch (err) {

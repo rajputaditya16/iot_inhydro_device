@@ -104,7 +104,7 @@ const LiveMonitoring = () => {
           if (!selectedDeviceId && data.data.length > 0) {
             const firstConfigured = data.data.find(
               (d) => (d.thingspeak?.channelId || d.tempChannelId)
-            );
+            ) || data.data[0];
             if (firstConfigured) {
               setSelectedDeviceId(firstConfigured._id);
               setSearchParams({ device: firstConfigured._id });
@@ -171,11 +171,13 @@ const LiveMonitoring = () => {
     const channelId = deviceMeta?.thingspeak?.channelId || deviceMeta?.tempChannelId;
     const readApiKey = deviceMeta?.thingspeak?.readApiKey || deviceMeta?.tempReadApiKey;
 
-    if (!channelId || !readApiKey) return;
+    const url = (channelId && readApiKey)
+      ? `https://api.thingspeak.com/channels/${channelId}/feeds.json?api_key=${readApiKey}&results=24`
+      : `${API_BASE}/api/devices/${selectedDeviceId}/analytics`;
 
-    const url = `https://api.thingspeak.com/channels/${channelId}/feeds.json?api_key=${readApiKey}&results=24`;
+    const headers = (!channelId || !readApiKey) && token ? { Authorization: `Bearer ${token}` } : {};
 
-    fetch(url)
+    fetch(url, { headers })
       .then((res) => res.json())
       .then((result) => {
         const channel = result?.channel || {};
@@ -183,7 +185,7 @@ const LiveMonitoring = () => {
         const latestFeed = feeds[feeds.length - 1];
 
         // Parse dynamic fields configuration from channel
-        const fields = Object.keys(channel)
+        let fields = Object.keys(channel)
           .filter((k) => k.startsWith('field') && channel[k])
           .map((k) => ({
             key: k,
@@ -191,16 +193,25 @@ const LiveMonitoring = () => {
             ...getFieldDisplayInfo(channel[k]),
           }));
 
+        if (fields.length === 0) {
+          fields = [
+            { key: 'field1', label: 'Temperature', icon: Thermometer, unit: '°C', type: 'temperature' },
+            { key: 'field2', label: 'Moisture / Humidity', icon: Droplets, unit: '%', type: 'moisture' },
+            { key: 'field3', label: 'pH Level', icon: FlaskConical, unit: 'pH', type: 'ph' },
+            { key: 'field4', label: 'EC Level', icon: Zap, unit: 'mS/cm', type: 'ec' },
+          ];
+        }
+
         setActiveFields(fields);
 
-        if (!latestFeed || !latestFeed.entry_id) {
+        if (!latestFeed) {
           setLiveDevice(null);
           setHasNewData(false);
           setLoading(false);
           return;
         }
 
-        const lastUpdatedTime = new Date(latestFeed.created_at);
+        const lastUpdatedTime = new Date(latestFeed.created_at || Date.now());
         const diffMs = Date.now() - lastUpdatedTime.getTime();
         // 5 minutes threshold
         const isOnline = diffMs < 5 * 60 * 1000;
@@ -208,9 +219,9 @@ const LiveMonitoring = () => {
         const device = {
           id: selectedDeviceId,
           name: deviceMeta?.name || 'Live Sensor Data',
-          location: deviceMeta?.location || 'API Feed',
+          location: deviceMeta?.location || 'Private Broker Feed',
           status: isOnline ? 'online' : 'offline',
-          lastUpdated: latestFeed.created_at,
+          lastUpdated: latestFeed.created_at || new Date().toISOString(),
         };
 
         const currentMetrics = {};
@@ -221,7 +232,7 @@ const LiveMonitoring = () => {
         const newChartData = {};
         fields.forEach(f => {
           newChartData[f.key] = feeds.map(feed => ({
-            time: new Date(feed.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            time: new Date(feed.created_at || Date.now()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
             value: parseFloat(feed[f.key]) || 0,
           }));
         });
@@ -247,29 +258,26 @@ const LiveMonitoring = () => {
         setHasNewData(false);
         setLoading(false);
       });
-  }, [deviceMeta, selectedDeviceId, getFieldDisplayInfo]);
+  }, [deviceMeta, selectedDeviceId, getFieldDisplayInfo, API_BASE, token]);
 
   useEffect(() => {
     const isOfficeControl = deviceMeta?.deviceType === 'office_control';
     const isControlling = deviceMeta?.deviceType === 'controlling';
-    if (isOfficeControl || isControlling) {
+    const isMultiSensor = deviceMeta?.deviceType === 'multi_sensor';
+
+    if (isOfficeControl || isControlling || isMultiSensor) {
       return;
     }
 
-    if (!hasThingspeak && deviceMeta?.deviceType !== 'multi_sensor') {
-      setLoading(false);
-      return;
-    }
-
-    if (hasThingspeak) {
+    if (selectedDeviceId) {
       setLoading(true);
       fetchLiveData();
       const interval = setInterval(fetchLiveData, 15000);
       return () => clearInterval(interval);
     }
-  }, [hasThingspeak, fetchLiveData, deviceMeta]);
+  }, [fetchLiveData, deviceMeta, selectedDeviceId]);
 
-  // ── Step 3: MQTT Subscription for Multi-Sensor, Office Control & Controlling Devices ──────
+  // ── Step 3: Private Broker SSE Real-Time Stream for All Devices ─────────────────
   useEffect(() => {
     const isMultiSensor = deviceMeta?.deviceType === 'multi_sensor';
     const isOfficeControl = deviceMeta?.deviceType === 'office_control';
@@ -280,14 +288,10 @@ const LiveMonitoring = () => {
       mqttId = 'system2'; // Default fallback for control.py scripts
     }
     if (!mqttId) {
-      mqttId = deviceMeta?.id || deviceMeta?._id;
+      mqttId = deviceMeta?.id || deviceMeta?._id || selectedDeviceId;
     }
 
-    if ((!isMultiSensor && !isOfficeControl && !isControlling) || !mqttId) {
-      if (mqttClientRef.current) {
-        mqttClientRef.current.end();
-        mqttClientRef.current = null;
-      }
+    if (!mqttId) {
       return;
     }
 
@@ -377,12 +381,45 @@ const LiveMonitoring = () => {
           });
           return nextHist;
         });
+      } else {
+        // Standard / General Private Broker Device
+        const tel = payload.telemetry || payload.data || payload || {};
+        const tempVal = tel.field1 !== undefined ? parseFloat(tel.field1) : (tel.temp !== undefined ? parseFloat(tel.temp) : (tel.room_temp !== undefined ? parseFloat(tel.room_temp) : (tel.water_temp !== undefined ? parseFloat(tel.water_temp) : 0)));
+        const moistVal = tel.field2 !== undefined ? parseFloat(tel.field2) : (tel.moisture !== undefined ? parseFloat(tel.moisture) : (tel.humidity !== undefined ? parseFloat(tel.humidity) : (tel.room_humi !== undefined ? parseFloat(tel.room_humi) : 0)));
+        const phVal = tel.field3 !== undefined ? parseFloat(tel.field3) : (tel.ph !== undefined ? parseFloat(tel.ph) : 0);
+        const ecVal = tel.field4 !== undefined ? parseFloat(tel.field4) : (tel.ec !== undefined ? parseFloat(tel.ec) : 0);
+
+        const currentMetrics = {
+          field1: tempVal,
+          field2: moistVal,
+          field3: phVal,
+          field4: ecVal,
+        };
+
+        const fields = [
+          { key: 'field1', label: 'Temperature', icon: Thermometer, unit: '°C', type: 'temperature' },
+          { key: 'field2', label: 'Moisture / Humidity', icon: Droplets, unit: '%', type: 'moisture' },
+          { key: 'field3', label: 'pH Level', icon: FlaskConical, unit: 'pH', type: 'ph' },
+          { key: 'field4', label: 'EC Level', icon: Zap, unit: 'mS/cm', type: 'ec' },
+        ];
+
+        setActiveFields(fields);
+        setActiveMetrics(currentMetrics);
+
+        const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setChartData(prev => {
+          const newChart = { ...prev };
+          fields.forEach(f => {
+            newChart[f.key] = [...(newChart[f.key] || []), { time: timeStr, value: currentMetrics[f.key] }].slice(-24);
+          });
+          return newChart;
+        });
       }
 
       setLiveDevice({
         id: selectedDeviceId,
         name: deviceMeta?.name || 'Live Sensor Data',
-        location: deviceMeta?.location || 'Live Stream',
+        location: deviceMeta?.location || 'Private Broker Stream',
         status: 'online',
         lastUpdated: new Date().toISOString(),
       });
@@ -392,14 +429,14 @@ const LiveMonitoring = () => {
       setTimeout(() => setHasNewData(false), 2000);
     };
 
-    // ── 1. Connect to Backend Real-Time SSE Stream (Sub-second real-time streaming, 0 DB load) ──
+    // ── 1. Connect to Backend Real-Time SSE Stream (Private Broker Stream) ──
     const sseUrl = `${API_BASE}/api/devices/stream`;
     const eventSource = new EventSource(sseUrl);
 
     eventSource.onmessage = (event) => {
       try {
         const packet = JSON.parse(event.data);
-        if (packet.mqttId === mqttId || packet.deviceId === selectedDeviceId) {
+        if (packet.mqttId === mqttId || packet.deviceId === selectedDeviceId || (packet.topic && packet.topic.includes(mqttId))) {
           processTelemetryPacket(packet.topic, packet.data);
         }
       } catch (e) {
@@ -410,7 +447,7 @@ const LiveMonitoring = () => {
     return () => {
       eventSource.close();
     };
-  }, [deviceMeta, selectedDeviceId]);
+  }, [deviceMeta, selectedDeviceId, API_BASE]);
 
   const handleRefresh = () => {
     setLoading(true);
@@ -502,8 +539,7 @@ const LiveMonitoring = () => {
           Last updated: {liveDevice?.lastUpdated ? formatTimestamp(liveDevice.lastUpdated) : '--'}
           <button
             onClick={handleRefresh}
-            disabled={!hasThingspeak}
-            className="rounded-lg border border-slate-700 p-1.5 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+            className="rounded-lg border border-slate-700 p-1.5 transition-colors hover:bg-slate-800 hover:text-white"
           >
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
@@ -515,8 +551,8 @@ const LiveMonitoring = () => {
         </div>
       </div>
 
-      {/* ── ThingSpeak Not Configured Warning ─────────────────────────────── */}
-      {selectedDeviceId && !hasThingspeak && deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && deviceMeta?.deviceType !== 'controlling' && (
+      {/* ── Standard Single-Device Content Grid ───────────────────────────────── */}
+      {deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && deviceMeta?.deviceType !== 'controlling' && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1095,7 +1131,7 @@ const LiveMonitoring = () => {
       )}
 
       {/* ── Standard Single-Device Content Grid ───────────────────────────────── */}
-      {hasThingspeak && deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && deviceMeta?.deviceType !== 'controlling' && (
+      {deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && deviceMeta?.deviceType !== 'controlling' && (
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
           {/* Left: Big Metrics */}
           <div className="space-y-4 xl:col-span-1">
