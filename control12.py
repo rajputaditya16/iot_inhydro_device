@@ -16,7 +16,7 @@ R1_PORT_ORP  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.3:1.0-port0"
 R1_PORT_CO2  = "/dev/serial/by-path/usb-0:1.4-port0"
 
 # Room 2 sensor ports
-R2_PORT_SOIL = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.6:1.0-port0"
+R2_PORT_SOIL = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
 R2_PORT_MD02 = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.5:1.0-port0"
 R2_PORT_ORP  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.4:1.0-port0"
 R2_PORT_CO2  = "/dev/serial/by-path/platform-3f98000.usb-usb-0:1:2:1:0-port0"

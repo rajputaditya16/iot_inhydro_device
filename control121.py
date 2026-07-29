@@ -10,26 +10,26 @@ import paho.mqtt.client as mqtt
 
 
 # Room 1 sensor ports
-R1_PORT_SOIL = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.2:1.0-port0"
-R1_PORT_MD02 = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.1:1.0-port0"
-R1_PORT_ORP  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.3:1.0-port0"
-R1_PORT_CO2  = "/dev/serial/by-path/usb-0:1.4-port0"
+R1_PORT_SOIL = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.1:1.0-port0"
+R1_PORT_MD02 = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.1:2.0-port0"
+R1_PORT_ORP  = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.1:3.0-port0"
+R1_PORT_CO2  = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.2:1.0-port0"
 
 # Room 2 sensor ports
-R2_PORT_EC   = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.6:1.0-port0"
-R2_PORT_PH   = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.11:1.0-port0" # Adjust to your actual pH USB by-path
-R2_PORT_MD02 = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.5:1.0-port0"
-R2_PORT_ORP  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.4:1.0-port0"
-R2_PORT_CO2  = "/dev/serial/by-path/platform-3f98000.usb-usb-0:1:2:1:0-port0"
+R2_PORT_EC   = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.3:1.0-port0"
+R2_PORT_PH   = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.4:1.0-port0" # Adjust to your actual pH USB by-path
+R2_PORT_MD02 = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.5:1.0-port0"
+R2_PORT_ORP  = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.6:1.0-port0"
+R2_PORT_CO2  = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.7:1.0-port0"
 
 # Room 3 sensor ports
-R3_PORT_MD02_1 = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.9:1.0-port0"
-R3_PORT_MD02_2 = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.10:1.0-port0"
-R3_PORT_CO2    = "/dev/serial/by-path/platform-3f98000.usb-usb-0:1:2:2:0-port0"
+R3_PORT_MD02_1 = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.8:1.0-port0"
+R3_PORT_MD02_2 = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.9:1.0-port0"
+R3_PORT_CO2    = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.10:1.0-port0"
 
 # MODBUS SETTINGS
 RELAY_BAUD = 9600
-RELAY_PORT_FIXED = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.7:1.0-port0"
+RELAY_PORT_FIXED = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.11:1.0-port0"
 POSSIBLE_RELAY_IDS = [255, 1, 2, 0, 3]  
 working_relay_id = None
 
@@ -200,7 +200,7 @@ def default_setpoints(room=1):
         "USER 3 Name": "Operator 3", "USER 3 PASSWORD": "3333",
         "EC MIN": 1.2, "EC MAX": 1.8,
         "PH LOW": 5.8,  "PH HIGH": 6.5,
-        "D T Max": 35.0, "DT Min": 15.0,
+        "D T Max": 35.0, "D T Min": 15.0,
         "N T Max": 35.0, "N T Min": 15.0,
         "H Max": 80.0, "H Min": 30.0,
     }
@@ -750,7 +750,7 @@ def control_room(room, data):
             
             if in_day:
                 t_max = sp.get("D T Max", 35.0)
-                t_min = sp.get("DT Min", 15.0)
+                t_min = sp.get("D T Min", 15.0)
                 mode_str = "Day"
             elif in_night:
                 t_max = sp.get("N T Max", 35.0)
@@ -758,7 +758,7 @@ def control_room(room, data):
                 mode_str = "Night"
             else:
                 t_max = sp.get("D T Max", 35.0)
-                t_min = sp.get("DT Min", 15.0)
+                t_min = sp.get("D T Min", 15.0)
                 mode_str = "Day"
 
             if not st["ac_active"] and rt >= t_max:
@@ -2013,7 +2013,7 @@ def build_setpoint_screen(room):
         grid_climate.pack(pady=4, padx=5)
         
         make_cell(grid_climate, "D T Max", "Day T Max:").grid(row=0, column=0, padx=6, pady=2)
-        make_cell(grid_climate, "DT Min", "Day T Min:").grid(row=0, column=1, padx=6, pady=2)
+        make_cell(grid_climate, "D T Min", "Day T Min:").grid(row=0, column=1, padx=6, pady=2)
         make_cell(grid_climate, "N T Max", "Night T Max:").grid(row=1, column=0, padx=6, pady=2)
         make_cell(grid_climate, "N T Min", "Night T Min:").grid(row=1, column=1, padx=6, pady=2)
         make_cell(grid_climate, "H Max", "Humid Max:").grid(row=2, column=0, padx=6, pady=2)
@@ -2765,7 +2765,7 @@ def save_local_telemetry(d1, d2, d3):
         return
 
     current_time = time.time()
-    if current_time - last_local_save_time < 45:
+    if current_time - last_local_save_time < 1:
         return
 
     ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))

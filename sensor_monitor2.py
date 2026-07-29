@@ -13,9 +13,6 @@ import subprocess
 import paho.mqtt.client as mqtt
 from PIL import Image, ImageTk
 
-# ==============================================================================
-# CONFIG & IDENTITY
-# ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ID_FILE = os.path.join(BASE_DIR, "device_id.txt")
 
@@ -72,9 +69,6 @@ active_warnings = []
 ts_rotation_idx = 0
 mqtt_timer = 0
 
-# ==============================================================================
-# DEFAULT ALMORA CALENDAR & SCHEDULE SETTINGS SCHEMA (5 CALENDAR SLOTS, 5 TIME FRAMES)
-# ==============================================================================
 def generate_default_almora_schedule():
     return {
         "mode": "SCHEDULED", # "STATIC" or "SCHEDULED"
@@ -89,11 +83,11 @@ def generate_default_almora_schedule():
                 "end_date": "2026-08-31",
                 "enabled": True,
                 "time_slots": [
-                    {"id": 1, "start": "06:00", "stop": "09:00", "temp_setpoint": 22.5, "temp_tol": 2.0, "humi_setpoint": 65.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 2, "start": "09:00", "stop": "13:00", "temp_setpoint": 24.0, "temp_tol": 2.0, "humi_setpoint": 60.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 3, "start": "13:00", "stop": "17:00", "temp_setpoint": 25.5, "temp_tol": 2.0, "humi_setpoint": 55.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 4, "start": "17:00", "stop": "21:00", "temp_setpoint": 23.0, "temp_tol": 2.0, "humi_setpoint": 65.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 5, "start": "21:00", "stop": "06:00", "temp_setpoint": 20.0, "temp_tol": 2.0, "humi_setpoint": 70.0, "humi_tol": 5.0, "enabled": True}
+                    {"id": 1, "start": "06:00", "stop": "09:00", "t_max": 24.5, "t_min": 20.5, "h_max": 70.0, "h_min": 60.0, "enabled": True},
+                    {"id": 2, "start": "09:00", "stop": "13:00", "t_max": 26.0, "t_min": 22.0, "h_max": 65.0, "h_min": 55.0, "enabled": True},
+                    {"id": 3, "start": "13:00", "stop": "17:00", "t_max": 27.5, "t_min": 23.5, "h_max": 60.0, "h_min": 50.0, "enabled": True},
+                    {"id": 4, "start": "17:00", "stop": "21:00", "t_max": 25.0, "t_min": 21.0, "h_max": 70.0, "h_min": 60.0, "enabled": True},
+                    {"id": 5, "start": "21:00", "stop": "06:00", "t_max": 22.0, "t_min": 18.0, "h_max": 75.0, "h_min": 65.0, "enabled": True}
                 ]
             },
             "Setting B": {
@@ -101,11 +95,11 @@ def generate_default_almora_schedule():
                 "end_date": "2026-10-31",
                 "enabled": True,
                 "time_slots": [
-                    {"id": 1, "start": "06:00", "stop": "09:00", "temp_setpoint": 21.0, "temp_tol": 2.0, "humi_setpoint": 65.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 2, "start": "09:00", "stop": "13:00", "temp_setpoint": 23.0, "temp_tol": 2.0, "humi_setpoint": 60.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 3, "start": "13:00", "stop": "17:00", "temp_setpoint": 24.5, "temp_tol": 2.0, "humi_setpoint": 55.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 4, "start": "17:00", "stop": "21:00", "temp_setpoint": 22.0, "temp_tol": 2.0, "humi_setpoint": 65.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 5, "start": "21:00", "stop": "06:00", "temp_setpoint": 19.0, "temp_tol": 2.0, "humi_setpoint": 70.0, "humi_tol": 5.0, "enabled": True}
+                    {"id": 1, "start": "06:00", "stop": "09:00", "t_max": 23.0, "t_min": 19.0, "h_max": 70.0, "h_min": 60.0, "enabled": True},
+                    {"id": 2, "start": "09:00", "stop": "13:00", "t_max": 25.0, "t_min": 21.0, "h_max": 65.0, "h_min": 55.0, "enabled": True},
+                    {"id": 3, "start": "13:00", "stop": "17:00", "t_max": 26.5, "t_min": 22.5, "h_max": 60.0, "h_min": 50.0, "enabled": True},
+                    {"id": 4, "start": "17:00", "stop": "21:00", "t_max": 24.0, "t_min": 20.0, "h_max": 70.0, "h_min": 60.0, "enabled": True},
+                    {"id": 5, "start": "21:00", "stop": "06:00", "t_max": 21.0, "t_min": 17.0, "h_max": 75.0, "h_min": 65.0, "enabled": True}
                 ]
             },
             "Setting C": {
@@ -113,11 +107,11 @@ def generate_default_almora_schedule():
                 "end_date": "2026-12-31",
                 "enabled": True,
                 "time_slots": [
-                    {"id": 1, "start": "06:00", "stop": "09:00", "temp_setpoint": 18.0, "temp_tol": 2.0, "humi_setpoint": 60.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 2, "start": "09:00", "stop": "13:00", "temp_setpoint": 20.0, "temp_tol": 2.0, "humi_setpoint": 55.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 3, "start": "13:00", "stop": "17:00", "temp_setpoint": 21.0, "temp_tol": 2.0, "humi_setpoint": 55.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 4, "start": "17:00", "stop": "21:00", "temp_setpoint": 19.0, "temp_tol": 2.0, "humi_setpoint": 60.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 5, "start": "21:00", "stop": "06:00", "temp_setpoint": 17.0, "temp_tol": 2.0, "humi_setpoint": 65.0, "humi_tol": 5.0, "enabled": True}
+                    {"id": 1, "start": "06:00", "stop": "09:00", "t_max": 20.0, "t_min": 16.0, "h_max": 65.0, "h_min": 55.0, "enabled": True},
+                    {"id": 2, "start": "09:00", "stop": "13:00", "t_max": 22.0, "t_min": 18.0, "h_max": 60.0, "h_min": 50.0, "enabled": True},
+                    {"id": 3, "start": "13:00", "stop": "17:00", "t_max": 23.0, "t_min": 19.0, "h_max": 60.0, "h_min": 50.0, "enabled": True},
+                    {"id": 4, "start": "17:00", "stop": "21:00", "t_max": 21.0, "t_min": 17.0, "h_max": 65.0, "h_min": 55.0, "enabled": True},
+                    {"id": 5, "start": "21:00", "stop": "06:00", "t_max": 19.0, "t_min": 15.0, "h_max": 70.0, "h_min": 60.0, "enabled": True}
                 ]
             },
             "Setting D": {
@@ -125,11 +119,11 @@ def generate_default_almora_schedule():
                 "end_date": "2027-03-31",
                 "enabled": True,
                 "time_slots": [
-                    {"id": 1, "start": "06:00", "stop": "09:00", "temp_setpoint": 19.0, "temp_tol": 2.0, "humi_setpoint": 60.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 2, "start": "09:00", "stop": "13:00", "temp_setpoint": 21.0, "temp_tol": 2.0, "humi_setpoint": 55.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 3, "start": "13:00", "stop": "17:00", "temp_setpoint": 22.0, "temp_tol": 2.0, "humi_setpoint": 55.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 4, "start": "17:00", "stop": "21:00", "temp_setpoint": 20.0, "temp_tol": 2.0, "humi_setpoint": 60.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 5, "start": "21:00", "stop": "06:00", "temp_setpoint": 18.0, "temp_tol": 2.0, "humi_setpoint": 65.0, "humi_tol": 5.0, "enabled": True}
+                    {"id": 1, "start": "06:00", "stop": "09:00", "t_max": 21.0, "t_min": 17.0, "h_max": 65.0, "h_min": 55.0, "enabled": True},
+                    {"id": 2, "start": "09:00", "stop": "13:00", "t_max": 23.0, "t_min": 19.0, "h_max": 60.0, "h_min": 50.0, "enabled": True},
+                    {"id": 3, "start": "13:00", "stop": "17:00", "t_max": 24.0, "t_min": 20.0, "h_max": 60.0, "h_min": 50.0, "enabled": True},
+                    {"id": 4, "start": "17:00", "stop": "21:00", "t_max": 22.0, "t_min": 18.0, "h_max": 65.0, "h_min": 55.0, "enabled": True},
+                    {"id": 5, "start": "21:00", "stop": "06:00", "t_max": 20.0, "t_min": 16.0, "h_max": 70.0, "h_min": 60.0, "enabled": True}
                 ]
             },
             "Setting E": {
@@ -137,19 +131,17 @@ def generate_default_almora_schedule():
                 "end_date": "2027-06-30",
                 "enabled": True,
                 "time_slots": [
-                    {"id": 1, "start": "06:00", "stop": "09:00", "temp_setpoint": 22.0, "temp_tol": 2.0, "humi_setpoint": 65.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 2, "start": "09:00", "stop": "13:00", "temp_setpoint": 24.5, "temp_tol": 2.0, "humi_setpoint": 60.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 3, "start": "13:00", "stop": "17:00", "temp_setpoint": 26.0, "temp_tol": 2.0, "humi_setpoint": 55.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 4, "start": "17:00", "stop": "21:00", "temp_setpoint": 23.5, "temp_tol": 2.0, "humi_setpoint": 65.0, "humi_tol": 5.0, "enabled": True},
-                    {"id": 5, "start": "21:00", "stop": "06:00", "temp_setpoint": 20.5, "temp_tol": 2.0, "humi_setpoint": 70.0, "humi_tol": 5.0, "enabled": True}
+                    {"id": 1, "start": "06:00", "stop": "09:00", "t_max": 24.0, "t_min": 20.0, "h_max": 70.0, "h_min": 60.0, "enabled": True},
+                    {"id": 2, "start": "09:00", "stop": "13:00", "t_max": 26.5, "t_min": 22.5, "h_max": 65.0, "h_min": 55.0, "enabled": True},
+                    {"id": 3, "start": "13:00", "stop": "17:00", "t_max": 28.0, "t_min": 24.0, "h_max": 60.0, "h_min": 50.0, "enabled": True},
+                    {"id": 4, "start": "17:00", "stop": "21:00", "t_max": 25.5, "t_min": 21.5, "h_max": 70.0, "h_min": 60.0, "enabled": True},
+                    {"id": 5, "start": "21:00", "stop": "06:00", "t_max": 22.5, "t_min": 18.5, "h_max": 75.0, "h_min": 65.0, "enabled": True}
                 ]
             }
         }
     }
 
-# ==============================================================================
-# CONFIG & SETPOINTS LOAD / SAVE
-# ==============================================================================
+
 def load_config():
     global system_config
     if os.path.exists(CONFIG_FILE):
@@ -206,9 +198,6 @@ def get_setpoints(skey):
         sensor_setpoints[skey] = generate_default_almora_schedule()
     return sensor_setpoints[skey]
 
-# ==============================================================================
-# ALMORA DYNAMIC RTC CALENDAR & 5-TIME-SLOT EVALUATOR
-# ==============================================================================
 def get_active_setpoints(skey):
     """
     Evaluates current RTC Date and Time against 5 Calendar Settings (Settings A-E)
@@ -272,28 +261,25 @@ def get_active_setpoints(skey):
                 is_in_slot = (current_time_str >= start_t or current_time_str <= stop_t)
 
             if is_in_slot:
-                target_t = float(slot.get("temp_setpoint", 24.0))
-                t_tol = float(slot.get("temp_tol", 2.0))
-                target_h = float(slot.get("humi_setpoint", 60.0))
-                h_tol = float(slot.get("humi_tol", 5.0))
+                t_max_v = float(slot.get("t_max", slot.get("temp_setpoint", 24.0) + slot.get("temp_tol", 2.0)))
+                t_min_v = float(slot.get("t_min", slot.get("temp_setpoint", 24.0) - slot.get("temp_tol", 2.0)))
+                h_max_v = float(slot.get("h_max", slot.get("humi_setpoint", 60.0) + slot.get("humi_tol", 5.0)))
+                h_min_v = float(slot.get("h_min", slot.get("humi_setpoint", 60.0) - slot.get("humi_tol", 5.0)))
 
                 active_info.update({
                     "setting_name": set_key,
                     "slot_id": slot.get("id", 1),
-                    "target_temp": round(target_t, 1),
-                    "target_humi": round(target_h, 1),
-                    "T MIN": round(target_t - t_tol, 1),
-                    "T MAX": round(target_t + t_tol, 1),
-                    "H MIN": round(target_h - h_tol, 1),
-                    "H MAX": round(target_h + h_tol, 1)
+                    "target_temp": round((t_max_v + t_min_v) / 2, 1),
+                    "target_humi": round((h_max_v + h_min_v) / 2, 1),
+                    "T MIN": round(t_min_v, 1),
+                    "T MAX": round(t_max_v, 1),
+                    "H MIN": round(h_min_v, 1),
+                    "H MAX": round(h_max_v, 1)
                 })
                 return active_info
 
     return active_info
 
-# ==============================================================================
-# HARDWARE ALARM BUZZER CONTROLLER (30-SECOND TRIGGER)
-# ==============================================================================
 def trigger_buzzer_30s():
     """Triggers physical hardware buzzer for 30 seconds in non-blocking thread."""
     global buzzer_active
@@ -313,9 +299,6 @@ def trigger_buzzer_30s():
 
     threading.Thread(target=_buzzer_worker, daemon=True).start()
 
-# ==============================================================================
-# NETWORK & HARDWARE HELPERS
-# ==============================================================================
 def set_wifi(ssid, password):
     try:
         subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True)
@@ -381,9 +364,6 @@ def start_bluetooth_server():
                 if 'client' in locals(): client.close()
     except Exception as e: print("BT Error:", e)
 
-# ==============================================================================
-# MQTT CLOUD CLIENTS
-# ==============================================================================
 mqtt_ts_client = None
 TS_MQTT_TOPIC = ""
 
@@ -501,9 +481,7 @@ try:
     control_client.loop_start()
 except Exception as e: pass
 
-# ==============================================================================
-# MODBUS RELAY & SENSOR POLLING ENGINE
-# ==============================================================================
+
 def set_relay(channel, state):
     global working_relay_id
     relay_port = system_config.get('relay_port')
@@ -614,9 +592,7 @@ def sensor_reader():
         active_warnings = current_warnings
         time.sleep(1)
 
-# ==============================================================================
-# TKINTER GUI FRAMEWORK (ALMORA CONTROLLER HMI)
-# ==============================================================================
+
 root = tk.Tk()
 root.attributes("-fullscreen", True)
 root.configure(bg="white")
@@ -640,14 +616,53 @@ def add_logo(parent):
             photo = ImageTk.PhotoImage(img)
             lbl = tk.Label(parent, image=photo, bg="white")
             lbl.image = photo 
-            lbl.place(relx=1.0, rely=0.0, anchor="ne", x=-20, y=20)
+            lbl.place(relx=1.0, rely=0.0, anchor="ne", x=-20, y=15)
     except Exception as e: pass
+
+def add_top_left_exit(parent):
+    btn_exit = tk.Button(
+        parent,
+        text="✖ EXIT",
+        font=("Helvetica", 12, "bold"),
+        bg="#dc2626",
+        fg="white",
+        activebackground="#b91c1c",
+        activeforeground="white",
+        relief="flat",
+        bd=0,
+        padx=16,
+        pady=12,
+        cursor="hand2",
+        command=quit_app
+    )
+    btn_exit.place(relx=0.0, rely=0.0, anchor="nw", x=20, y=15)
+    btn_exit.lift()
+
+clock_labels = []
+
+def add_bottom_right_clock(parent, bg_color="white"):
+    lbl = tk.Label(
+        parent,
+        text="📅 Day, YYYY-MM-DD   ⏰ HH:MM:SS (IST)",
+        font=("Helvetica", 11, "bold"),
+        fg="#00897b",
+        bg=bg_color,
+        padx=10,
+        pady=6
+    )
+    lbl.place(relx=1.0, rely=1.0, anchor="se", x=-20, y=-15)
+    lbl.lift()
+    clock_labels.append(lbl)
+    return lbl
 
 def show(frame):
     for f in [frame_main, frame_set, frame_schedule, frame_detail]:
         f.pack_forget()
     frame.pack(fill="both", expand=True)
     add_logo(frame)
+    add_top_left_exit(frame)
+    if frame != frame_main:
+        add_bottom_right_clock(frame)
 
 def get_sensor_display_name(skey):
     if skey == "S7": return "GREEN HOUSE"
@@ -657,12 +672,9 @@ def get_f_name(skey):
     if skey == "S7": return "Fanpad"
     return "AC"
 
-# --- MAIN DASHBOARD HEADER & CLOCK ---
+# --- MAIN DASHBOARD HEADER ---
 lbl_title = tk.Label(frame_main, text="INHYDRO COLD ROOM DASHBOARD", font=big, fg="#1565c0", bg="white")
-lbl_title.pack(pady=(10, 2))
-
-lbl_clock = tk.Label(frame_main, text="📅 YYYY-MM-DD  ⏰ HH:MM:SS (IST)", font=med, fg="#00897b", bg="white")
-lbl_clock.pack(pady=(0, 5))
+lbl_title.pack(pady=(40, 8))
 
 # Live Warning Bar
 lbl_warning_bar = tk.Label(frame_main, text="SYSTEM NORMAL", font=med, bg="#2e7d32", fg="white", height=2)
@@ -672,12 +684,6 @@ sensors_grid = tk.Frame(frame_main, bg="white")
 sensors_grid.pack(pady=15)
 sensor_widgets = {}
 
-def update_clock_display():
-    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
-    now_str = datetime.datetime.now(ist_tz).strftime("📅 %Y-%m-%d   ⏰ %H:%M:%S  (IST)")
-    lbl_clock.config(text=now_str)
-    root.after(1000, update_clock_display)
-
 footer_main = tk.Frame(frame_main, bg="#eeeeee", height=80)
 footer_main.pack(side="bottom", fill="x")
 footer_main.pack_propagate(False)
@@ -686,7 +692,26 @@ btn_pause = tk.Button(footer_main, text="MANUAL STOP", font=med, width=14, bg="#
 btn_pause.pack(side="left", padx=15, pady=10)
 tk.Button(footer_main, text="SCHEDULE SLOTS", font=med, width=16, bg="#0284c7", fg="white", command=lambda: open_schedule_editor("S1")).pack(side="left", padx=10, pady=10)
 tk.Button(footer_main, text="RESTART", font=med, width=12, bg="#1565c0", fg="white", command=lambda: restart_program()).pack(side="left", padx=10, pady=10)
-tk.Button(footer_main, text="EXIT", font=med, width=10, bg="#757575", fg="white", command=lambda: quit_app()).pack(side="right", padx=20, pady=10)
+
+# Date, Time and Day display in place of old exit button in bottom right footer
+lbl_clock = tk.Label(footer_main, text="📅 Day, YYYY-MM-DD   ⏰ HH:MM:SS (IST)", font=("Helvetica", 12, "bold"), fg="#00897b", bg="#eeeeee")
+lbl_clock.pack(side="right", padx=20, pady=10)
+
+def update_clock_display():
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    now = datetime.datetime.now(ist_tz)
+    now_str = now.strftime("📅 %A, %Y-%m-%d   ⏰ %H:%M:%S (IST)")
+    if 'lbl_clock' in globals() and lbl_clock.winfo_exists():
+        lbl_clock.config(text=now_str)
+    for lbl in list(clock_labels):
+        try:
+            if lbl.winfo_exists():
+                lbl.config(text=now_str)
+            else:
+                clock_labels.remove(lbl)
+        except Exception:
+            pass
+    root.after(1000, update_clock_display)
 
 def toggle_pause():
     global system_paused
@@ -853,14 +878,11 @@ btn_f_det.pack(side="bottom", pady=40)
 tk.Button(btn_f_det, text="BACK TO DASHBOARD", font=med, bg="#757575", fg="white", width=18, command=lambda: show(frame_main)).pack(side="left", padx=15)
 tk.Button(btn_f_det, text="EDIT SCHEDULE SLOTS", font=med, bg="#0284c7", fg="white", width=20, command=lambda: open_schedule_editor(next((k for k, v in SENSOR_MAP.items() if v == active_detail_port), "S1"))).pack(side="left", padx=15)
 
-# ==============================================================================
-# ALMORA2.PY STANDARDIZED MODAL KEYPAD & KEYBOARD POPUP COMPONENT
-# ==============================================================================
 keypad_modal = None
 
 def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphanumeric=False):
     """
-    Opens an almora2.py-styled Keypad or Keyboard modal popup.
+    Opens an almora2.py-styled Fullscreen Keypad or Keyboard modal popup.
     - is_alphanumeric=True: Full QWERTY Keyboard layout (for names / strings).
     - is_alphanumeric=False: Standard Numeric + Time/Date Keypad layout.
     Color Palette: DEL (#f97316), CLR (#dc2626), CONFIRM (#0284c7), CANCEL (#64748b).
@@ -870,22 +892,31 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
         keypad_modal.destroy()
 
     keypad_modal = tk.Toplevel(root)
-    keypad_modal.title(title_text)
     keypad_modal.configure(bg="white")
-    keypad_modal.transient(root)
-    keypad_modal.grab_set()
 
-    # Center window on screen
-    w, h = 540 if is_alphanumeric else 420, 480 if is_alphanumeric else 440
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    keypad_modal.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
+    keypad_modal.geometry(f"{sw}x{sh}+0+0")
+    try:
+        keypad_modal.attributes("-fullscreen", True)
+    except Exception:
+        pass
+    keypad_modal.grab_set()
+    keypad_modal.focus_force()
+
+    add_logo(keypad_modal)
+    add_top_left_exit(keypad_modal)
+    add_bottom_right_clock(keypad_modal)
+
+    # Centered container for Fullscreen Keypad Modal
+    kp_main = tk.Frame(keypad_modal, bg="white")
+    kp_main.pack(expand=True)
 
     entered_val = str(initial_value)
 
-    lbl_modal_title = tk.Label(keypad_modal, text=title_text, font=med, fg="#1565c0", bg="white")
-    lbl_modal_title.pack(pady=(12, 6))
+    lbl_modal_title = tk.Label(kp_main, text=title_text, font=big, fg="#1565c0", bg="white")
+    lbl_modal_title.pack(pady=(10, 8))
 
-    lbl_modal_disp = tk.Label(keypad_modal, text=entered_val, font=("Arial", 18, "bold"), fg="#0f172a", bg="#f1f5f9", width=20, relief="sunken", bd=2)
+    lbl_modal_disp = tk.Label(kp_main, text=entered_val, font=("Arial", 22, "bold"), fg="#0f172a", bg="#f1f5f9", width=22, relief="sunken", bd=2)
     lbl_modal_disp.pack(pady=8)
 
     def kp_press(ch):
@@ -911,17 +942,17 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
     def kp_cancel():
         keypad_modal.destroy()
 
-    kp_buttons_frame = tk.Frame(keypad_modal, bg="white")
+    kp_buttons_frame = tk.Frame(kp_main, bg="white")
     kp_buttons_frame.pack(pady=10)
 
     if is_alphanumeric:
         rows = [list("1234567890"), list("QWERTYUIOP"), list("ASDFGHJKL:"), list("ZXCVBNM._-")]
         for ri, row_k in enumerate(rows):
             r_f = tk.Frame(kp_buttons_frame, bg="white")
-            r_f.pack(pady=2)
+            r_f.pack(pady=3)
             for ch in row_k:
-                tk.Button(r_f, text=ch, font=("Arial", 11, "bold"), width=3, bg="#f1f5f9", fg="#0f172a",
-                          command=lambda x=ch: kp_press(x)).pack(side="left", padx=2)
+                tk.Button(r_f, text=ch, font=("Arial", 13, "bold"), width=3, bg="#f1f5f9", fg="#0f172a",
+                          command=lambda x=ch: kp_press(x)).pack(side="left", padx=3)
     else:
         num_grid = [
             ('1', 0, 0), ('2', 0, 1), ('3', 0, 2),
@@ -931,159 +962,342 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
             ('-', 4, 1)
         ]
         for t, r, c in num_grid:
-            tk.Button(kp_buttons_frame, text=t, font=med, width=4, height=1, bg="#f1f5f9", fg="#0f172a",
-                      command=lambda x=t: kp_press(x)).grid(row=r, column=c, padx=3, pady=3)
+            tk.Button(kp_buttons_frame, text=t, font=("Arial", 16, "bold"), width=5, height=1, bg="#f1f5f9", fg="#0f172a",
+                      command=lambda x=t: kp_press(x)).grid(row=r, column=c, padx=5, pady=5)
 
-    kp_actions_frame = tk.Frame(keypad_modal, bg="white")
-    kp_actions_frame.pack(side="bottom", pady=15)
+    kp_actions_frame = tk.Frame(kp_main, bg="white")
+    kp_actions_frame.pack(pady=15)
 
-    tk.Button(kp_actions_frame, text="DEL", font=("Arial", 10, "bold"), bg="#f97316", fg="white", width=7, command=kp_back).pack(side="left", padx=4)
-    tk.Button(kp_actions_frame, text="CLR", font=("Arial", 10, "bold"), bg="#dc2626", fg="white", width=7, command=kp_clear).pack(side="left", padx=4)
-    tk.Button(kp_actions_frame, text="CONFIRM", font=("Arial", 10, "bold"), bg="#0284c7", fg="white", width=10, command=kp_confirm).pack(side="left", padx=4)
-    tk.Button(kp_actions_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#64748b", fg="white", width=8, command=kp_cancel).pack(side="left", padx=4)
+    tk.Button(kp_actions_frame, text="DEL", font=("Arial", 13, "bold"), bg="#f97316", fg="white", width=8, pady=12, command=kp_back).pack(side="left", padx=6)
+    tk.Button(kp_actions_frame, text="CLR", font=("Arial", 13, "bold"), bg="#dc2626", fg="white", width=8, pady=12, command=kp_clear).pack(side="left", padx=6)
+    tk.Button(kp_actions_frame, text="CONFIRM", font=("Arial", 13, "bold"), bg="#0284c7", fg="white", width=12, pady=12, command=kp_confirm).pack(side="left", padx=6)
+    tk.Button(kp_actions_frame, text="CANCEL", font=("Arial", 13, "bold"), bg="#64748b", fg="white", width=10, pady=12, command=kp_cancel).pack(side="left", padx=6)
 
-# ==============================================================================
-# ALMORA 5 CALENDAR SLOTS & 5 TIME FRAMES EDITOR HMI
-# ==============================================================================
+# ALMORA CALENDAR SLOTS & 5 TIME FRAMES EDITOR HMI
+
 sched_entries = {}
 
-lbl_sched_title = tk.Label(frame_schedule, text="ALMORA CALENDAR & SCHEDULE SLOTS EDITOR", font=big, fg="#1565c0", bg="white")
-lbl_sched_title.pack(pady=(6, 2))
+# Permanently packed bottom action buttons frame on schedule editor
+sched_btn_frame = tk.Frame(frame_schedule, bg="white")
+sched_btn_frame.pack(side="bottom", fill="x", pady=(4, 8))
 
-sched_top_ctrl = tk.Frame(frame_schedule, bg="white")
-sched_top_ctrl.pack(pady=4)
+# Main Scrollable Canvas Container for Schedule Page
+sched_container = tk.Frame(frame_schedule, bg="white")
+sched_container.pack(side="top", fill="both", expand=True)
 
-# 1. SENSOR NAME SELECTION WITH EDIT BUTTON
-tk.Label(sched_top_ctrl, text="Sensor:", font=med, fg="#1565c0", bg="white").pack(side="left", padx=(5, 2))
-lbl_val_sensor = tk.Label(sched_top_ctrl, text="S1 (COLD ROOM 1)", font=small, bg="#f1f5f9", fg="#e65100", width=18, relief="sunken", bd=1)
-lbl_val_sensor.pack(side="left", padx=2)
+sched_canvas = tk.Canvas(sched_container, bg="white", highlightthickness=0)
+sched_scrollbar = ttk.Scrollbar(sched_container, orient="vertical", command=sched_canvas.yview)
+sched_scroll_inner = tk.Frame(sched_canvas, bg="white")
 
-def edit_sensor_select():
-    pop = tk.Toplevel(root)
-    pop.title("Select Sensor")
-    pop.configure(bg="white")
-    pop.transient(root)
-    pop.grab_set()
-    w, h = 380, 420
-    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    pop.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
-    
-    tk.Label(pop, text="SELECT SENSOR", font=med, fg="#1565c0", bg="white").pack(pady=10)
-    for skey in sorted(SENSOR_MAP.keys()):
-        dname = get_sensor_display_name(skey)
-        tk.Button(pop, text=f"{skey} — {dname}", font=small, bg="#0284c7", fg="white", width=26,
-                  command=lambda s=skey: (pop.destroy(), skey_combo.set(s), load_schedule_form())).pack(pady=3)
-    tk.Button(pop, text="CANCEL", font=small, bg="#64748b", fg="white", width=12, command=pop.destroy).pack(pady=10)
+sched_scroll_window = sched_canvas.create_window((0, 0), window=sched_scroll_inner, anchor="nw")
 
-tk.Button(sched_top_ctrl, text="EDIT", font=("Arial", 8, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove", command=edit_sensor_select).pack(side="left", padx=(2, 15))
+def _on_sched_inner_configure(event):
+    sched_canvas.configure(scrollregion=sched_canvas.bbox("all"))
+
+sched_scroll_inner.bind("<Configure>", _on_sched_inner_configure)
+
+def _on_sched_canvas_configure(event):
+    sched_canvas.itemconfig(sched_scroll_window, width=event.width)
+
+sched_canvas.bind("<Configure>", _on_sched_canvas_configure)
+
+sched_canvas.configure(yscrollcommand=sched_scrollbar.set)
+
+sched_scrollbar.pack(side="right", fill="y")
+sched_canvas.pack(side="left", fill="both", expand=True)
+
+def _on_sched_mousewheel(event):
+    try:
+        if event.delta:
+            sched_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        elif event.num == 4:
+            sched_canvas.yview_scroll(-1, "units")
+        elif event.num == 5:
+            sched_canvas.yview_scroll(1, "units")
+    except Exception:
+        pass
+
+sched_canvas.bind_all("<MouseWheel>", _on_sched_mousewheel)
+sched_canvas.bind_all("<Button-4>", _on_sched_mousewheel)
+sched_canvas.bind_all("<Button-5>", _on_sched_mousewheel)
+
+lbl_sched_title = tk.Label(sched_scroll_inner, text="ALMORA CALENDAR & SCHEDULE SLOTS EDITOR", font=big, fg="#1565c0", bg="white")
+lbl_sched_title.pack(pady=(35, 2))
+
+sched_top_ctrl = tk.Frame(sched_scroll_inner, bg="white")
+sched_top_ctrl.pack(pady=2)
+
+# 1. SENSOR & PROFILE DROPDOWNS (MIND.PY STYLED)
+tk.Label(sched_top_ctrl, text="Sensor:", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack(side="left", padx=(5, 4))
+
+sensor_dropdown_open = False
+sensor_dropdown_btn = None
+sensor_menu_frame = tk.Frame(sched_scroll_inner, bg="white", bd=1, relief="solid", highlightbackground="#cbd5e1")
+
+def toggle_sensor_dropdown():
+    global sensor_dropdown_open
+    if sensor_dropdown_open:
+        sensor_menu_frame.place_forget()
+        sensor_dropdown_open = False
+    else:
+        for w in sensor_menu_frame.winfo_children(): w.destroy()
+        for skey in sorted(SENSOR_MAP.keys()):
+            dname = get_sensor_display_name(skey)
+            btn = tk.Button(sensor_menu_frame, text=f"{skey} — {dname}", font=("Helvetica", 12, "bold"), bg="white", fg="#1e293b",
+                            activebackground="#0284c7", activeforeground="white", relief="flat", bd=0, anchor="w", padx=14, pady=10, cursor="hand2")
+            btn.config(command=lambda s=skey: select_sensor(s))
+            btn.pack(fill="x")
+        sensor_menu_frame.place(in_=sensor_dropdown_btn, relx=0.0, rely=1.0, y=2, width=280)
+        sensor_menu_frame.lift()
+        sensor_dropdown_open = True
+
+def select_sensor(skey):
+    global sensor_dropdown_open
+    skey_combo.set(skey)
+    sensor_menu_frame.place_forget()
+    sensor_dropdown_open = False
+    load_schedule_form()
+
+sensor_dropdown_btn = tk.Button(sched_top_ctrl, text="S1 — COLD ROOM 1  ▼", font=("Helvetica", 12, "bold"), bg="#f1f5f9", fg="#1e293b",
+                                activebackground="#e2e8f0", relief="flat", bd=0, padx=16, pady=10, cursor="hand2", command=toggle_sensor_dropdown)
+sensor_dropdown_btn.pack(side="left", padx=(0, 15))
 
 skey_combo = ttk.Combobox(sched_top_ctrl, values=list(SENSOR_MAP.keys()), width=1)
 skey_combo.set("S1")
 
-# 2. PROFILE / SEASON SELECTION WITH EDIT BUTTON
-tk.Label(sched_top_ctrl, text="Profile/Season:", font=med, fg="#1565c0", bg="white").pack(side="left", padx=(10, 2))
-lbl_val_setting = tk.Label(sched_top_ctrl, text="Setting A", font=small, bg="#f1f5f9", fg="#e65100", width=12, relief="sunken", bd=1)
-lbl_val_setting.pack(side="left", padx=2)
+tk.Label(sched_top_ctrl, text="Profile/Season:", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack(side="left", padx=(5, 4))
 
-def edit_setting_select():
-    pop = tk.Toplevel(root)
-    pop.title("Select Profile/Season")
-    pop.configure(bg="white")
-    pop.transient(root)
-    pop.grab_set()
-    w, h = 360, 360
-    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    pop.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
-    
-    tk.Label(pop, text="SELECT PROFILE / SEASON", font=med, fg="#1565c0", bg="white").pack(pady=10)
-    for s_name in ["Setting A", "Setting B", "Setting C", "Setting D", "Setting E"]:
-        tk.Button(pop, text=s_name, font=small, bg="#0284c7", fg="white", width=22,
-                  command=lambda s=s_name: (pop.destroy(), setting_combo.set(s), load_schedule_form())).pack(pady=4)
-    tk.Button(pop, text="CANCEL", font=small, bg="#64748b", fg="white", width=12, command=pop.destroy).pack(pady=10)
+profile_dropdown_open = False
+profile_menu_frame = tk.Frame(sched_scroll_inner, bg="white", bd=1, relief="solid", highlightbackground="#cbd5e1")
 
-tk.Button(sched_top_ctrl, text="EDIT", font=("Arial", 8, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove", command=edit_setting_select).pack(side="left", padx=(2, 5))
+def toggle_profile_dropdown():
+    global profile_dropdown_open
+    if profile_dropdown_open:
+        profile_menu_frame.place_forget()
+        profile_dropdown_open = False
+    else:
+        for w in profile_menu_frame.winfo_children(): w.destroy()
+        sp = get_setpoints(skey_combo.get())
+        settings_dict = sp.get("settings", {})
+        for s_key in ["Setting A", "Setting B", "Setting C", "Setting D", "Setting E"]:
+            p_name = settings_dict.get(s_key, {}).get("name", s_key)
+            btn_txt = f"{s_key} ({p_name})" if p_name != s_key else s_key
+            btn = tk.Button(profile_menu_frame, text=btn_txt, font=("Helvetica", 12, "bold"), bg="white", fg="#1e293b",
+                            activebackground="#0284c7", activeforeground="white", relief="flat", bd=0, anchor="w", padx=14, pady=10, cursor="hand2")
+            btn.config(command=lambda s=s_key: select_profile(s))
+            btn.pack(fill="x")
+        profile_menu_frame.place(in_=profile_dropdown_btn, relx=0.0, rely=1.0, y=2, width=280)
+        profile_menu_frame.lift()
+        profile_dropdown_open = True
+
+def select_profile(s_name):
+    global profile_dropdown_open
+    setting_combo.set(s_name)
+    profile_menu_frame.place_forget()
+    profile_dropdown_open = False
+    load_schedule_form()
+
+profile_dropdown_btn = tk.Button(sched_top_ctrl, text="Setting A  ▼", font=("Helvetica", 12, "bold"), bg="#f1f5f9", fg="#1e293b",
+                                 activebackground="#e2e8f0", relief="flat", bd=0, padx=16, pady=10, cursor="hand2", command=toggle_profile_dropdown)
+profile_dropdown_btn.pack(side="left")
 
 setting_combo = ttk.Combobox(sched_top_ctrl, values=["Setting A", "Setting B", "Setting C", "Setting D", "Setting E"], width=1)
 setting_combo.set("Setting A")
 
-# 3. DATE RANGE ROW WITH EDIT BUTTONS
-date_frame = tk.Frame(frame_schedule, bg="#f8fafc", bd=1, relief="solid")
-date_frame.pack(pady=4, fill="x", padx=20)
+def on_schedule_click_outside(event):
+    global sensor_dropdown_open, profile_dropdown_open
+    w = event.widget
+    in_s_dp, in_p_dp = False, False
+    while w:
+        if w == sensor_menu_frame or w == sensor_dropdown_btn: in_s_dp = True; break
+        if w == profile_menu_frame or w == profile_dropdown_btn: in_p_dp = True; break
+        try: w = w.master
+        except Exception: break
+    if not in_s_dp and sensor_dropdown_open:
+        sensor_menu_frame.place_forget(); sensor_dropdown_open = False
+    if not in_p_dp and profile_dropdown_open:
+        profile_menu_frame.place_forget(); profile_dropdown_open = False
 
-tk.Label(date_frame, text="Start Date (YYYY-MM-DD):", font=small, fg="#1565c0", bg="#f8fafc").grid(row=0, column=0, padx=6, pady=4)
-lbl_val_sdate = tk.Label(date_frame, text="2026-07-01", font=small, bg="#f1f5f9", fg="#e65100", width=12, relief="sunken", bd=1)
-lbl_val_sdate.grid(row=0, column=1, padx=4, pady=4)
+frame_schedule.bind("<Button-1>", on_schedule_click_outside)
+
+# 2. DATE RANGE ROW (CENTERED & BORDERLESS OUTSIDE GRID)
+date_frame = tk.Frame(sched_scroll_inner, bg="white")
+date_frame.pack(pady=2, anchor="center")
+
+tk.Label(date_frame, text="Start Date (YYYY-MM-DD):", font=("Helvetica", 11, "bold"), fg="#64748b", bg="white").grid(row=0, column=0, padx=4, pady=2)
+lbl_val_sdate = tk.Label(date_frame, text="2026-07-01", font=("Helvetica", 11, "bold"), bg="#ffffff", fg="#1e293b", width=11, relief="sunken", bd=1)
+lbl_val_sdate.grid(row=0, column=1, padx=3, pady=2)
 
 def edit_sdate():
-    open_almora_keypad("Edit Start Date (YYYY-MM-DD)", lbl_val_sdate.cget("text"), lambda v: lbl_val_sdate.config(text=v))
+    open_almora_keypad("Edit Start Date (YYYY-MM-DD)", lbl_val_sdate.cget("text"), lambda v: (lbl_val_sdate.config(text=v), save_current_schedule_to_file()))
 
-tk.Button(date_frame, text="EDIT", font=("Arial", 8, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove", command=edit_sdate).grid(row=0, column=2, padx=4, pady=4)
+tk.Button(date_frame, text="EDIT", font=("Helvetica", 12, "bold"), bg="#cbd5e1", fg="#1e293b", activebackground="#cbd5e1", relief="flat", bd=0, padx=18, pady=12, cursor="hand2", command=edit_sdate).grid(row=0, column=2, padx=3, pady=2)
 
-tk.Label(date_frame, text="End Date (YYYY-MM-DD):", font=small, fg="#1565c0", bg="#f8fafc").grid(row=0, column=3, padx=10, pady=4)
-lbl_val_edate = tk.Label(date_frame, text="2026-08-31", font=small, bg="#f1f5f9", fg="#e65100", width=12, relief="sunken", bd=1)
-lbl_val_edate.grid(row=0, column=4, padx=4, pady=4)
+tk.Label(date_frame, text="End Date (YYYY-MM-DD):", font=("Helvetica", 11, "bold"), fg="#64748b", bg="white").grid(row=0, column=3, padx=(18, 4), pady=2)
+lbl_val_edate = tk.Label(date_frame, text="2026-08-31", font=("Helvetica", 11, "bold"), bg="#ffffff", fg="#1e293b", width=11, relief="sunken", bd=1)
+lbl_val_edate.grid(row=0, column=4, padx=3, pady=2)
 
 def edit_edate():
-    open_almora_keypad("Edit End Date (YYYY-MM-DD)", lbl_val_edate.cget("text"), lambda v: lbl_val_edate.config(text=v))
+    open_almora_keypad("Edit End Date (YYYY-MM-DD)", lbl_val_edate.cget("text"), lambda v: (lbl_val_edate.config(text=v), save_current_schedule_to_file()))
 
-tk.Button(date_frame, text="EDIT", font=("Arial", 8, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove", command=edit_edate).grid(row=0, column=5, padx=4, pady=4)
+tk.Button(date_frame, text="EDIT", font=("Helvetica", 12, "bold"), bg="#cbd5e1", fg="#1e293b", activebackground="#cbd5e1", relief="flat", bd=0, padx=18, pady=12, cursor="hand2", command=edit_edate).grid(row=0, column=5, padx=3, pady=2)
 
-# 4. SEPARATE TEMPERATURE & HUMIDITY SCHEDULE GRIDS
-grids_wrapper = tk.Frame(frame_schedule, bg="white")
-grids_wrapper.pack(pady=4, fill="both", expand=True, padx=10)
+def save_current_schedule_to_file(show_feedback=True):
+    try:
+        skey = skey_combo.get()
+        setting_nm = setting_combo.get()
+        sp = get_setpoints(skey)
+        st = sp.setdefault("settings", {}).setdefault(setting_nm, {})
+        st["start_date"] = lbl_val_sdate.cget("text").strip()
+        st["end_date"] = lbl_val_edate.cget("text").strip()
+        st["enabled"] = True
 
-temp_grid_frame = tk.LabelFrame(grids_wrapper, text=" 🌡️ TEMPERATURE SCHEDULE GRID ", font=med, fg="#1565c0", bg="white", bd=2, relief="groove")
-temp_grid_frame.pack(side="left", fill="both", expand=True, padx=5, pady=2)
+        new_slots = []
+        for idx in range(5):
+            if idx in sched_entries:
+                l_fname, l_tstart, l_tstop, l_tmax_val, l_tmin_val, l_hmax_val, l_hmin_val = sched_entries[idx]
+                new_slots.append({
+                    "id": idx + 1,
+                    "name": l_fname.cget("text").strip(),
+                    "start": l_tstart.cget("text").strip(),
+                    "stop": l_tstop.cget("text").strip(),
+                    "t_max": round(float(l_tmax_val.cget("text").strip()), 1),
+                    "t_min": round(float(l_tmin_val.cget("text").strip()), 1),
+                    "h_max": round(float(l_hmax_val.cget("text").strip()), 1),
+                    "h_min": round(float(l_hmin_val.cget("text").strip()), 1),
+                    "enabled": True
+                })
+        st["time_slots"] = new_slots
+        save_setpoints()
+        print(f"Schedule for {skey} - {setting_nm} saved successfully!")
+        
+        if show_feedback and 'btn_save_sched' in globals() and btn_save_sched.winfo_exists():
+            orig_txt = btn_save_sched.cget("text")
+            orig_bg = btn_save_sched.cget("bg")
+            btn_save_sched.config(text="SAVED ✅", bg="#15803d")
+            def _reset_btn():
+                try:
+                    if btn_save_sched.winfo_exists():
+                        btn_save_sched.config(text=orig_txt, bg=orig_bg)
+                except Exception:
+                    pass
+            root.after(1500, _reset_btn)
+    except Exception as e:
+        print(f"Schedule Save Error: {e}")
 
-humi_grid_frame = tk.LabelFrame(grids_wrapper, text=" 💧 HUMIDITY SCHEDULE GRID ", font=med, fg="#1565c0", bg="white", bd=2, relief="groove")
-humi_grid_frame.pack(side="right", fill="both", expand=True, padx=5, pady=2)
+# Populate permanently packed bottom action buttons
+btn_save_sched = tk.Button(sched_btn_frame, text="SAVE SCHEDULE", font=("Helvetica", 12, "bold"), bg="#2e7d32", fg="white", width=20, height=2, cursor="hand2", command=lambda: save_current_schedule_to_file(True))
+btn_save_sched.pack(side="left", padx=15)
+tk.Button(sched_btn_frame, text="CANCEL / BACK", font=("Helvetica", 12, "bold"), bg="#64748b", fg="white", width=20, height=2, cursor="hand2", command=lambda: show(frame_main)).pack(side="left", padx=15)
+
+# 3. SEPARATE TEMPERATURE & HUMIDITY SCHEDULE GRIDS (CENTERED SQUARE CONTAINERS)
+grids_wrapper = tk.Frame(sched_scroll_inner, bg="white")
+grids_wrapper.pack(pady=2, anchor="center")
+
+temp_grid_frame = tk.LabelFrame(grids_wrapper, text=" 🌡️ TEMPERATURE SCHEDULE GRID ", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="white", bd=2, relief="solid", highlightbackground="#94a3b8")
+temp_grid_frame.pack(side="top", anchor="center", padx=8, pady=3)
+
+humi_grid_frame = tk.LabelFrame(grids_wrapper, text=" 💧 HUMIDITY SCHEDULE GRID ", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="white", bd=2, relief="solid", highlightbackground="#94a3b8")
+humi_grid_frame.pack(side="top", anchor="center", padx=8, pady=3)
 
 def edit_slot_popup(idx):
-    """Full Slot Frame Modal Editor for Frame X."""
-    l_tstart, l_tstop, l_tset, l_ttol, l_hstart, l_hstop, l_hset, l_htol = sched_entries[idx]
+    l_fname, l_tstart, l_tstop, l_tmax_val, l_tmin_val, l_hmax_val, l_hmin_val = sched_entries[idx]
     
     pop = tk.Toplevel(root)
-    pop.title(f"Edit Schedule Frame {idx+1}")
     pop.configure(bg="white")
-    pop.transient(root)
-    pop.grab_set()
-    w, h = 480, 420
-    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    pop.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
 
-    tk.Label(pop, text=f"EDIT SCHEDULE FRAME {idx+1}", font=med, fg="#1565c0", bg="white").pack(pady=10)
-    
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    pop.geometry(f"{sw}x{sh}+0+0")
+    try:
+        pop.attributes("-fullscreen", True)
+    except Exception:
+        pass
+    pop.grab_set()
+    pop.focus_force()
+
+    add_logo(pop)
+    add_top_left_exit(pop)
+    add_bottom_right_clock(pop)
+
+    header = tk.Frame(pop, bg="white")
+    header.pack(pady=(45, 10))
+    tk.Label(header, text=f"EDIT SCHEDULE FRAME {idx+1}", font=big, fg="#1565c0", bg="white").pack()
+
     body = tk.Frame(pop, bg="white")
-    body.pack(pady=10)
+    body.pack(pady=15)
 
     items = [
-        ("Start Time", l_tstart.cget("text"), lambda v: (l_tstart.config(text=v), l_hstart.config(text=v))),
-        ("Stop Time", l_tstop.cget("text"), lambda v: (l_tstop.config(text=v), l_hstop.config(text=v))),
-        ("Target Temp (°C)", l_tset.cget("text"), lambda v: l_tset.config(text=v)),
-        ("Temp Tol (±)", l_ttol.cget("text"), lambda v: l_ttol.config(text=v)),
-        ("Target Humi (%)", l_hset.cget("text"), lambda v: l_hset.config(text=v)),
-        ("Humi Tol (±)", l_htol.cget("text"), lambda v: l_htol.config(text=v)),
+        ("Frame Name", l_fname, True, False),
+        ("Start Time", l_tstart, False, False),
+        ("Stop Time", l_tstop, False, False),
+        ("T MAX (ON °C)", l_tmax_val, False, False),
+        ("T MIN (OFF °C)", l_tmin_val, False, False),
+        ("H MAX (ON %)", l_hmax_val, False, False),
+        ("H MIN (OFF %)", l_hmin_val, False, False),
     ]
 
-    for label, curr_val, callback in items:
+    for label, v_lbl, is_alpha, is_float in items:
         r_f = tk.Frame(body, bg="white")
-        r_f.pack(fill="x", pady=3)
-        tk.Label(r_f, text=label, font=small, fg="#0f172a", bg="white", width=18, anchor="w").pack(side="left")
-        v_lbl = tk.Label(r_f, text=curr_val, font=small, bg="#f1f5f9", fg="#e65100", width=8, relief="sunken", bd=1)
-        v_lbl.pack(side="left", padx=5)
-        tk.Button(r_f, text="EDIT", font=("Arial", 8, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove",
-                  command=lambda lbl=v_lbl, cb=callback, title=label: open_almora_keypad(f"Edit {title}", lbl.cget("text"), lambda v: (lbl.config(text=v), cb(v)))).pack(side="left")
+        r_f.pack(fill="x", pady=6)
+        tk.Label(r_f, text=f"{label}:", font=("Helvetica", 13, "bold"), fg="#1e293b", bg="white", width=18, anchor="e").pack(side="left", padx=10)
+        
+        val_display = tk.Label(r_f, text=v_lbl.cget("text"), font=("Helvetica", 13, "bold"), bg="#f1f5f9", fg="#1565c0", width=16, relief="sunken", bd=1)
+        val_display.pack(side="left", padx=10)
 
-    tk.Button(pop, text="DONE / CLOSE", font=small, bg="#2e7d32", fg="white", width=16, command=pop.destroy).pack(pady=15)
+        def make_callback(orig_label, target_disp):
+            def cb(new_val):
+                orig_label.config(text=new_val)
+                target_disp.config(text=new_val)
+            return cb
+
+        callback = make_callback(v_lbl, val_display)
+
+        tk.Button(
+            r_f,
+            text="EDIT",
+            font=("Helvetica", 13, "bold"),
+            bg="#cbd5e1",
+            fg="#1e293b",
+            activebackground="#cbd5e1",
+            relief="flat",
+            bd=0,
+            padx=24,
+            pady=14,
+            cursor="hand2",
+            command=lambda lbl=val_display, cb=callback, title=label, alpha=is_alpha: open_almora_keypad(
+                f"Edit {title}", lbl.cget("text"), lambda v: (lbl.config(text=v), cb(v)), is_alphanumeric=alpha
+            )
+        ).pack(side="left", padx=5)
+
+    def save_and_close_slot():
+        save_current_schedule_to_file()
+        pop.destroy()
+        load_schedule_form()
+
+    def cancel_slot():
+        pop.destroy()
+        load_schedule_form()
+
+    btn_action_f = tk.Frame(pop, bg="white")
+    btn_action_f.pack(side="bottom", pady=30)
+
+    tk.Button(btn_action_f, text="SAVE & APPLY", font=med, bg="#2e7d32", fg="white", width=20, height=2, command=save_and_close_slot).pack(side="left", padx=20)
+    tk.Button(btn_action_f, text="CANCEL / CLOSE", font=med, bg="#64748b", fg="white", width=20, height=2, command=cancel_slot).pack(side="left", padx=20)
+
+def load_schedule_form_refresh():
+    load_schedule_form()
 
 def load_schedule_form():
     skey = skey_combo.get()
     setting_nm = setting_combo.get()
-    lbl_val_sensor.config(text=f"{skey} ({get_sensor_display_name(skey)})")
-    lbl_val_setting.config(text=setting_nm)
-
+    
     sp = get_setpoints(skey)
     st = sp.get("settings", {}).get(setting_nm, {})
+
+    profile_disp_name = st.get("name", setting_nm)
+
+    sensor_dropdown_btn.config(text=f"{skey} — {get_sensor_display_name(skey)}  ▼")
+    profile_dropdown_btn.config(text=f"{setting_nm} ({profile_disp_name})  ▼" if profile_disp_name != setting_nm else f"{setting_nm}  ▼")
 
     lbl_val_sdate.config(text=st.get("start_date", "2026-07-01"))
     lbl_val_edate.config(text=st.get("end_date", "2026-08-31"))
@@ -1092,134 +1306,82 @@ def load_schedule_form():
     for widget in humi_grid_frame.winfo_children(): widget.destroy()
     sched_entries.clear()
 
-    # Temperature Headers
-    t_headers = ["Slot / Frame", "Start Time", "Stop Time", "Target Temp (°C)", "Temp Tol (±)"]
-    for c_idx, h in enumerate(t_headers):
-        tk.Label(temp_grid_frame, text=h, font=font.Font(size=9, weight="bold"), fg="#1565c0", bg="white").grid(row=0, column=c_idx, padx=4, pady=3)
-
-    # Humidity Headers
-    h_headers = ["Slot / Frame", "Start Time", "Stop Time", "Target Humi (%)", "Humi Tol (±)"]
-    for c_idx, h in enumerate(h_headers):
-        tk.Label(humi_grid_frame, text=h, font=font.Font(size=9, weight="bold"), fg="#1565c0", bg="white").grid(row=0, column=c_idx, padx=4, pady=3)
-
     time_slots = st.get("time_slots", [])
+
+    temp_inner = tk.Frame(temp_grid_frame, bg="white")
+    temp_inner.pack(anchor="center", padx=8, pady=4)
+
+    humi_inner = tk.Frame(humi_grid_frame, bg="white")
+    humi_inner.pack(anchor="center", padx=8, pady=4)
+    
+    for c in range(6):
+        temp_inner.columnconfigure(c, weight=1)
+        humi_inner.columnconfigure(c, weight=1)
+
+    card_title_font = font.Font(size=11, weight="bold")
+    card_time_font = font.Font(size=10, weight="bold")
+    card_val_font = font.Font(size=10, weight="bold")
+
     for idx in range(5):
-        slot_data = time_slots[idx] if idx < len(time_slots) else {"start":"08:00", "stop":"12:00", "temp_setpoint":24.0, "temp_tol":2.0, "humi_setpoint":60.0, "humi_tol":5.0}
-        r = idx + 1
+        slot_data = time_slots[idx] if idx < len(time_slots) else {"name": f"Frame {idx+1}", "start":"08:00", "stop":"12:00", "t_max":26.0, "t_min":20.0, "h_max":70.0, "h_min":55.0}
+        
+        frame_name_v = slot_data.get("name", f"Frame {idx+1}")
+        t_max_v = slot_data.get("t_max", slot_data.get("temp_setpoint", 24.0) + slot_data.get("temp_tol", 2.0))
+        t_min_v = slot_data.get("t_min", slot_data.get("temp_setpoint", 24.0) - slot_data.get("temp_tol", 2.0))
+        h_max_v = slot_data.get("h_max", slot_data.get("humi_setpoint", 60.0) + slot_data.get("humi_tol", 5.0))
+        h_min_v = slot_data.get("h_min", slot_data.get("humi_setpoint", 60.0) - slot_data.get("humi_tol", 5.0))
+        
+        start_v = slot_data.get("start", "08:00")
+        stop_v = slot_data.get("stop", "12:00")
 
-        # --- TEMPERATURE GRID ROW ---
-        f_tslot = tk.Frame(temp_grid_frame, bg="white")
-        f_tslot.grid(row=r, column=0, padx=3, pady=2)
-        tk.Label(f_tslot, text=f"Frame {idx+1}", font=font.Font(size=9, weight="bold"), fg="#0f172a", bg="white").pack(side="left", padx=1)
-        tk.Button(f_tslot, text="EDIT", font=("Arial", 7, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove",
-                  command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=1)
+        l_fname = tk.Label(frame_schedule, text=frame_name_v)
+        l_tstart = tk.Label(frame_schedule, text=start_v)
+        l_tstop = tk.Label(frame_schedule, text=stop_v)
+        l_tmax_val = tk.Label(frame_schedule, text=str(t_max_v))
+        l_tmin_val = tk.Label(frame_schedule, text=str(t_min_v))
+        l_hmax_val = tk.Label(frame_schedule, text=str(h_max_v))
+        l_hmin_val = tk.Label(frame_schedule, text=str(h_min_v))
 
-        f_tstart = tk.Frame(temp_grid_frame, bg="white")
-        f_tstart.grid(row=r, column=1, padx=3, pady=2)
-        l_tstart = tk.Label(f_tstart, text=slot_data.get("start","08:00"), font=font.Font(size=9), bg="#f1f5f9", fg="#e65100", width=5, relief="sunken", bd=1)
-        l_tstart.pack(side="left", padx=1)
-        tk.Button(f_tstart, text="EDIT", font=("Arial", 7, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove",
-                  command=lambda lbl=l_tstart, i=idx: open_almora_keypad("Edit Start Time", lbl.cget("text"), lambda v: (lbl.config(text=v), sched_entries[i][4].config(text=v)))).pack(side="left")
+        sched_entries[idx] = (l_fname, l_tstart, l_tstop, l_tmax_val, l_tmin_val, l_hmax_val, l_hmin_val)
 
-        f_tstop = tk.Frame(temp_grid_frame, bg="white")
-        f_tstop.grid(row=r, column=2, padx=3, pady=2)
-        l_tstop = tk.Label(f_tstop, text=slot_data.get("stop","12:00"), font=font.Font(size=9), bg="#f1f5f9", fg="#e65100", width=5, relief="sunken", bd=1)
-        l_tstop.pack(side="left", padx=1)
-        tk.Button(f_tstop, text="EDIT", font=("Arial", 7, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove",
-                  command=lambda lbl=l_tstop, i=idx: open_almora_keypad("Edit Stop Time", lbl.cget("text"), lambda v: (lbl.config(text=v), sched_entries[i][5].config(text=v)))).pack(side="left")
+        if idx < 3:
+            r_pos = 0
+            c_pos = idx * 2
+        else:
+            r_pos = 1
+            c_pos = 1 + (idx - 3) * 2
 
-        f_tset = tk.Frame(temp_grid_frame, bg="white")
-        f_tset.grid(row=r, column=3, padx=3, pady=2)
-        l_tset = tk.Label(f_tset, text=str(slot_data.get("temp_setpoint",24.0)), font=font.Font(size=9), bg="#f1f5f9", fg="#e65100", width=5, relief="sunken", bd=1)
-        l_tset.pack(side="left", padx=1)
-        tk.Button(f_tset, text="EDIT", font=("Arial", 7, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove",
-                  command=lambda lbl=l_tset: open_almora_keypad("Edit Target Temp", lbl.cget("text"), lambda v: lbl.config(text=v))).pack(side="left")
+        # --- 1. TEMPERATURE FRAME SPACIOUS SQUARE CARD ---
+        card_t = tk.Frame(temp_inner, bg="#f8fafc", bd=2, relief="solid", highlightbackground="#cbd5e1", width=230, height=175)
+        card_t.pack_propagate(False)
+        card_t.grid(row=r_pos, column=c_pos, columnspan=2, padx=8, pady=4)
 
-        f_ttol = tk.Frame(temp_grid_frame, bg="white")
-        f_ttol.grid(row=r, column=4, padx=3, pady=2)
-        l_ttol = tk.Label(f_ttol, text=str(slot_data.get("temp_tol",2.0)), font=font.Font(size=9), bg="#f1f5f9", fg="#e65100", width=4, relief="sunken", bd=1)
-        l_ttol.pack(side="left", padx=1)
-        tk.Button(f_ttol, text="EDIT", font=("Arial", 7, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove",
-                  command=lambda lbl=l_ttol: open_almora_keypad("Edit Temp Tol", lbl.cget("text"), lambda v: lbl.config(text=v))).pack(side="left")
+        tk.Label(card_t, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc").pack(pady=(4,2))
+        tk.Label(card_t, text=f"⏰ {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc").pack(pady=1)
+        tk.Label(card_t, text=f"T MAX (ON): {t_max_v:.1f}°C", font=card_val_font, fg="#b91c1c", bg="#f8fafc").pack(pady=1)
+        tk.Label(card_t, text=f"T MIN (OFF): {t_min_v:.1f}°C", font=card_val_font, fg="#15803d", bg="#f8fafc").pack(pady=1)
 
-        # --- HUMIDITY GRID ROW ---
-        f_hslot = tk.Frame(humi_grid_frame, bg="white")
-        f_hslot.grid(row=r, column=0, padx=3, pady=2)
-        tk.Label(f_hslot, text=f"Frame {idx+1}", font=font.Font(size=9, weight="bold"), fg="#0f172a", bg="white").pack(side="left", padx=1)
-        tk.Button(f_hslot, text="EDIT", font=("Arial", 7, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove",
-                  command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=1)
+        tk.Button(card_t, text="EDIT FRAME", font=("Helvetica", 11, "bold"), bg="#cbd5e1", fg="#1e293b", activebackground="#cbd5e1", relief="flat", bd=0, padx=20, pady=9, cursor="hand2",
+                  command=lambda i=idx: edit_slot_popup(i)).pack(pady=(5, 2))
 
-        f_hstart = tk.Frame(humi_grid_frame, bg="white")
-        f_hstart.grid(row=r, column=1, padx=3, pady=2)
-        l_hstart = tk.Label(f_hstart, text=slot_data.get("start","08:00"), font=font.Font(size=9), bg="#f1f5f9", fg="#e65100", width=5, relief="sunken", bd=1)
-        l_hstart.pack(side="left", padx=1)
-        tk.Button(f_hstart, text="EDIT", font=("Arial", 7, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove",
-                  command=lambda lbl=l_hstart, i=idx: open_almora_keypad("Edit Start Time", lbl.cget("text"), lambda v: (lbl.config(text=v), sched_entries[i][0].config(text=v)))).pack(side="left")
+        # --- 2. HUMIDITY FRAME SPACIOUS SQUARE CARD ---
+        card_h = tk.Frame(humi_inner, bg="#f8fafc", bd=2, relief="solid", highlightbackground="#cbd5e1", width=230, height=175)
+        card_h.pack_propagate(False)
+        card_h.grid(row=r_pos, column=c_pos, columnspan=2, padx=8, pady=4)
 
-        f_hstop = tk.Frame(humi_grid_frame, bg="white")
-        f_hstop.grid(row=r, column=2, padx=3, pady=2)
-        l_hstop = tk.Label(f_hstop, text=slot_data.get("stop","12:00"), font=font.Font(size=9), bg="#f1f5f9", fg="#e65100", width=5, relief="sunken", bd=1)
-        l_hstop.pack(side="left", padx=1)
-        tk.Button(f_hstop, text="EDIT", font=("Arial", 7, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove",
-                  command=lambda lbl=l_hstop, i=idx: open_almora_keypad("Edit Stop Time", lbl.cget("text"), lambda v: (lbl.config(text=v), sched_entries[i][1].config(text=v)))).pack(side="left")
+        tk.Label(card_h, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc").pack(pady=(4,2))
+        tk.Label(card_h, text=f"⏰ {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc").pack(pady=1)
+        tk.Label(card_h, text=f"H MAX (ON): {h_max_v:.1f}%", font=card_val_font, fg="#b91c1c", bg="#f8fafc").pack(pady=1)
+        tk.Label(card_h, text=f"H MIN (OFF): {h_min_v:.1f}%", font=card_val_font, fg="#15803d", bg="#f8fafc").pack(pady=1)
 
-        f_hset = tk.Frame(humi_grid_frame, bg="white")
-        f_hset.grid(row=r, column=3, padx=3, pady=2)
-        l_hset = tk.Label(f_hset, text=str(slot_data.get("humi_setpoint",60.0)), font=font.Font(size=9), bg="#f1f5f9", fg="#e65100", width=5, relief="sunken", bd=1)
-        l_hset.pack(side="left", padx=1)
-        tk.Button(f_hset, text="EDIT", font=("Arial", 7, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove",
-                  command=lambda lbl=l_hset: open_almora_keypad("Edit Target Humi", lbl.cget("text"), lambda v: lbl.config(text=v))).pack(side="left")
-
-        f_htol = tk.Frame(humi_grid_frame, bg="white")
-        f_htol.grid(row=r, column=4, padx=3, pady=2)
-        l_htol = tk.Label(f_htol, text=str(slot_data.get("humi_tol",5.0)), font=font.Font(size=9), bg="#f1f5f9", fg="#e65100", width=4, relief="sunken", bd=1)
-        l_htol.pack(side="left", padx=1)
-        tk.Button(f_htol, text="EDIT", font=("Arial", 7, "bold"), bg="#0284c7", fg="white", bd=1, relief="groove",
-                  command=lambda lbl=l_htol: open_almora_keypad("Edit Humi Tol", lbl.cget("text"), lambda v: lbl.config(text=v))).pack(side="left")
-
-        sched_entries[idx] = (l_tstart, l_tstop, l_tset, l_ttol, l_hstart, l_hstop, l_hset, l_htol)
+        tk.Button(card_h, text="EDIT FRAME", font=("Helvetica", 11, "bold"), bg="#cbd5e1", fg="#1e293b", activebackground="#cbd5e1", relief="flat", bd=0, padx=20, pady=9, cursor="hand2",
+                  command=lambda i=idx: edit_slot_popup(i)).pack(pady=(5, 2))
 
 def open_schedule_editor(skey="S1"):
     skey_combo.set(skey)
     setting_combo.set("Setting A")
     show(frame_schedule)
     load_schedule_form()
-
-def save_schedule_form():
-    try:
-        skey = skey_combo.get()
-        setting_nm = setting_combo.get()
-        sp = get_setpoints(skey)
-
-        st = sp.setdefault("settings", {}).setdefault(setting_nm, {})
-        st["start_date"] = lbl_val_sdate.cget("text").strip()
-        st["end_date"] = lbl_val_edate.cget("text").strip()
-        st["enabled"] = True
-
-        new_slots = []
-        for idx in range(5):
-            l_tstart, l_tstop, l_tset, l_ttol, l_hstart, l_hstop, l_hset, l_htol = sched_entries[idx]
-            new_slots.append({
-                "id": idx + 1,
-                "start": l_tstart.cget("text").strip(),
-                "stop": l_tstop.cget("text").strip(),
-                "temp_setpoint": round(float(l_tset.cget("text").strip()), 1),
-                "temp_tol": round(float(l_ttol.cget("text").strip()), 1),
-                "humi_setpoint": round(float(l_hset.cget("text").strip()), 1),
-                "humi_tol": round(float(l_htol.cget("text").strip()), 1),
-                "enabled": True
-            })
-        st["time_slots"] = new_slots
-        save_setpoints()
-        show(frame_main)
-    except Exception as e:
-        print(f"Validation Error: {e}")
-
-sched_btn_frame = tk.Frame(frame_schedule, bg="white")
-sched_btn_frame.pack(side="bottom", pady=10)
-
-tk.Button(sched_btn_frame, text="SAVE SCHEDULE", font=med, bg="#2e7d32", fg="white", width=18, command=save_schedule_form).pack(side="left", padx=15)
-tk.Button(sched_btn_frame, text="CANCEL / BACK", font=med, bg="#757575", fg="white", width=18, command=lambda: show(frame_main)).pack(side="left", padx=15)
 
 # --- SETPOINT STUDIO UI ---
 active_setup_skey = "S1"
