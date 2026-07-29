@@ -180,46 +180,45 @@ exports.pushThingspeakConfig = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Device not found' });
     }
 
-    const isControlling = device.deviceType === 'controlling';
-    const isOfficeOrSystem2 = device.deviceType === 'office_control' || device.deviceType === 'system2';
     const { channelId, readApiKey, writeApiKey, port, username, password, clientId } = device.thingspeak || {};
-    if (!isControlling && !isOfficeOrSystem2 && (!channelId || !readApiKey || !writeApiKey || !port || !username || !password || !clientId)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Device does not have complete ThingSpeak configuration (all fields required)',
+
+    const deviceRoot = device.mqttId || device._id;
+    const isSyncRequest = !req.body || Object.keys(req.body).length === 0 || req.body.action === 'sync' || req.query.action === 'sync';
+
+    if (isSyncRequest) {
+      // Request setpoints sync from device
+      if (device.deviceType === 'office_control' || device.deviceType === 'system2') {
+        await publishToDevice(`inhydro/${deviceRoot}/room1/setpoints/request_sync`, '1');
+        await publishToDevice(`inhydro/${deviceRoot}/room2/setpoints/request_sync`, '1');
+        await publishToDevice(`inhydro/${deviceRoot}/room3/setpoints/request_sync`, '1');
+      } else if (device.deviceType === 'controlling') {
+        await publishToDevice(`inhydro/${deviceRoot}/monitor/setpoints/request_sync`, '1');
+      } else {
+        await publishToDevice(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `Setpoints sync requested for device "${device.name}" via Private Broker MQTT`,
+      });
+    } else {
+      // Push updated setpoints / config to device
+      const payload = req.body;
+      if (device.deviceType === 'office_control' || device.deviceType === 'system2') {
+        const room = req.query.room || req.body.room || 1;
+        await publishToDevice(`inhydro/${deviceRoot}/room${room}/setpoints/update`, payload);
+      } else if (device.deviceType === 'controlling') {
+        await publishToDevice(`inhydro/${deviceRoot}/monitor/setpoints/update`, payload);
+      } else {
+        await publishToDevice(`inhydro/${deviceRoot}/setpoints/update`, payload);
+        await publishToDevice(`inhydro/${deviceRoot}/config/update`, payload);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `Setpoints updated for device "${device.name}" via Private Broker MQTT`,
       });
     }
-
-    // Publish to the Pi's MQTT topic
-    // We prioritize the custom mqttId set by the user (e.g. device1, almora1)
-    const deviceRoot = device.mqttId || device._id;
-    const payload = {
-      channelId: channelId || '',
-      readApiKey: readApiKey || '',
-      writeApiKey: writeApiKey || '',
-      port: port || 1883,
-      username: username || '',
-      password: password || '',
-      clientId: clientId || '',
-      deviceName: device.name,
-      pushedAt: new Date().toISOString(),
-    };
-
-    if (device.deviceType === 'office_control' || device.deviceType === 'system2') {
-      await publishToDevice(`inhydro/${deviceRoot}/room1/setpoints/update`, payload);
-      await publishToDevice(`inhydro/${deviceRoot}/room2/setpoints/update`, payload);
-      await publishToDevice(`inhydro/${deviceRoot}/room3/setpoints/update`, payload);
-    } else if (device.deviceType === 'controlling') {
-      await publishToDevice(`inhydro/${deviceRoot}/monitor/setpoints/update`, payload);
-    } else {
-      await publishToDevice(`inhydro/${deviceRoot}/setpoints/update`, payload);
-    }
-
-    res.status(200).json({
-      success: true,
-      message: `ThingSpeak config pushed to device "${device.name}" via MQTT`,
-      topic: `inhydro/${deviceRoot}/setpoints/update`,
-    });
   } catch (err) {
     console.error('Push config error:', err);
     res.status(500).json({

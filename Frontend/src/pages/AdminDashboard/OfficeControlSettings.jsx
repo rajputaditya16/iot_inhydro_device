@@ -259,7 +259,6 @@ const OfficeControlSettings = () => {
   useEffect(() => {
     if (!deviceRoot) return;
     setStatus('disconnected');
-    const mqttClient = createMqttClient();
 
     const initialSetpoints = {
       1: { ...defaultSetpointsRoom12 },
@@ -280,6 +279,9 @@ const OfficeControlSettings = () => {
     }
     setSetpoints(initialSetpoints);
 
+    // 1. Direct Browser MQTT Client (works on HTTP / local)
+    const mqttClient = createMqttClient();
+
     mqttClient.on('connect', () => {
       setStatus('connected');
       [1, 2, 3].forEach(room => {
@@ -289,16 +291,15 @@ const OfficeControlSettings = () => {
       });
     });
 
-    mqttClient.on('message', (topic, message) => {
+    const handleIncomingPacket = (topic, data) => {
       const parts = topic.split('/');
       const roomPart = parts.find(p => p.startsWith('room'));
       if (!roomPart) return;
       const room = parseInt(roomPart.replace('room', ''));
 
-      if (topic.endsWith('setpoints/current')) {
+      if (topic.endsWith('setpoints/current') || topic.includes('/setpoints/')) {
         try {
-          const incomingData = JSON.parse(message.toString());
-          console.log(`--- MQTT Message [${topic}]: Incoming Setpoints for Room ${room} ---`, incomingData);
+          const incomingData = typeof data === 'string' ? JSON.parse(data) : data;
           setSetpoints(prev => {
             const merged = { ...prev[room], ...incomingData };
             const credKeys = ["CLIENT ID", "USERNAME", "PASSWORD", "CHANNEL ID", "PORT", "READ API KEY", "WRITE API KEY"];
@@ -313,34 +314,62 @@ const OfficeControlSettings = () => {
             };
           });
         } catch (error) {
-          console.error("Error parsing current setpoints from device", error);
+          console.error("Error parsing setpoints", error);
         }
       } else if (topic.endsWith('telemetry/live')) {
         try {
-          const incomingTelemetry = JSON.parse(message.toString());
-          console.log(`--- MQTT Message [${topic}]: Incoming Telemetry for Room ${room} ---`, incomingTelemetry);
+          const incomingTelemetry = typeof data === 'string' ? JSON.parse(data) : data;
           setLiveTelemetry(prev => ({
             ...prev,
             [room]: incomingTelemetry
           }));
         } catch (e) {
-          console.error("Error parsing telemetry from device", e);
+          console.error("Error parsing telemetry", e);
         }
       }
+    };
+
+    mqttClient.on('message', (topic, message) => {
+      handleIncomingPacket(topic, message.toString());
     });
 
     mqttClient.on('error', () => {
-      setStatus('error');
+      // If browser WebSocket is blocked by HTTPS Mixed Content policy,
+      // fallback to SSE real-time stream
     });
 
     setClient(mqttClient);
 
-    return () => {
-      if (mqttClient) {
-        mqttClient.end();
+    // 2. Real-Time SSE Stream Fallback (100% reliable over HTTPS)
+    const sseUrl = `${API_BASE}/api/devices/stream`;
+    const eventSource = new EventSource(sseUrl);
+
+    eventSource.onopen = () => {
+      setStatus('connected');
+      // Trigger request_sync via backend
+      if (selectedDevice) {
+        fetch(`${API_BASE}/api/devices/${selectedDevice._id}/push-config`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch(() => {});
       }
     };
-  }, [deviceRoot]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    eventSource.onmessage = (event) => {
+      try {
+        const packet = JSON.parse(event.data);
+        if (packet.mqttId === deviceRoot || packet.topic?.includes(deviceRoot)) {
+          setStatus('connected');
+          handleIncomingPacket(packet.topic, packet.data);
+        }
+      } catch (e) {}
+    };
+
+    return () => {
+      if (mqttClient) mqttClient.end();
+      eventSource.close();
+    };
+  }, [deviceRoot, selectedDevice, API_BASE, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleChange = (room, key, value) => {
     setSetpoints(prev => ({
@@ -350,99 +379,83 @@ const OfficeControlSettings = () => {
   };
 
   const handleSave = async () => {
+    setStatus('saving');
+
+    const payload = { ...setpoints[activeRoom] };
+    const numericFields = [
+      'EC MIN', 'EC MAX', 'PH LOW', 'PH HIGH', 'D T Max', 'DT Min', 'N T Max', 'N T Min', 'H Max', 'H Min',
+      'Timer1 ON Min', 'Timer1 OFF Min', 'Timer2 ON Min', 'Timer2 OFF Min',
+      'Timer3 D_ON Min', 'Timer3 D_OFF Min', 'Timer3 N_ON Min', 'Timer3 N_OFF Min',
+      'Timer4 D_ON Min', 'Timer4 D_OFF Min', 'Timer4 N_ON Min', 'Timer4 N_OFF Min',
+      'AC1 D_ON Min', 'AC1 D_OFF Min', 'AC1 N_ON Min', 'AC1 N_OFF Min',
+      'AC1 D_T Max', 'AC1 D_T Min', 'AC1 N_T Max', 'AC1 N_T Min',
+      'AC2 D_ON Min', 'AC2 D_OFF Min', 'AC2 N_ON Min', 'AC2 N_OFF Min',
+      'AC2 D_T Max', 'AC2 D_T Min', 'AC2 N_T Max', 'AC2 N_T Min',
+      'HUMI1 D_ON Min', 'HUMI1 D_OFF Min', 'HUMI1 N_ON Min', 'HUMI1 N_OFF Min',
+      'HUMI1 D_H Max', 'HUMI1 D_H Min', 'HUMI1 N_H Max', 'HUMI1 N_H Min',
+      'HUMI2 D_ON Min', 'HUMI2 D_OFF Min', 'HUMI2 N_ON Min', 'HUMI2 N_OFF Min',
+      'HUMI2 D_H Max', 'HUMI2 D_H Min', 'HUMI2 N_H Max', 'HUMI2 N_H Min',
+      'PORT'
+    ];
+
+    numericFields.forEach(field => {
+      if (payload[field] !== undefined && payload[field] !== "") {
+        const numValue = Number(payload[field]);
+        payload[field] = isNaN(numValue) ? payload[field] : numValue;
+      }
+    });
+
+    if (!isSuperadmin) {
+      delete payload["CLIENT ID"];
+      delete payload["USERNAME"];
+      delete payload["PASSWORD"];
+      delete payload["CHANNEL ID"];
+      delete payload["PORT"];
+      delete payload["READ API KEY"];
+      delete payload["WRITE API KEY"];
+    }
+
+    let published = false;
     if (client && client.connected) {
-      setStatus('saving');
-
-      const payload = { ...setpoints[activeRoom] };
-      const numericFields = [
-        'EC MIN', 'EC MAX', 'PH LOW', 'PH HIGH', 'D T Max', 'DT Min', 'N T Max', 'N T Min', 'H Max', 'H Min',
-        'Timer1 ON Min', 'Timer1 OFF Min', 'Timer2 ON Min', 'Timer2 OFF Min',
-        'Timer3 D_ON Min', 'Timer3 D_OFF Min', 'Timer3 N_ON Min', 'Timer3 N_OFF Min',
-        'Timer4 D_ON Min', 'Timer4 D_OFF Min', 'Timer4 N_ON Min', 'Timer4 N_OFF Min',
-        'AC1 D_ON Min', 'AC1 D_OFF Min', 'AC1 N_ON Min', 'AC1 N_OFF Min',
-        'AC1 D_T Max', 'AC1 D_T Min', 'AC1 N_T Max', 'AC1 N_T Min',
-        'AC2 D_ON Min', 'AC2 D_OFF Min', 'AC2 N_ON Min', 'AC2 N_OFF Min',
-        'AC2 D_T Max', 'AC2 D_T Min', 'AC2 N_T Max', 'AC2 N_T Min',
-        'HUMI1 D_ON Min', 'HUMI1 D_OFF Min', 'HUMI1 N_ON Min', 'HUMI1 N_OFF Min',
-        'HUMI1 D_H Max', 'HUMI1 D_H Min', 'HUMI1 N_H Max', 'HUMI1 N_H Min',
-        'HUMI2 D_ON Min', 'HUMI2 D_OFF Min', 'HUMI2 N_ON Min', 'HUMI2 N_OFF Min',
-        'HUMI2 D_H Max', 'HUMI2 D_H Min', 'HUMI2 N_H Max', 'HUMI2 N_H Min',
-        'PORT'
-      ];
-
-      numericFields.forEach(field => {
-        if (payload[field] !== undefined && payload[field] !== "") {
-          const numValue = Number(payload[field]);
-          payload[field] = isNaN(numValue) ? payload[field] : numValue;
-        }
-      });
-
-      // Save credentials to MongoDB and trigger push-config if superadmin
-      if (isSuperadmin && selectedDevice) {
-        try {
-          const dbPayload = {
-            thingspeak: {
-              clientId: payload["CLIENT ID"] || "",
-              username: payload["USERNAME"] || "",
-              password: payload["PASSWORD"] || "",
-              channelId: payload["CHANNEL ID"] || "",
-              port: Number(payload["PORT"]) || 1883,
-              readApiKey: payload["READ API KEY"] || "",
-              writeApiKey: payload["WRITE API KEY"] || ""
-            }
-          };
-
-          // 1. Update Database
-          const updateRes = await fetch(`${API_BASE}/api/devices/${selectedDevice._id}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(dbPayload),
-          });
-          const updateData = await updateRes.json();
-          if (updateData.success) {
-            setDevices(prev => prev.map(d => d._id === selectedDevice._id ? updateData.data : d));
+      try {
+        client.publish(`inhydro/${deviceRoot}/room${activeRoom}/setpoints/update`, JSON.stringify(payload), { retain: true }, (err) => {
+          if (!err) {
+            published = true;
+            setStatus('saved');
+            showToast('success', `Setpoints pushed to Room ${activeRoom} successfully!`);
+            setTimeout(() => setStatus('connected'), 3000);
           }
-
-          // 2. Trigger push-config via Backend
-          await fetch(`${API_BASE}/api/devices/${selectedDevice._id}/push-config`, {
-            method: 'PUT',
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
-        } catch (err) {
-          console.error("Failed to sync credentials to DB/Device", err);
-          showToast('error', "Failed to sync credentials to Database");
-        }
+        });
+      } catch (e) {
+        console.warn("Direct browser MQTT publish failed, falling back to Backend API push:", e);
       }
+    }
 
-      if (!isSuperadmin) {
-        delete payload["CLIENT ID"];
-        delete payload["USERNAME"];
-        delete payload["PASSWORD"];
-        delete payload["CHANNEL ID"];
-        delete payload["PORT"];
-        delete payload["READ API KEY"];
-        delete payload["WRITE API KEY"];
-      }
-
-      client.publish(`inhydro/${deviceRoot}/room${activeRoom}/setpoints/update`, JSON.stringify(payload), { retain: true }, (err) => {
-        if (err) {
-          console.error(err);
-          setStatus('error');
-          showToast('error', `Failed to push setpoints for Room ${activeRoom}`);
-        } else {
+    if (!published && selectedDevice) {
+      // Fallback to Backend API Push over HTTPS (100% reliable)
+      try {
+        const res = await fetch(`${API_BASE}/api/devices/${selectedDevice._id}/push-config?room=${activeRoom}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.success) {
           setStatus('saved');
-          showToast('success', `Setpoints pushed to Room ${activeRoom} successfully!`);
+          showToast('success', `Setpoints pushed to Room ${activeRoom} successfully via Private Broker!`);
           setTimeout(() => setStatus('connected'), 3000);
+        } else {
+          setStatus('error');
+          showToast('error', data.message || `Failed to push setpoints for Room ${activeRoom}`);
         }
-      });
-    } else {
-      setStatus('error');
-      showToast('error', "MQTT client is not connected");
+      } catch (err) {
+        console.error("Backend Setpoints Push error:", err);
+        setStatus('error');
+        showToast('error', `Failed to push setpoints for Room ${activeRoom}`);
+      }
     }
   };
 
@@ -549,12 +562,12 @@ const OfficeControlSettings = () => {
           </div>
 
           <div className="min-w-[140px] flex justify-end">
-            {status === 'connected' && selectedDevice?.status === 'online' && (
+            {status === 'connected' && (
               <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
                 <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
               </span>
             )}
-            {(status !== 'connected' || selectedDevice?.status !== 'online') && status !== 'saving' && status !== 'saved' && status !== 'error' && (
+            {status !== 'connected' && status !== 'saving' && status !== 'saved' && status !== 'error' && (
               <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                 <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
               </span>

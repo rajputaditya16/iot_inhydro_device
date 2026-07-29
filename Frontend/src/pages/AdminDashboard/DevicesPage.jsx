@@ -413,7 +413,7 @@ const DevicesPage = () => {
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
-                            {(hasThingspeak || device.deviceType === 'controlling') && (
+                            {(hasThingspeak || device.mqttId || device._id) && (
                               <>
                                 <div className="w-px h-4 bg-slate-700/50 mx-1"></div>
                                 <button
@@ -423,7 +423,7 @@ const DevicesPage = () => {
                                       ? 'text-purple-300 bg-purple-500/10 cursor-wait'
                                       : 'text-purple-400 hover:bg-purple-500/10 hover:text-purple-300'
                                     }`}
-                                  title="Push Config to Device (MQTT)"
+                                  title="Push Config / Setpoints to Device (Private Broker MQTT)"
                                 >
                                   <Send className={`h-4 w-4 ${pushingId === deviceId ? 'animate-pulse' : ''}`} />
                                 </button>
@@ -794,7 +794,7 @@ const DevicesPage = () => {
                   <Activity className="h-3.5 w-3.5" /> Live Monitoring
                 </button>
 
-                {isAdmin && (selectedDeviceDetails.thingspeak?.channelId || selectedDeviceDetails.thingspeak?.tempChannelId || selectedDeviceDetails.deviceType === 'controlling') && (
+                {isAdmin && (
                   <button
                     type="button"
                     onClick={() => {
@@ -804,7 +804,7 @@ const DevicesPage = () => {
                     className={`flex items-center gap-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-xs font-semibold text-purple-400 hover:bg-purple-500 hover:text-white transition-all shadow-md shadow-purple-500/5 ${pushingId === (selectedDeviceDetails._id || selectedDeviceDetails.id) ? 'opacity-50 cursor-wait' : ''
                       }`}
                   >
-                    <Send className={`h-3.5 w-3.5 ${pushingId === (selectedDeviceDetails._id || selectedDeviceDetails.id) ? 'animate-pulse' : ''}`} /> Push Config (MQTT)
+                    <Send className={`h-3.5 w-3.5 ${pushingId === (selectedDeviceDetails._id || selectedDeviceDetails.id) ? 'animate-pulse' : ''}`} /> Push Config / Setpoints (MQTT)
                   </button>
                 )}
               </div>

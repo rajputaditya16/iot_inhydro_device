@@ -178,7 +178,7 @@ const DEFAULT_CONFIG = {
   password: '',
   device_id: '',
   tz_offset: 5.5,
-  mqtt_broker: 'mqtt3.thingspeak.com',
+  mqtt_broker: '147.93.106.142',
   mqtt_client_id: '',
   mqtt_user: '',
   mqtt_pass: '',
@@ -346,11 +346,7 @@ const LightMotorPumpSettings = () => {
   };
 
   // ── Confirm save ─────────────────────────────────────────────────────────────
-  const handleConfirmSave = () => {
-    if (!client || !client.connected) {
-      setStatus('error');
-      return;
-    }
+  const handleConfirmSave = async () => {
     setStatus('saving');
 
     const payload = isSuperadmin ? { ...config } : { relays: config.relays };
@@ -374,18 +370,44 @@ const LightMotorPumpSettings = () => {
       }).catch(err => console.error('DB sync error:', err));
     }
 
-    client.publish(`inhydro/${deviceRoot}/config/update`, JSON.stringify(payload), { retain: true }, (err) => {
-      if (err) {
+    if (client && client.connected) {
+      client.publish(`inhydro/${deviceRoot}/config/update`, JSON.stringify(payload), { retain: true }, (err) => {
+        if (err) {
+          setStatus('error');
+        } else {
+          setStatus('saved');
+          setSavedConfig(config); // mark as clean
+          setShowSaveModal(false);
+          setShowSuccessToast(true);
+          setTimeout(() => { setStatus('connected'); }, 3000);
+          setTimeout(() => { setShowSuccessToast(false); }, 5000);
+        }
+      });
+    } else if (selectedDevice) {
+      try {
+        const res = await fetch(`${API_BASE}/api/devices/${selectedDevice._id}/push-config`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setStatus('saved');
+          setSavedConfig(config);
+          setShowSaveModal(false);
+          setShowSuccessToast(true);
+          setTimeout(() => { setStatus('connected'); }, 3000);
+          setTimeout(() => { setShowSuccessToast(false); }, 5000);
+        } else {
+          setStatus('error');
+        }
+      } catch (err) {
+        console.error('Backend MQTT push error:', err);
         setStatus('error');
-      } else {
-        setStatus('saved');
-        setSavedConfig(config); // mark as clean
-        setShowSaveModal(false);
-        setShowSuccessToast(true);
-        setTimeout(() => { setStatus('connected'); }, 3000);
-        setTimeout(() => { setShowSuccessToast(false); }, 5000);
       }
-    });
+    } else {
+      setStatus('error');
+    }
   };
 
   // ── Status map ────────────────────────────────────────────────────────────────

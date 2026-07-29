@@ -82,28 +82,40 @@ const startMqttSubscriber = () => {
   client.on('connect', () => {
     console.log('✅ [MQTT Subscriber] Connected to Mosquitto VPS broker.');
 
-    // Subscribe to multi-sensor telemetry: inhydro/{mqttId}/telemetry/live
-    client.subscribe('inhydro/+/telemetry/live', (err) => {
-      if (err) console.error('[MQTT Subscriber] Failed to subscribe to multi_sensor topic:', err);
-      else console.log('[MQTT Subscriber] Subscribed to inhydro/+/telemetry/live');
-    });
-
-    // Subscribe to office control telemetry: inhydro/{mqttId}/room{1,2}/telemetry/live
-    client.subscribe('inhydro/+/+/telemetry/live', (err) => {
-      if (err) console.error('[MQTT Subscriber] Failed to subscribe to office_control topic:', err);
-      else console.log('[MQTT Subscriber] Subscribed to inhydro/+/+/telemetry/live');
+    // Subscribe to all private broker telemetry topics under inhydro/#
+    client.subscribe('inhydro/#', (err) => {
+      if (err) console.error('[MQTT Subscriber] Failed to subscribe to inhydro/# topics:', err);
+      else console.log('✅ [MQTT Subscriber] Subscribed to inhydro/# (all private broker device telemetry)');
     });
   });
 
   client.on('message', async (topic, message) => {
     try {
       const topicParts = topic.split('/');
-      // Topic structure is either:
-      // - inhydro/{mqttId}/telemetry/live
-      // - inhydro/{mqttId}/{room}/telemetry/live
+      // Topic structure is: inhydro/{mqttId}/...
       const mqttId = topicParts[1];
 
       if (!mqttId) {
+        return;
+      }
+
+      // Parse payload
+      const payloadString = message.toString();
+      let payloadData;
+      try {
+        payloadData = JSON.parse(payloadString);
+      } catch (e) {
+        payloadData = { raw: payloadString };
+      }
+
+      // Stream setpoint updates real-time via SSE to web dashboard
+      if (topic.includes('/setpoints/')) {
+        telemetryEmitter.emit('telemetry', {
+          mqttId,
+          topic,
+          data: payloadData,
+          timestamp: new Date()
+        });
         return;
       }
 
@@ -129,16 +141,6 @@ const startMqttSubscriber = () => {
         });
       } catch (err) {
         console.error(`[MQTT Subscriber] Failed to update device online status: ${err.message}`);
-      }
-
-      // Parse payload
-      const payloadString = message.toString();
-      let payloadData;
-      try {
-        payloadData = JSON.parse(payloadString);
-      } catch (e) {
-        // Fallback for non-JSON payloads
-        payloadData = { raw: payloadString };
       }
 
       // Get the correct dynamic model for this device's collection
