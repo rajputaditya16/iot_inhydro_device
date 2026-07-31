@@ -392,19 +392,7 @@ def process_humi_day_night_timer(relay_obj, room_humi=None):
     ts = timer_state["humi"]
     now_sec = time.time()
 
-    # Humidity Threshold Logic Status
-    if room_humi is not None:
-        humi_logic_active = (room_humi < h_max)
-    else:
-        humi_logic_active = True
-
-    # High Humidity Protection Cutoff: If live room humidity is at or above Max Threshold, turn OFF
-    if room_humi is not None and room_humi >= h_max:
-        ts["state"] = "OFF"
-        ts["last"] = now_sec
-        relay_obj.off()
-        return f"{mode} (CUTOFF ≥{h_max:.0f}%)"
-
+    # 1. Independent Cyclic Timer Execution (Runs throughout in_window)
     if in_window:
         run_sec = on_min * 60.0
         off_sec = off_min * 60.0
@@ -417,19 +405,31 @@ def process_humi_day_night_timer(relay_obj, room_humi=None):
             if now_sec - ts["last"] >= run_sec:
                 ts["state"] = "OFF"
                 ts["last"] = now_sec
-
-        # Single GPIO Pin (GPIO 17) Output Control:
-        # Turn ON if and only if BOTH Cycle Timer is ON AND Threshold Logic permits
-        if ts["state"] == "ON" and humi_logic_active:
-            relay_obj.on()
-        else:
-            relay_obj.off()
     else:
         ts["state"] = "OFF"
         ts["last"] = 0.0
+
+    # 2. Humidity Threshold & Sensor Protection Logic
+    if room_humi is None:
+        humi_logic_active = False
+        status_msg = f"{mode} (SENSOR ERR)"
+    elif room_humi >= h_max:
+        humi_logic_active = False
+        status_msg = f"{mode} (CUTOFF ≥{h_max:.0f}%)"
+    elif room_humi <= h_min:
+        humi_logic_active = True
+        status_msg = f"{mode} ({ts['state']})"
+    else:
+        # Keep existing state when between h_min and h_max
+        status_msg = f"{mode} ({ts['state']})"
+
+    # 3. Output Relay Control: Relay is ON if and only if BOTH Timer is ON AND Humidity Condition permits
+    if in_window and ts["state"] == "ON" and humi_logic_active:
+        relay_obj.on()
+    else:
         relay_obj.off()
 
-    return mode
+    return status_msg
 
 def control_system(water_data, md02_data):
     warnings = []
@@ -475,6 +475,14 @@ def control_system(water_data, md02_data):
                 relay_ph.off()
             else:
                 warnings.append("⚠ PH DOSING ACTIVE")
+    else:
+        # Sensor Disconnected Safety Interlock (Water Sensor)
+        ec_active = False
+        ph_active = False
+        relay_ec1.off()
+        relay_ec2.off()
+        relay_ph.off()
+        warnings.append("⚠ WATER SENSOR ERR – DOSING DISABLED")
 
     # 2. MD02 CLIMATE CONTROL
     if md02_data:
@@ -495,6 +503,11 @@ def control_system(water_data, md02_data):
             else:
                 relay_temp.on()
                 warnings.append("⚠ COOLING ACTIVE")
+    else:
+        # Sensor Disconnected Safety Interlock (MD02 Climate Sensor)
+        temp_active = False
+        relay_temp.off()
+        warnings.append("⚠ MD02 SENSOR ERR – COOLING DISABLED")
 
     # 3. HUMIDIFIER DAY/NIGHT CYCLIC TIMER (GPIO 17)
     humi_mode = process_humi_day_night_timer(relay_humi, md02_data["room_humi"] if md02_data else None)
@@ -950,8 +963,8 @@ relay_items = [
     ("EC2",              "ec2"),
     ("pH",               "ph"),
     ("FAN",              "temp"),
-    ("Humidifier",       "humi_logic"),
-    ("Humidifier Timer", "humi_timer"),
+    ("Fogger ",       "humi_logic"),
+    ("Fogger Timer", "humi_timer"),
     ("TIMER 1",          "tmr1"),
     ("TIMER 2",          "tmr2"),
 ]
