@@ -1,5 +1,4 @@
 const Device = require('../models/Device');
-const SensorPacket = require('../models/SensorPacket');
 const MqttPacket = require('../models/MqttPacket');
 const { getTelemetryModel } = require('../models/TelemetryLog');
 const { publishToDevice } = require('../utils/mqttPublisher');
@@ -31,7 +30,7 @@ exports.getDevices = async (req, res) => {
     const updatedDevices = await Promise.all(
       devices.map(async (device) => {
         let status = device.status;
-        
+
         // If device is online but hasn't sent telemetry in 2 minutes, mark as offline
         if (
           status === 'online' &&
@@ -78,6 +77,11 @@ exports.getDevices = async (req, res) => {
           liveStats.moisture = parseFloat(latestData.s2?.t || 0);
           liveStats.ph = parseFloat(latestData.s3?.t || 0);
           liveStats.ec = parseFloat(latestData.s4?.t || 0);
+        } else if (device.deviceType === 'monit' || device.deviceType === 'dosing') {
+          liveStats.temp = parseFloat(latestData.temp ?? latestData.water_temp ?? 0);
+          liveStats.moisture = parseFloat(latestData.moist ?? latestData.moisture ?? 0);
+          liveStats.ph = parseFloat(latestData.ph ?? 0);
+          liveStats.ec = parseFloat(latestData.ec ?? 0);
         } else {
           // Fallback for general devices
           liveStats.temp = parseFloat(latestData.field1 || latestData.temp || 0);
@@ -424,6 +428,17 @@ exports.getDeviceAnalytics = async (req, res) => {
             field16: tel.p !== undefined && tel.p !== null ? String(tel.p) : null,
             field17: tel.k !== undefined && tel.k !== null ? String(tel.k) : null,
           });
+        } else if (device.deviceType === 'monit' || device.deviceType === 'dosing') {
+          mappedFeeds.push({
+            created_at: p.timestamp.toISOString(),
+            entry_id: mappedFeeds.length + 1,
+            field1: d.temp !== undefined && d.temp !== null ? String(d.temp) : (d.water_temp !== undefined ? String(d.water_temp) : null),
+            field2: d.moist !== undefined && d.moist !== null ? String(d.moist) : (d.moisture !== undefined ? String(d.moisture) : null),
+            field3: d.ec !== undefined && d.ec !== null ? String(d.ec) : null,
+            field4: d.ph !== undefined && d.ph !== null ? String(d.ph) : null,
+            field5: d.room_temp !== undefined && d.room_temp !== null ? String(d.room_temp) : null,
+            field6: d.room_humi !== undefined && d.room_humi !== null ? String(d.room_humi) : null,
+          });
         } else {
           // Standard / system2 / almora mapping
           const tel = d.telemetry || d || {};
@@ -507,6 +522,13 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field6 = 'Cold Room 6 Temp';
       channelData.field7 = 'Cold Room 7 Temp';
       channelData.field8 = 'Field 8';
+    } else if (device.deviceType === 'monit') {
+      channelData.field1 = 'Water Temp';
+      channelData.field2 = 'Water Moisture';
+      channelData.field3 = 'Water EC';
+      channelData.field4 = 'Water pH';
+      channelData.field5 = 'Room Temp';
+      channelData.field6 = 'Room Humidity';
     } else {
       channelData.field1 = 'Water Temp';
       channelData.field2 = 'Water Moisture';
@@ -551,11 +573,13 @@ exports.getDeviceAnalytics = async (req, res) => {
 // @desc    Real-time Server-Sent Events (SSE) telemetry stream directly from Mosquitto TCP
 // @access  Public / Private
 exports.streamTelemetry = (req, res) => {
+  const origin = req.headers.origin;
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
+    'X-Accel-Buffering': 'no', // Critical: Disables Nginx & reverse proxy buffering on cloud deployments
+    'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization',
     'Access-Control-Allow-Credentials': 'true'
   });
@@ -564,10 +588,28 @@ exports.streamTelemetry = (req, res) => {
     res.flushHeaders();
   }
   res.write(': connected\n\n');
+  if (typeof res.flush === 'function') {
+    res.flush();
+  }
+
+  // Periodic heartbeat ping to prevent cloud load balancers/proxies (Render, Cloudflare, Nginx) from dropping connection
+  const pingInterval = setInterval(() => {
+    try {
+      res.write(': ping\n\n');
+      if (typeof res.flush === 'function') {
+        res.flush();
+      }
+    } catch (e) {
+      clearInterval(pingInterval);
+    }
+  }, 15000);
 
   const onTelemetry = (payload) => {
     try {
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (typeof res.flush === 'function') {
+        res.flush();
+      }
     } catch (e) {
       // client disconnected
     }
@@ -576,6 +618,7 @@ exports.streamTelemetry = (req, res) => {
   telemetryEmitter.on('telemetry', onTelemetry);
 
   req.on('close', () => {
+    clearInterval(pingInterval);
     telemetryEmitter.off('telemetry', onTelemetry);
   });
 };

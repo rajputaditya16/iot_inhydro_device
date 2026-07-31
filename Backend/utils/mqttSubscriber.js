@@ -26,7 +26,7 @@ const resolveDeviceId = async (mqttId, topic) => {
   if (topic.includes('/monitor/')) {
     typeCriteria = { deviceType: 'controlling' };
   } else if (topic.includes('/room1/') || topic.includes('/room2/') || topic.includes('/room3/')) {
-    typeCriteria = { deviceType: { $in: ['office_control', 'system2'] } };
+    typeCriteria = { deviceType: { $in: ['office_control', 'system2', 'monit', ] } };
   } else {
     // default/multi_sensor
     typeCriteria = { deviceType: { $nin: ['controlling', 'office_control', 'system2'] } };
@@ -108,21 +108,23 @@ const startMqttSubscriber = () => {
         payloadData = { raw: payloadString };
       }
 
+      // Broadcast in-memory SSE telemetry event IMMEDIATELY for zero-latency streaming
+      telemetryEmitter.emit('telemetry', {
+        mqttId,
+        topic,
+        data: payloadData,
+        timestamp: new Date()
+      });
+
       // Stream setpoint updates real-time via SSE to web dashboard
       if (topic.includes('/setpoints/')) {
-        telemetryEmitter.emit('telemetry', {
-          mqttId,
-          topic,
-          data: payloadData,
-          timestamp: new Date()
-        });
         return;
       }
 
       // Resolve device from DB/cache using mqttId and the topic
       const deviceId = await resolveDeviceId(mqttId, topic);
       if (!deviceId) {
-        // Device not registered in our dashboard, skip saving
+        // Device not registered in our dashboard, skip saving to DB
         return;
       }
 
@@ -187,15 +189,6 @@ const startMqttSubscriber = () => {
         });
         console.log(`[MQTT Subscriber] Saved live telemetry for "${mqttId}" on topic "${topic}" in collection ${TelemetryModel.collection.name}`);
       }
-
-      // Emit in-memory event for SSE real-time web streaming
-      telemetryEmitter.emit('telemetry', {
-        deviceId: deviceId.toString(),
-        mqttId,
-        topic,
-        data: payloadData,
-        timestamp: new Date()
-      });
     } catch (err) {
       console.error(`[MQTT Subscriber] Error processing incoming MQTT packet on "${topic}":`, err.message);
     }

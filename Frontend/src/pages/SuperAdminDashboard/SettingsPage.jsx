@@ -8,10 +8,11 @@ import ColdStorageSettings from '../AdminDashboard/ColdStorageSettings';
 import LightMotorPumpSettings from '../AdminDashboard/LightMotorPumpSettings';
 import OfficeControlSettings from '../AdminDashboard/OfficeControlSettings';
 import ControllingDeviceSettings from '../AdminDashboard/ControllingDeviceSettings';
+import MonitSettings from '../AdminDashboard/MonitSettings';
 
 const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('profile');
-  
+
   const [currentUser, setCurrentUser] = useState({ name: 'User', email: '', role: 'user' });
   const [showPopup, setShowPopup] = useState(false);
   const [popupText, setPopupText] = useState('');
@@ -84,7 +85,7 @@ const SettingsPage = () => {
     try {
       const token = localStorage.getItem('token');
       const API_BASE = import.meta.env.VITE_API_URL || '';
-      
+
       const res = await fetch(`${API_BASE}/api/auth/update-profile`, {
         method: 'PUT',
         headers: {
@@ -93,9 +94,9 @@ const SettingsPage = () => {
         },
         body: JSON.stringify(payload)
       });
-      
+
       const data = await res.json();
-      
+
       if (res.ok && data.success) {
         const updatedUser = {
           ...currentUser,
@@ -104,7 +105,7 @@ const SettingsPage = () => {
           role: data.user.role || currentUser.role
         };
         setCurrentUser(updatedUser);
-        
+
         const storedUser = localStorage.getItem('user');
         if (storedUser) {
           const parsedUser = JSON.parse(storedUser);
@@ -119,7 +120,7 @@ const SettingsPage = () => {
         }
 
         triggerPopup(payload.password ? "Settings and password updated successfully!" : "Settings saved successfully!", "success");
-        
+
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
@@ -153,13 +154,14 @@ const SettingsPage = () => {
   const tabs = [
     { key: 'profile', label: 'Profile', icon: User },
     ...((currentUser.role === 'admin' || currentUser.role === 'superadmin') ? [
-      {key: 'device_config', label: 'Device Control', icon: Settings},
-      {key: 'almora_config', label: 'Almora Setup', icon: Monitor},
-      {key: 'almora2_config', label: 'Almora Setup 2', icon: Monitor},
-      {key: 'cold_storage_config', label: 'Cold Storage Setup', icon: Monitor},
-      {key: 'light_motor_pump_config', label: 'Light Motor Pump Setup', icon: Monitor},
-      {key: 'office_control_config', label: 'Office Control Setup', icon: Monitor},
-      {key: 'controlling_config', label: 'Controller Setup', icon: Monitor},
+      { key: 'device_config', label: 'Device Control', icon: Settings },
+      { key: 'almora_config', label: 'Almora Setup', icon: Monitor },
+      { key: 'almora2_config', label: 'Almora Setup 2', icon: Monitor },
+      { key: 'cold_storage_config', label: 'Cold Storage Setup', icon: Monitor },
+      { key: 'light_motor_pump_config', label: 'Light Motor Pump Setup', icon: Monitor },
+      { key: 'office_control_config', label: 'Office Control Setup', icon: Monitor },
+      { key: 'controlling_config', label: 'Controller Setup', icon: Monitor },
+      { key: 'monit_config', label: 'Monit Setup', icon: Monitor },
     ] : []),
     // { key: 'notifications', label: 'Notifications', icon: Bell },
     // { key: 'appearance', label: 'Appearance', icon: Palette },
@@ -180,10 +182,10 @@ const SettingsPage = () => {
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-               className={`flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${activeTab === tab.key
-                    ? 'bg-green-500/10 text-green-400'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                }`}
+                className={`flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${activeTab === tab.key
+                  ? 'bg-green-500/10 text-green-400'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                  }`}
               >
                 <tab.icon className="h-4 w-4 shrink-0" />
                 <span className="hidden lg:block">{tab.label}</span>
@@ -210,7 +212,7 @@ const SettingsPage = () => {
             {activeTab === 'almora_config' && (
               <AlmoraSettings />
             )}
-            
+
             {/* Almora 2 Control */}
             {activeTab === 'almora2_config' && (
               <Almora2Settings />
@@ -223,7 +225,7 @@ const SettingsPage = () => {
 
             {/* Light Motor Pump Control */}
             {activeTab === 'light_motor_pump_config' && (
-              <LightMotorPumpSettings/>
+              <LightMotorPumpSettings />
             )}
 
             {/* Office Control */}
@@ -234,6 +236,11 @@ const SettingsPage = () => {
             {/* InHydro Controller */}
             {activeTab === 'controlling_config' && (
               <ControllingDeviceSettings />
+            )}
+
+            {/* Monit Controller */}
+            {activeTab === 'monit_config' && (
+              <MonitSettings />
             )}
 
             {/* Profile */}
@@ -344,7 +351,7 @@ const SettingsPage = () => {
                 </div>
 
                 <div className="pt-4 border-t border-slate-700/30">
-                  <button 
+                  <button
                     onClick={handleSaveSettings}
                     className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-green-500/20 active:scale-95 transition-all"
                   >
@@ -365,15 +372,13 @@ const SettingsPage = () => {
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
-            className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-2xl border bg-slate-900/90 px-4 py-3 shadow-xl backdrop-blur-md ${
-              popupType === 'error'
+            className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-2xl border bg-slate-900/90 px-4 py-3 shadow-xl backdrop-blur-md ${popupType === 'error'
                 ? 'border-rose-500/20 text-rose-400 shadow-rose-500/5'
                 : 'border-emerald-500/20 text-emerald-400 shadow-emerald-500/5'
-            }`}
+              }`}
           >
-            <div className={`rounded-full p-1.5 ${
-              popupType === 'error' ? 'bg-rose-500/10' : 'bg-emerald-500/10'
-            }`}>
+            <div className={`rounded-full p-1.5 ${popupType === 'error' ? 'bg-rose-500/10' : 'bg-emerald-500/10'
+              }`}>
               {popupType === 'error' ? (
                 <AlertCircle className="h-5 w-5 text-rose-400" />
               ) : (
