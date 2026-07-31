@@ -37,7 +37,7 @@ DELAY_BETWEEN_PORTS = 0.2
 
 # Hardware Dictionary: Maps Web MQTT IDs directly to physical USB paths
 SENSOR_MAP = {
-    "S1": "/dev/serial/by-path/usb-0:1:1:3:1:0-port0",
+    "S1": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0",
     "S2": "/dev/serial/by-path/usb_PLACEHOLDER_S2",
     "S3": "/dev/serial/by-path/usb_PLACEHOLDER_S3",
     "S4": "/dev/serial/by-path/usb_PLACEHOLDER_S4",

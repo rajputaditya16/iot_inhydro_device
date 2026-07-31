@@ -1,0 +1,2072 @@
+{
+    "S1": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Frame 1",
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Frame 2",
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Frame 3",
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Frame 4",
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Frame 5",
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "S2": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "S3": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "S4": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "S5": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "S6": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "S7": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    }
+}
