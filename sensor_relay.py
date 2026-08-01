@@ -8,10 +8,21 @@ import serial
 import paho.mqtt.client as mqtt
 from gpiozero import OutputDevice, Device
 try:
-    from gpiozero.pins.pigpio import PiGPIOFactory
-    Device.pin_factory = PiGPIOFactory()
-except:
-    pass
+    from gpiozero.pins.lgpio import LGPIOFactory
+    Device.pin_factory = LGPIOFactory()
+    print("📌 GPIO Backend: LGPIOFactory (Raspberry Pi 5)")
+except Exception as e1:
+    try:
+        from gpiozero.pins.pigpio import PiGPIOFactory
+        Device.pin_factory = PiGPIOFactory()
+        print("📌 GPIO Backend: PiGPIOFactory")
+    except Exception as e2:
+        try:
+            from gpiozero.pins.mock import MockFactory
+            Device.pin_factory = MockFactory()
+            print("Notice: Physical GPIO backend unavailable. Using MockFactory.")
+        except Exception as e3:
+            print("Notice: GPIO pin factory initialization fallback:", e3)
 
 # CONFIG
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

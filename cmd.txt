@@ -1,3 +1,58 @@
  sudo rfkill unblock bluetooth
  sudo usermod -aG bluetooth pi
  sudo systemctl restart bluetooth
+
+
+
+ Here is the complete guide to replacing the Raspberry Pi logo with your custom company logo on Raspberry Pi 5 (Raspberry Pi OS Bookworm).
+
+1. Change Boot Splash Screen Logo (Startup Screen)
+To replace the boot screen logo with your company logo:
+
+Step 1: Copy your logo to Plymouth Plymouth themes
+Make sure your company logo is a PNG image (e.g., company_logo.png).
+
+Run this command in the terminal:
+
+bash
+sudo cp /home/inhydro/Desktop/iot_inhydro_device/logo.png /usr/share/plymouth/themes/pix/splash.png
+Step 2: Hide Raspberry Pi "Berries" and Boot Text
+Edit the boot configuration file (/boot/firmware/cmdline.txt on Raspberry Pi 5):
+
+bash
+sudo nano /boot/firmware/cmdline.txt
+(Note: Ensure all settings stay on one single line in cmdline.txt)
+
+Add these flags to the end of the line:
+
+text
+quiet splash logo.nologo loglevel=0 vt.global_cursor_default=0
+Save and exit (Ctrl+O, Enter, Ctrl+X).
+
+Step 3: Update Initramfs Boot Image
+bash
+sudo update-initramfs -u
+2. Change Desktop Taskbar / Main Menu Icon (Top-Left Raspberry Icon)
+To replace the Raspberry Pi logo in the top-left corner of the desktop menu bar:
+
+Step 1: Overwrite Default UI Icon
+bash
+sudo cp /home/inhydro/Desktop/iot_inhydro_device/logo.png /usr/share/raspberrypi-ui-mods/icons/rpi-2020.png
+Step 2: Refresh Desktop Panel
+bash
+pkill lxpanel 2>/dev/null || pkill wf-panel 2>/dev/null || true
+3. Change Application Logo in HMI (almora2.py / monit.py)
+Your Python scripts (almora2.py and monit.py) load the logo from the local file named logo.png:
+
+python
+LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
+To update the logo inside your HMI app:
+
+Save your company logo image as logo.png.
+Place it in /home/inhydro/Desktop/iot_inhydro_device/logo.png.
+Quick Test Reboot
+Reboot your Raspberry Pi 5 to see your new custom company splash screen:
+
+bash
+sudo reboot
+4:56 PM

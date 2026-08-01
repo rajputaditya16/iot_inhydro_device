@@ -1,0 +1,69 @@
+====================================================================
+RASPBERRY PI 5 - COMPLETE SETUP AND LAUNCH COMMANDS FOR ALMORA2.PY
+====================================================================
+
+STEP 1: Navigate to Project Directory
+--------------------------------------------------------------------
+cd /home/inhydro/Desktop/iot_inhydro_device
+
+
+STEP 2: Configure Sudo Permissions for Headless Bluetooth & WiFi (Passwordless Sudo)
+--------------------------------------------------------------------
+echo "$USER ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/$USER
+
+
+STEP 3: Install GPIO, Python Build, Bluetooth & Network Packages
+--------------------------------------------------------------------
+sudo apt update
+sudo apt install -y \
+    python3-lgpio \
+    python3-rpi-lgpio \
+    python3-gpiozero \
+    liblgpio-dev \
+    python3-dev \
+    build-essential \
+    swig \
+    python3-venv \
+    python3-pip \
+    python3-pil \
+    python3-pil.imagetk \
+    bluez \
+    bluez-tools \
+    network-manager
+
+
+STEP 4: Enable Bluetooth Compatibility (-C) & SDP Port Setup
+--------------------------------------------------------------------
+# 1. Create systemd drop-in override for bluetooth compatibility mode (-C)
+sudo mkdir -p /etc/systemd/system/bluetooth.service.d
+echo -e "[Service]\nExecStart=\nExecStart=/usr/libexec/bluetooth/bluetoothd -C\nExecStartPost=-/bin/chmod 777 /var/run/sdp" | sudo tee /etc/systemd/system/bluetooth.service.d/override.conf
+
+# 2. Reload systemd and restart Bluetooth daemon
+sudo systemctl daemon-reload
+sudo systemctl enable bluetooth
+sudo systemctl restart bluetooth
+
+# 3. Register Serial Port profile and apply permissions (run sdptool FIRST to create /var/run/sdp)
+sleep 1
+sudo sdptool add SP 2>/dev/null || true
+[ -e /var/run/sdp ] && sudo chmod 777 /var/run/sdp 2>/dev/null || true
+
+
+STEP 5: Setup Python Virtual Environment with System Site Packages
+--------------------------------------------------------------------
+python3 -m venv --system-site-packages venv
+source venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install lgpio gpiozero minimalmodbus paho-mqtt pillow pyserial
+
+
+STEP 6: Run Almora2 Controller Script
+--------------------------------------------------------------------
+python almora2.py
+
+
+====================================================================
+AUTOMATED SCRIPT (EXECUTES ALL STEPS SAFELY):
+====================================================================
+./setup_pi5_env.sh
+====================================================================

@@ -52,9 +52,24 @@ if os.path.exists(OLD_FILE):
         print("🗑️ Removed legacy setpoints.json...")
     except Exception: pass
 
-# Fixed Serial Ports with By-Path Mapping
-SERIAL_PORT_WATER = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
-SERIAL_PORT_MD02  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.1:1.0-port0"
+# Serial Port Resolution for Pi 5 / Pi 4 / Standard USB Dongles
+def resolve_serial_port(preferred_path, fallback_port):
+    if os.path.exists(preferred_path):
+        return preferred_path
+    if os.path.exists(fallback_port):
+        return fallback_port
+    import glob
+    ports = sorted(glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
+    if ports:
+        if "WATER" in preferred_path or fallback_port == "/dev/ttyUSB0":
+            return ports[0]
+        elif len(ports) > 1:
+            return ports[1]
+        return ports[0]
+    return fallback_port
+
+SERIAL_PORT_WATER = resolve_serial_port("/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.2:1.0-port0", "/dev/ttyUSB0")
+SERIAL_PORT_MD02  = resolve_serial_port("/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0", "/dev/ttyUSB1")
 
 DEVICE_ID_WATER = 1
 DEVICE_ID_MD02  = 1
@@ -291,7 +306,7 @@ def on_control_message(client, userdata, msg):
         print(f"❌ Private Control MQTT Update Error: {e}")
 
 is_mqtt_connected = False
-control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Almora2_Device_{DEVICE_NAME}")
+control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Monit_Device_{DEVICE_NAME}")
 control_client.on_message = on_control_message
 
 def on_control_connect(client, userdata, flags, rc, properties=None):
@@ -490,31 +505,32 @@ def control_system(water_data, md02_data):
 
         # EC Control
         if not ec_active and ec_val < ec_min:
-            ec_active = True
-            relay_ec1.on()
-            relay_ec2.on()
-            warnings.append("⚠ EC LOW – DOSING EC1 & EC2")
+            if now - last_ec > 120:
+                ec_active = True
+                relay_ec1.on()
+                relay_ec2.on()
+                last_ec = now
+                warnings.append("⚠ EC LOW – DOSING EC1 & EC2")
         elif ec_active:
-            if ec_val >= ec_max:
+            if ec_val >= ec_max or (now - last_ec > 55):
                 ec_active = False
                 relay_ec1.off()
                 relay_ec2.off()
             else:
-                relay_ec1.on()
-                relay_ec2.on()
                 warnings.append("⚠ EC DOSING ACTIVE")
 
         # pH Control
         if not ph_active and ph_val > ph_high:
-            ph_active = True
-            relay_ph.on()
-            warnings.append("⚠ PH HIGH – DOSING PH MINUS")
+            if now - last_ph > 120:
+                ph_active = True
+                relay_ph.on()
+                last_ph = now
+                warnings.append("⚠ PH HIGH – DOSING PH MINUS")
         elif ph_active:
-            if ph_val <= ph_low:
+            if ph_val <= ph_low or (now - last_ph > 55):
                 ph_active = False
                 relay_ph.off()
             else:
-                relay_ph.on()
                 warnings.append("⚠ PH DOSING ACTIVE")
     else:
         # Sensor Disconnected Safety Interlock (Water Sensor)
@@ -940,7 +956,7 @@ lbl_clock = tk.Label(root, text="", font=("Arial", 11, "bold"), fg="#1565c0", bg
 lbl_clock.place(x=15, y=10, anchor="nw")
 
 
-tk.Label(frame_main, text=f"DEVICE: {DEVICE_NAME.upper()} — CONTROLLER & MONITOR", font=FONT_BIG, fg="#1565c0", bg="#ffffff").pack(pady=(8, 2))
+tk.Label(frame_main, text=f"MONNET GROUP FARM AUTOMATION", font=FONT_BIG, fg="#1565c0", bg="#ffffff").pack(pady=(8, 2))
 
 # Pack Footer FIRST at bottom so content_grid auto-fits remaining vertical space
 footer_main = tk.Frame(frame_main, bg="#ffffff", height=55)
