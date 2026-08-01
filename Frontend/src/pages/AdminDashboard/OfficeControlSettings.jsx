@@ -26,32 +26,32 @@ const defaultSetpointsRoom3 = {
   "Timer3 N_Start": "17:05", "Timer3 N_Stop": "09:55", "Timer3 N_ON Min": 15, "Timer3 N_OFF Min": 30,
   "AC1 Name": "AC 1 TIMER",
   "AC1 D_Start": "10:00", "AC1 D_Stop": "17:00",
-  "AC1 D_ON Min": 15,     "AC1 D_OFF Min": 30,
+  "AC1 D_ON Min": 15, "AC1 D_OFF Min": 30,
   "AC1 N_Start": "17:05", "AC1 N_Stop": "09:55",
-  "AC1 N_ON Min": 15,     "AC1 N_OFF Min": 30,
-  "AC1 D_T Max": 35.0,    "AC1 D_T Min": 15.0,
-  "AC1 N_T Max": 35.0,    "AC1 N_T Min": 15.0,
+  "AC1 N_ON Min": 15, "AC1 N_OFF Min": 30,
+  "AC1 D_T Max": 35.0, "AC1 D_T Min": 15.0,
+  "AC1 N_T Max": 35.0, "AC1 N_T Min": 15.0,
   "AC2 Name": "AC 2 TIMER",
   "AC2 D_Start": "10:00", "AC2 D_Stop": "17:00",
-  "AC2 D_ON Min": 15,     "AC2 D_OFF Min": 30,
+  "AC2 D_ON Min": 15, "AC2 D_OFF Min": 30,
   "AC2 N_Start": "17:05", "AC2 N_Stop": "09:55",
-  "AC2 N_ON Min": 15,     "AC2 N_OFF Min": 30,
-  "AC2 D_T Max": 35.0,    "AC2 D_T Min": 15.0,
-  "AC2 N_T Max": 35.0,    "AC2 N_T Min": 15.0,
+  "AC2 N_ON Min": 15, "AC2 N_OFF Min": 30,
+  "AC2 D_T Max": 35.0, "AC2 D_T Min": 15.0,
+  "AC2 N_T Max": 35.0, "AC2 N_T Min": 15.0,
   "HUMI1 Name": "HUMI 1 TIMER",
   "HUMI1 D_Start": "10:00", "HUMI1 D_Stop": "17:00",
-  "HUMI1 D_ON Min": 15,     "HUMI1 D_OFF Min": 30,
+  "HUMI1 D_ON Min": 15, "HUMI1 D_OFF Min": 30,
   "HUMI1 N_Start": "17:05", "HUMI1 N_Stop": "09:55",
-  "HUMI1 N_ON Min": 15,     "HUMI1 N_OFF Min": 30,
-  "HUMI1 D_H Max": 80.0,    "HUMI1 D_H Min": 30.0,
-  "HUMI1 N_H Max": 80.0,    "HUMI1 N_H Min": 30.0,
+  "HUMI1 N_ON Min": 15, "HUMI1 N_OFF Min": 30,
+  "HUMI1 D_H Max": 80.0, "HUMI1 D_H Min": 30.0,
+  "HUMI1 N_H Max": 80.0, "HUMI1 N_H Min": 30.0,
   "HUMI2 Name": "HUMI 2 TIMER",
   "HUMI2 D_Start": "10:00", "HUMI2 D_Stop": "17:00",
-  "HUMI2 D_ON Min": 15,     "HUMI2 D_OFF Min": 30,
+  "HUMI2 D_ON Min": 15, "HUMI2 D_OFF Min": 30,
   "HUMI2 N_Start": "17:05", "HUMI2 N_Stop": "09:55",
-  "HUMI2 N_ON Min": 15,     "HUMI2 N_OFF Min": 30,
-  "HUMI2 D_H Max": 80.0,    "HUMI2 D_H Min": 30.0,
-  "HUMI2 N_H Max": 80.0,    "HUMI2 N_H Min": 30.0,
+  "HUMI2 N_ON Min": 15, "HUMI2 N_OFF Min": 30,
+  "HUMI2 D_H Max": 80.0, "HUMI2 D_H Min": 30.0,
+  "HUMI2 N_H Max": 80.0, "HUMI2 N_H Min": 30.0,
 };
 
 const InputRow = ({ label, objKey, type = "number", data, onChange }) => (
@@ -351,7 +351,7 @@ const OfficeControlSettings = () => {
         fetch(`${API_BASE}/api/devices/${selectedDevice._id}/push-config`, {
           method: 'PUT',
           headers: { Authorization: `Bearer ${token}` }
-        }).catch(() => {});
+        }).catch(() => { });
       }
     };
 
@@ -362,7 +362,7 @@ const OfficeControlSettings = () => {
           setStatus('connected');
           handleIncomingPacket(packet.topic, packet.data);
         }
-      } catch (e) {}
+      } catch (e) { }
     };
 
     return () => {
@@ -617,7 +617,7 @@ const OfficeControlSettings = () => {
           <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4 pb-4 border-b border-slate-700/50">
               <h4 className="text-sm font-semibold text-green-400">Core Limits</h4>
-              
+
               {/* Real-time Relay and Dosing Statuses */}
               {selectedDevice && selectedDevice.status === 'online' && (
                 <div className="flex flex-wrap items-center gap-2">
@@ -678,10 +678,10 @@ const OfficeControlSettings = () => {
             </div>
           </div>
         )}
- 
+
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
           <h4 className="mb-4 text-sm font-semibold text-green-400">Cyclic Timers</h4>
-          
+
           {activeRoom === 3 ? (
             <div className="space-y-6">
               {/* Row 1: Timer 1 & Timer 2 */}
@@ -703,7 +703,7 @@ const OfficeControlSettings = () => {
                   liveCycle={liveTelemetry[activeRoom]?.timer_state?.[1]?.state}
                 />
               </div>
- 
+
               {/* Row 2: Timer 3 (Full Width Day/Night) */}
               <DayNightTimerCard
                 prefix="Timer3"
@@ -713,13 +713,13 @@ const OfficeControlSettings = () => {
                 liveRelay={liveTelemetry[activeRoom]?.relay_status?.tmr3}
                 liveCycle={liveTelemetry[activeRoom]?.timer_state?.[2]?.state}
               />
- 
+
               {/* Separator Line */}
               <div className="border-t border-slate-700/50 my-6" />
- 
+
               {/* Climate Control Header */}
               <h4 className="text-sm font-semibold text-green-400">Climate Control Timers</h4>
- 
+
               {/* Row 3: AC Timers vs Humidifier Timers (Side by side with vertical separator) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative">
                 {/* AC Timers (Left side) */}
@@ -734,10 +734,10 @@ const OfficeControlSettings = () => {
                     liveRelay={liveTelemetry[activeRoom]?.relay_status?.ac1}
                     liveCycle={liveTelemetry[activeRoom]?.timer_state?.[3]?.state}
                   />
-                  
+
                   {/* Internal Separator */}
                   <div className="border-t border-slate-700/30 my-4" />
-                  
+
                   <DayNightTimerCard
                     prefix="AC2"
                     label="AC 2"
@@ -748,10 +748,10 @@ const OfficeControlSettings = () => {
                     liveCycle={liveTelemetry[activeRoom]?.timer_state?.[4]?.state}
                   />
                 </div>
- 
+
                 {/* Vertical Separator Line (visible on md screens and up) */}
                 <div className="hidden md:block absolute left-1/2 top-0 bottom-0 border-l border-slate-700/50" />
- 
+
                 {/* Humidifier Timers (Right side) */}
                 <div className="space-y-6">
                   <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider text-center border-b border-slate-700/50 pb-2">Humidifier Timers</h5>
@@ -764,10 +764,10 @@ const OfficeControlSettings = () => {
                     liveRelay={liveTelemetry[activeRoom]?.relay_status?.humi1}
                     liveCycle={liveTelemetry[activeRoom]?.timer_state?.[5]?.state}
                   />
-                  
+
                   {/* Internal Separator */}
                   <div className="border-t border-slate-700/30 my-4" />
-                  
+
                   <DayNightTimerCard
                     prefix="HUMI2"
                     label="HUMI 2"
@@ -821,11 +821,11 @@ const OfficeControlSettings = () => {
             </div>
           )}
         </div>
- 
+
         {isSuperadmin && (
           <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 shadow-lg shadow-blue-500/5">
             <h4 className="mb-4 flex items-center gap-2 text-sm font-semibold text-blue-400">
-             
+
             </h4>
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
               <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label="MQTT Port" objKey="PORT" />
@@ -833,7 +833,7 @@ const OfficeControlSettings = () => {
           </div>
         )}
       </div>
- 
+
       <div className="pt-4">
         <button
           onClick={handleSave}
@@ -846,5 +846,5 @@ const OfficeControlSettings = () => {
     </div>
   );
 };
- 
+
 export default OfficeControlSettings;

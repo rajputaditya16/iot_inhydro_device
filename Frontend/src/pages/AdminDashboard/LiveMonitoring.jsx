@@ -125,8 +125,6 @@ const LiveMonitoring = () => {
   const deviceMeta = allDevices.find(
     (d) => d._id === selectedDeviceId || d.id === selectedDeviceId
   );
-  const hasThingspeak = (deviceMeta?.thingspeak?.channelId || deviceMeta?.tempChannelId) && (deviceMeta?.thingspeak?.readApiKey || deviceMeta?.tempReadApiKey);
-
   // ── Handle device change from dropdown ─────────────────────────────────────
   const handleDeviceChange = (newId) => {
     setSelectedDeviceId(newId);
@@ -139,7 +137,6 @@ const LiveMonitoring = () => {
     setChartData({});
     setActiveMetrics({});
     setActiveFields([]);
-    
     // Clear dual-room MQTT states
     setOfficeControlData({ 1: null, 2: null, 3: null });
     setOfficeControlHistory({
@@ -155,9 +152,9 @@ const LiveMonitoring = () => {
     });
   };
 
-  // ── Dynamic Field Parsing from ThingSpeak ──────────────────────────────────
+  // ── Dynamic Field Icon & Label Display Helper ──────────────────────────────
   const getFieldDisplayInfo = useCallback((name) => {
-    const lower = name.toLowerCase();
+    const lower = String(name || '').toLowerCase();
     if (lower.includes('temp')) return { icon: Thermometer, unit: '°C', type: 'temperature' };
     if (lower.includes('moist') || lower.includes('humid')) return { icon: Droplets, unit: '%', type: 'moisture' };
     if (lower.includes('ec') || lower.includes('conduct')) return { icon: Zap, unit: 'mS/cm', type: 'ec' };
@@ -166,16 +163,10 @@ const LiveMonitoring = () => {
     return { icon: Radio, unit: '', type: 'default' };
   }, []);
 
-  // ── Step 2: Fetch live data from ThingSpeak using the selected device's keys
+  // ── Step 2: Fetch live analytics data from Private Broker backend ─────────────────
   const fetchLiveData = useCallback(() => {
-    const channelId = deviceMeta?.thingspeak?.channelId || deviceMeta?.tempChannelId;
-    const readApiKey = deviceMeta?.thingspeak?.readApiKey || deviceMeta?.tempReadApiKey;
-
-    const url = (channelId && readApiKey)
-      ? `https://api.thingspeak.com/channels/${channelId}/feeds.json?api_key=${readApiKey}&results=24`
-      : `${API_BASE}/api/devices/${selectedDeviceId}/analytics`;
-
-    const headers = (!channelId || !readApiKey) && token ? { Authorization: `Bearer ${token}` } : {};
+    const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics`;
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
     fetch(url, { headers })
       .then((res) => res.json())
@@ -194,7 +185,15 @@ const LiveMonitoring = () => {
           }));
 
         if (fields.length === 0) {
-          fields = [
+          const isMonitType = deviceMeta?.deviceType === 'monit' || deviceMeta?.deviceType === 'dosing';
+          fields = isMonitType ? [
+            { key: 'field1', label: 'Water Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
+            { key: 'field2', label: 'Water Moisture', icon: Droplets, unit: '%', type: 'moisture' },
+            { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
+            { key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
+            { key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
+            { key: 'field6', label: 'Room Humidity', icon: Droplets, unit: '%', type: 'moisture' },
+          ] : [
             { key: 'field1', label: 'Temperature', icon: Thermometer, unit: '°C', type: 'temperature' },
             { key: 'field2', label: 'Moisture / Humidity', icon: Droplets, unit: '%', type: 'moisture' },
             { key: 'field3', label: 'pH Level', icon: FlaskConical, unit: 'pH', type: 'ph' },
@@ -205,7 +204,13 @@ const LiveMonitoring = () => {
         setActiveFields(fields);
 
         if (!latestFeed) {
-          setLiveDevice(null);
+          setLiveDevice({
+            id: selectedDeviceId,
+            name: deviceMeta?.name || 'Live Sensor Data',
+            location: deviceMeta?.location || 'Private Broker Feed',
+            status: deviceMeta?.status || 'online',
+            lastUpdated: deviceMeta?.lastUpdated || new Date().toISOString(),
+          });
           setHasNewData(false);
           setLoading(false);
           return;
@@ -384,19 +389,37 @@ const LiveMonitoring = () => {
       } else {
         // Standard / General Private Broker Device
         const tel = payload.telemetry || payload.data || payload || {};
-        const tempVal = tel.field1 !== undefined ? parseFloat(tel.field1) : (tel.temp !== undefined ? parseFloat(tel.temp) : (tel.room_temp !== undefined ? parseFloat(tel.room_temp) : (tel.water_temp !== undefined ? parseFloat(tel.water_temp) : 0)));
-        const moistVal = tel.field2 !== undefined ? parseFloat(tel.field2) : (tel.moisture !== undefined ? parseFloat(tel.moisture) : (tel.humidity !== undefined ? parseFloat(tel.humidity) : (tel.room_humi !== undefined ? parseFloat(tel.room_humi) : 0)));
+        const tempVal = tel.field1 !== undefined ? parseFloat(tel.field1) : (tel.temp !== undefined ? parseFloat(tel.temp) : (tel.water_temp !== undefined ? parseFloat(tel.water_temp) : (tel.room_temp !== undefined ? parseFloat(tel.room_temp) : 0)));
+        const moistVal = tel.field2 !== undefined ? parseFloat(tel.field2) : (tel.moist !== undefined ? parseFloat(tel.moist) : (tel.moisture !== undefined ? parseFloat(tel.moisture) : (tel.humidity !== undefined ? parseFloat(tel.humidity) : (tel.room_humi !== undefined ? parseFloat(tel.room_humi) : 0))));
         const phVal = tel.field3 !== undefined ? parseFloat(tel.field3) : (tel.ph !== undefined ? parseFloat(tel.ph) : 0);
         const ecVal = tel.field4 !== undefined ? parseFloat(tel.field4) : (tel.ec !== undefined ? parseFloat(tel.ec) : 0);
+        const roomTempVal = tel.field5 !== undefined ? parseFloat(tel.field5) : (tel.room_temp !== undefined ? parseFloat(tel.room_temp) : 0);
+        const roomHumiVal = tel.field6 !== undefined ? parseFloat(tel.field6) : (tel.room_humi !== undefined ? parseFloat(tel.room_humi) : 0);
 
-        const currentMetrics = {
+        const isMonitType = deviceMeta?.deviceType === 'monit' || deviceMeta?.deviceType === 'dosing';
+
+        const currentMetrics = isMonitType ? {
+          field1: tempVal,
+          field2: moistVal,
+          field3: ecVal,
+          field4: phVal,
+          field5: roomTempVal,
+          field6: roomHumiVal,
+        } : {
           field1: tempVal,
           field2: moistVal,
           field3: phVal,
           field4: ecVal,
         };
 
-        const fields = [
+        const fields = isMonitType ? [
+          { key: 'field1', label: 'Water Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
+          { key: 'field2', label: 'Water Moisture', icon: Droplets, unit: '%', type: 'moisture' },
+          { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
+          { key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
+          { key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
+          { key: 'field6', label: 'Room Humidity', icon: Droplets, unit: '%', type: 'moisture' },
+        ] : [
           { key: 'field1', label: 'Temperature', icon: Thermometer, unit: '°C', type: 'temperature' },
           { key: 'field2', label: 'Moisture / Humidity', icon: Droplets, unit: '%', type: 'moisture' },
           { key: 'field3', label: 'pH Level', icon: FlaskConical, unit: 'pH', type: 'ph' },
@@ -436,7 +459,17 @@ const LiveMonitoring = () => {
     eventSource.onmessage = (event) => {
       try {
         const packet = JSON.parse(event.data);
-        if (packet.mqttId === mqttId || packet.deviceId === selectedDeviceId || (packet.topic && packet.topic.includes(mqttId))) {
+        const mId = (mqttId || '').toLowerCase();
+        const dId = String(selectedDeviceId || '').toLowerCase();
+        const pMqttId = String(packet.mqttId || '').toLowerCase();
+        const pDevId = String(packet.deviceId || '').toLowerCase();
+        const pTopic = String(packet.topic || '').toLowerCase();
+
+        if (
+          (mId && pMqttId === mId) ||
+          (dId && pDevId === dId) ||
+          (mId && pTopic.includes(mId))
+        ) {
           processTelemetryPacket(packet.topic, packet.data);
         }
       } catch (e) {
@@ -477,7 +510,7 @@ const LiveMonitoring = () => {
           <Cpu className="h-12 w-12 text-yellow-400 mx-auto mb-4" />
           <h3 className="text-lg font-semibold text-white mb-2">No Devices Found</h3>
           <p className="text-sm text-slate-400">
-            Add devices in the <strong>Devices</strong> page with ThingSpeak configuration to start monitoring.
+            Add devices in the <strong>Devices</strong> page to start monitoring.
           </p>
         </div>
       </div>
@@ -500,12 +533,9 @@ const LiveMonitoring = () => {
                 Select a device...
               </option>
               {allDevices.map((d) => {
-                const hasCfg = d.thingspeak?.channelId && d.thingspeak?.readApiKey;
                 return (
                   <option key={d._id} value={d._id}>
                     {d.name} — {d.location}
-                   
-                   {/* {hasCfg ? ` (CH:${d.thingspeak.channelId})` : ' (No ThingSpeak)'} */}
                   </option>
                 );
               })}
@@ -522,13 +552,6 @@ const LiveMonitoring = () => {
                 className={`h-1.5 w-1.5 rounded-full ${getStatusDot(liveDevice.status)} ${liveDevice.status === 'online' ? 'animate-pulse-dot' : ''}`}
               />
               {liveDevice.status}
-            </span>
-          )}
-
-          {/* ThingSpeak Channel Badge */}
-          {hasThingspeak && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1 text-[10px] font-semibold text-blue-400">
-              <Radio className="h-3 w-3" /> CH: {deviceMeta.thingspeak.channelId}
             </span>
           )}
         </div>
@@ -551,27 +574,7 @@ const LiveMonitoring = () => {
         </div>
       </div>
 
-      {/* ── Standard Single-Device Content Grid ───────────────────────────────── */}
-      {deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && deviceMeta?.deviceType !== 'controlling' && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-start gap-4 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-6"
-        >
-          <AlertTriangle className="h-6 w-6 text-yellow-400 shrink-0 mt-0.5" />
-          <div>
-            <h3 className="text-sm font-semibold text-white mb-1">ThingSpeak Not Configured</h3>
-            <p className="text-sm text-slate-400">
-              {deviceMeta
-                ? `"${deviceMeta.name}" does not have ThingSpeak API keys configured.`
-                : 'Device not found.'}
-            </p>
-            <p className="text-xs text-slate-500 mt-1">
-              Go to <strong>Devices → Edit</strong> and add the Channel ID &amp; Read API Key to start streaming live data.
-            </p>
-          </div>
-        </motion.div>
-      )}
+
 
       {/* ── Office Control Dual-Room Live View ───────────────────────────── */}
       {deviceMeta?.deviceType === 'office_control' && (
@@ -582,9 +585,7 @@ const LiveMonitoring = () => {
               <button
                 key={room}
                 onClick={() => setActiveRoomTab(room)}
-                className={`relative px-6 py-3.5 text-sm font-semibold transition-all hover:text-white ${
-                  activeRoomTab === room ? 'text-green-400' : 'text-slate-400'
-                }`}
+                className={`relative px-6 py-3.5 text-sm font-semibold transition-all hover:text-white ${activeRoomTab === room ? 'text-green-400' : 'text-slate-400'                 }`}
               >
                 Room {room} Control
                 {activeRoomTab === room && (
@@ -602,7 +603,6 @@ const LiveMonitoring = () => {
             {/* Left: 8 Sensor Grid Boxes */}
             <div className="space-y-4 xl:col-span-1">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Live Readings (Room {activeRoomTab})</h3>
-              
               {!officeControlData[activeRoomTab] && loading ? (
                 <div className="space-y-4">
                   {[...Array(8)].map((_, i) => (
@@ -678,9 +678,9 @@ const LiveMonitoring = () => {
                         const ecColor = getMetricColor(ecStatus);
                         const bgMap = {
                           'text-emerald-400': 'bg-emerald-500/10 border-emerald-500/20',
-                          'text-yellow-400':  'bg-yellow-500/10 border-yellow-500/20',
-                          'text-red-400':     'bg-red-500/10 border-red-500/20',
-                          'text-slate-500':   'bg-slate-500/10 border-slate-500/20',
+                          'text-yellow-400': 'bg-yellow-500/10 border-yellow-500/20',
+                          'text-red-400': 'bg-red-500/10 border-red-500/20',
+                          'text-slate-500': 'bg-slate-500/10 border-slate-500/20',
                         };
                         return (
                           <motion.div
@@ -886,7 +886,7 @@ const LiveMonitoring = () => {
               {/* Left: Sensor Grid Boxes */}
               <div className="space-y-4 xl:col-span-1">
                 <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Live Readings</h3>
-                
+
                 {!controllingData && loading ? (
                   <div className="space-y-4">
                     {[...Array(17)].map((_, i) => (
@@ -908,9 +908,9 @@ const LiveMonitoring = () => {
                       const ecColor = getMetricColor(ecStatus);
                       const bgMap = {
                         'text-emerald-400': 'bg-emerald-500/10 border-emerald-500/20',
-                        'text-yellow-400':  'bg-yellow-500/10 border-yellow-500/20',
-                        'text-red-400':     'bg-red-500/10 border-red-500/20',
-                        'text-slate-500':   'bg-slate-500/10 border-slate-500/20',
+                        'text-yellow-400': 'bg-yellow-500/10 border-yellow-500/20',
+                        'text-red-400': 'bg-red-500/10 border-red-500/20',
+                        'text-slate-500': 'bg-slate-500/10 border-slate-500/20',
                       };
                       return (
                         <motion.div

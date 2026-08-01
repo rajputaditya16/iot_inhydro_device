@@ -17,15 +17,9 @@ const deviceSchema = new mongoose.Schema(
       enum: ['online', 'offline', 'warning', 'critical', 'blocked'],
       default: 'offline',
     },
-    battery: {
-      type: Number,
-      min: 0,
-      max: 100,
-      default: 100,
-    },
     deviceType: {
       type: String,
-      enum: ['system2', 'controlling', 'almora', 'almora2', 'multi_sensor', 'light_motor_pump', 'office_control'],
+      enum: ['system2', 'controlling', 'almora', 'almora2', 'multi_sensor', 'light_motor_pump', 'office_control', 'monit'],
       default: 'system2',
     },
     mqttId: {

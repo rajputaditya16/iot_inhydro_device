@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Cpu, Search, Plus, MapPin, Activity, Edit2, Trash2, PowerOff, ShieldAlert, Radio, Key, Eye, EyeOff, Send, Info, Copy, Check, Calendar, Clock } from 'lucide-react';
+import { Cpu, Search, Plus, MapPin, Activity, Edit2, Trash2, PowerOff, ShieldAlert, Radio, Info, Copy, Check, Calendar, Clock } from 'lucide-react';
 import { getStatusBg, getStatusDot, formatTimestamp } from '../../utils/helpers';
 import { SkeletonTable } from '../../components/Skeleton';
 import EmptyState from '../../components/EmptyState';
@@ -19,37 +19,8 @@ const EMPTY_FORM = {
   unit: '',
   nicknameByClient: '',
   thingspeak: {
-    channelId: '',
-    clientId: '',
-    username: '',
-    password: '',
-    readApiKey: '',
-    writeApiKey: '',
     port: 1883,
   },
-};
-
-const InputGroup = ({ label, value, onChange, type = 'text', placeholder = '' }) => {
-  const [show, setShow] = useState(false);
-  return (
-    <div>
-      <label className="mb-1 block text-[10px] font-medium text-slate-400">{label}</label>
-      <div className="relative">
-        <input
-          type={type === 'password' ? (show ? 'text' : 'password') : type}
-          value={value || ''}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-1.5 text-xs text-white outline-none focus:border-blue-500 font-mono"
-          placeholder={placeholder}
-        />
-        {type === 'password' && (
-          <button type="button" onClick={() => setShow(!show)} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
-            {show ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-          </button>
-        )}
-      </div>
-    </div>
-  );
 };
 
 const DevicesPage = () => {
@@ -66,20 +37,11 @@ const DevicesPage = () => {
   const [formLoading, setFormLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Toggle visibility for API keys in the form
-  const [showWriteKey, setShowWriteKey] = useState(false);
-  const [showReadKey, setShowReadKey] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [pushingId, setPushingId] = useState(null); // Track which device is being pushed
-
   // Details Modal State
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedDeviceIdDetails, setSelectedDeviceIdDetails] = useState(null);
   const selectedDeviceDetails = devices.find(d => (d._id || d.id) === selectedDeviceIdDetails);
   const [copiedId, setCopiedId] = useState(false);
-  const [showDetailsPassword, setShowDetailsPassword] = useState(false);
-  const [showDetailsWriteKey, setShowDetailsWriteKey] = useState(false);
-  const [showDetailsReadKey, setShowDetailsReadKey] = useState(false);
 
   const token = localStorage.getItem('token');
   const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -117,9 +79,6 @@ const DevicesPage = () => {
   const handleOpenModal = (device = null) => {
     if (!isAdmin) return;
     setError(null);
-    setShowWriteKey(false);
-    setShowReadKey(false);
-    setShowPassword(false);
     if (device) {
       setEditingDevice(device);
       setFormData({
@@ -134,12 +93,6 @@ const DevicesPage = () => {
         unit: device.unit || '',
         nicknameByClient: device.nicknameByClient || '',
         thingspeak: {
-          channelId: device.thingspeak?.channelId || device.thingspeak?.tempChannelId || '',
-          clientId: device.thingspeak?.clientId || device.thingspeak?.tempClientId || '',
-          username: device.thingspeak?.username || device.thingspeak?.tempUsername || '',
-          password: device.thingspeak?.password || device.thingspeak?.tempPassword || '',
-          readApiKey: device.thingspeak?.readApiKey || device.thingspeak?.tempReadApiKey || '',
-          writeApiKey: device.thingspeak?.writeApiKey || device.thingspeak?.tempWriteApiKey || '',
           port: device.thingspeak?.port || 1883,
         },
       });
@@ -214,49 +167,14 @@ const DevicesPage = () => {
     }
   };
 
-  // Update thingspeak nested fields helper
-  const updateThingspeak = (field, value) => {
-    setFormData((prev) => ({
-      ...prev,
-      thingspeak: { ...prev.thingspeak, [field]: value },
-    }));
-  };
-
-  // Push ThingSpeak config to physical device via MQTT
-  const handlePushConfig = async (deviceId, deviceName) => {
-    if (!isAdmin) return;
-    setPushingId(deviceId);
-    try {
-      const res = await fetch(`${API_BASE}/api/devices/${deviceId}/push-config`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const contentType = res.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        throw new Error("Received non-JSON response from server");
-      }
-      const data = await res.json();
-      if (data.success) {
-        alert(`✅ ThingSpeak config pushed to "${deviceName}" via MQTT!\nThe device will apply the new credentials automatically.`);
-      } else {
-        alert(`❌ Failed: ${data.message}`);
-      }
-    } catch (err) {
-      console.error(err);
-      alert('❌ Network error while pushing config');
-    } finally {
-      setPushingId(null);
-    }
-  };
-
   const filtered = devices.filter((d) => {
     const searchId = String(d._id || d.id || '');
-    const channelId = String(d.thingspeak?.channelId || d.thingspeak?.tempChannelId || '');
+    const mqttId = String(d.mqttId || '');
     const matchesSearch =
       String(d.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       searchId.toLowerCase().includes(searchTerm.toLowerCase()) ||
       String(d.location || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      channelId.toLowerCase().includes(searchTerm.toLowerCase());
+      mqttId.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || d.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -413,22 +331,6 @@ const DevicesPage = () => {
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
-                            {(hasThingspeak || device.mqttId || device._id) && (
-                              <>
-                                <div className="w-px h-4 bg-slate-700/50 mx-1"></div>
-                                <button
-                                  onClick={() => handlePushConfig(deviceId, device.name)}
-                                  disabled={pushingId === deviceId}
-                                  className={`rounded-lg p-2 transition-colors ${pushingId === deviceId
-                                      ? 'text-purple-300 bg-purple-500/10 cursor-wait'
-                                      : 'text-purple-400 hover:bg-purple-500/10 hover:text-purple-300'
-                                    }`}
-                                  title="Push Config / Setpoints to Device (Private Broker MQTT)"
-                                >
-                                  <Send className={`h-4 w-4 ${pushingId === deviceId ? 'animate-pulse' : ''}`} />
-                                </button>
-                              </>
-                            )}
                           </>
                         )}
                       </div>
@@ -494,8 +396,11 @@ const DevicesPage = () => {
                   >
                     <option value="system2">Standard System (system2.py)</option>
                     <option value="controlling">InHydro Controller (controlling.py)</option>
+                    <option value="monit">Monnet Controller (monit.py)</option>
+                    <option value="dosing">Dosing Controller (dosing.py)</option>
                     <option value="almora">Almora Machine (almora1.py)</option>
                     <option value="almora2">Almora Machine 2 (CO2/Temp/Hum)</option>
+                    <option value="almora2_full">Almora Machine 2 Full Controller (almora2_full.py)</option>
                     <option value="multi_sensor">Cold Storage (Multi-Sensor)</option>
                     <option value="light_motor_pump">Light Motor Pump (esp8266_controller)</option>
                     <option value="office_control">Office Control (control.py)</option>
@@ -560,29 +465,30 @@ const DevicesPage = () => {
                   </div>
                 </div>
 
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-300">Unit</label>
-                  <input
-                    type="text"
-                    value={formData.unit || ''}
-                    onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
-                    placeholder="e.g. Unit-A"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t border-slate-700/50" />
-
-            {/* MQTT Configuration Section */}
-            <div className="space-y-4">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-2">
-                <Radio className="h-3.5 w-3.5 text-blue-400" /> MQTT Configuration
-              </h4>
-              <div className="space-y-3 pl-1">
-                <div className="w-32">
-                  <InputGroup label="MQTT Port" value={formData.thingspeak.port} onChange={(v) => updateThingspeak('port', Number(v))} type="number" />
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-300">Unit</label>
+                    <input
+                      type="text"
+                      value={formData.unit || ''}
+                      onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                      placeholder="e.g. Unit-A"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-300">MQTT Port</label>
+                    <input
+                      type="number"
+                      value={formData.thingspeak?.port || 1883}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        thingspeak: { ...(formData.thingspeak || {}), port: Number(e.target.value) || 1883 }
+                      })}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      placeholder="1883"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -721,6 +627,13 @@ const DevicesPage = () => {
                       <span className="text-slate-400 font-medium">Unit</span>
                       <span className="text-white font-mono text-xs">{selectedDeviceDetails.unit || 'Not set'}</span>
                     </div>
+
+                    <div className="flex justify-between items-center border-t border-slate-800/60 pt-2.5">
+                      <span className="text-slate-400 font-medium">MQTT Port</span>
+                      <span className="text-white font-mono text-xs bg-slate-900/40 px-2 py-0.5 rounded border border-slate-700/30">
+                        {selectedDeviceDetails.thingspeak?.port || 1883}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -764,20 +677,6 @@ const DevicesPage = () => {
                 </div>
 
               </div>
-
-              {/* MQTT Configuration Section */}
-              <div className="rounded-xl border border-slate-700/30 bg-slate-900/10 p-5 space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-700/50 pb-2 flex items-center gap-1.5">
-                  <Radio className="h-4 w-4 text-blue-400" /> MQTT Configuration
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm">
-                  <div className="flex justify-between items-center py-1">
-                    <span className="text-slate-400 font-medium">MQTT Port</span>
-                    <span className="text-white font-mono font-semibold">{selectedDeviceDetails.thingspeak?.port || 1883}</span>
-                  </div>
-                </div>
-              </div>
-
             </div>
 
             {/* Persistent Footer Actions */}
@@ -793,20 +692,6 @@ const DevicesPage = () => {
                 >
                   <Activity className="h-3.5 w-3.5" /> Live Monitoring
                 </button>
-
-                {isAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handlePushConfig(selectedDeviceDetails._id || selectedDeviceDetails.id, selectedDeviceDetails.name);
-                    }}
-                    disabled={pushingId === (selectedDeviceDetails._id || selectedDeviceDetails.id)}
-                    className={`flex items-center gap-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-xs font-semibold text-purple-400 hover:bg-purple-500 hover:text-white transition-all shadow-md shadow-purple-500/5 ${pushingId === (selectedDeviceDetails._id || selectedDeviceDetails.id) ? 'opacity-50 cursor-wait' : ''
-                      }`}
-                  >
-                    <Send className={`h-3.5 w-3.5 ${pushingId === (selectedDeviceDetails._id || selectedDeviceDetails.id) ? 'animate-pulse' : ''}`} /> Push Config / Setpoints (MQTT)
-                  </button>
-                )}
               </div>
 
               <button
