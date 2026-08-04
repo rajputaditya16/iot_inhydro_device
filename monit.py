@@ -729,7 +729,7 @@ def control_system(water_data, md02_data):
         if fan2_on:
             relay_fan1.on()
             relay_fan2.on()
-            warnings.append("⚠ TEMP HIGH (100% FANS ON)")
+            warnings.append("⚠ TEMP HIGH (ALL FANS ON)")
         elif fan1_on:
             relay_fan1.on()
             relay_fan2.off()
