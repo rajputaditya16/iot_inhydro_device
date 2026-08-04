@@ -1166,7 +1166,7 @@ def open_system_settings_modal():
         system_config["upload_frequency_min"] = nxt
         lbl_freq.config(text=f"{nxt} Min")
 
-    tk.Button(r1, text="CHANGE", font=BTN_FONT_INLINE, bg="#cbd5e1", fg="#1e293b", width=8, height=1, relief="flat", bd=0, cursor="hand2", command=cycle_freq).pack(side="left", padx=5)
+    tk.Button(r1, text="CHANGE", font=BTN_FONT_INLINE, bg="#cbd5e1", fg="#1e293b", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=cycle_freq).pack(side="left", padx=5)
 
     # 2. Temp Alarm Offset (+/- C)
     r2 = tk.Frame(body, bg="white"); r2.pack(fill="x", pady=10)
@@ -1180,7 +1180,7 @@ def open_system_settings_modal():
         open_almora_keypad("Edit Temp Alarm Deviation Limit (°C)", str(system_config.get("temp_alarm_offset", 5.0)),
                            lambda v: (system_config.update({"temp_alarm_offset": float(v)}), lbl_toff.config(text=f"{float(v):.1f} °C")))
 
-    tk.Button(r2, text="EDIT", font=BTN_FONT_INLINE, bg="#cbd5e1", fg="#1e293b", width=8, height=1, relief="flat", bd=0, cursor="hand2", command=edit_toff).pack(side="left", padx=5)
+    tk.Button(r2, text="EDIT", font=BTN_FONT_INLINE, bg="#cbd5e1", fg="#1e293b", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=edit_toff).pack(side="left", padx=5)
 
     # 3. Humi Alarm Offset (+/- %)
     r3 = tk.Frame(body, bg="white"); r3.pack(fill="x", pady=10)
@@ -1194,7 +1194,7 @@ def open_system_settings_modal():
         open_almora_keypad("Edit Humi Alarm Deviation Limit (%)", str(system_config.get("humi_alarm_offset", 5.0)),
                            lambda v: (system_config.update({"humi_alarm_offset": float(v)}), lbl_hoff.config(text=f"{float(v):.1f} %")))
 
-    tk.Button(r3, text="EDIT", font=BTN_FONT_INLINE, bg="#cbd5e1", fg="#1e293b", width=8, height=1, relief="flat", bd=0, cursor="hand2", command=edit_hoff).pack(side="left", padx=5)
+    tk.Button(r3, text="EDIT", font=BTN_FONT_INLINE, bg="#cbd5e1", fg="#1e293b", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=edit_hoff).pack(side="left", padx=5)
 
     def save_sys_settings():
         save_config()
@@ -1678,7 +1678,7 @@ def edit_slot_popup(idx):
             bg="#cbd5e1",
             fg="#1e293b",
             width=8,
-            height=1,
+            height=2,
             relief="flat",
             bd=0,
             cursor="hand2",
@@ -1842,7 +1842,7 @@ def open_setpoints(port):
         val_lbl.pack(side="left", padx=10)
         labels[key] = val_lbl
         
-        tk.Button(row, text="EDIT", font=BTN_FONT_INLINE, bg="#0284c7", fg="white", width=8, height=1, bd=0, cursor="hand2",
+        tk.Button(row, text="EDIT", font=BTN_FONT_INLINE, bg="#cbd5e1", fg="#1e293b", width=8, height=2, relief="flat", bd=0, cursor="hand2",
                   command=lambda k=key, l=val_lbl: open_almora_keypad(f"Set {k}", l.cget("text"), lambda v: update_static_sp(k, v, l))).pack(side="left")
     show(frame_set)
 

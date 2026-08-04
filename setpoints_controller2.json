@@ -120,6 +120,32 @@
                         "h_max": 70.0,
                         "h_min": 60.0,
                         "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "12:00 PM",
+                        "stop": "04:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 6,
+                        "name": "Slot 6",
+                        "start": "12:00 PM",
+                        "stop": "04:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
                     }
                 ],
                 "name": "Setting A",
