@@ -1,0 +1,7 @@
+{
+    "relay_port": "/dev/serial/by-path/usb-0:1:2:1:0-port0",
+    "cloud_upload_frequency_min": 60,
+    "upload_frequency_min": 5,
+    "temp_alarm_offset": 5.0,
+    "humi_alarm_offset": 5.0
+}

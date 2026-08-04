@@ -1,0 +1,1266 @@
+{
+    "prog_03": {
+        "program_id": "prog_03",
+        "program_name": "Environmental Chamber Program 3",
+        "stages": {
+            "Stage 1": {
+                "stage_id": 1,
+                "stage_name": "Stage 1",
+                "start_date": "2026-08-04",
+                "end_date": "2026-08-17",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 6,
+                        "name": "Slot 6",
+                        "start": "08:00 am",
+                        "stop": "12:00 pm",
+                        "temp_setpoint": 24.5,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 7,
+                        "name": "Slot 7",
+                        "start": "08:00 am",
+                        "stop": "12:00 pm",
+                        "temp_setpoint": 24.5,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 8,
+                        "name": "Slot 8",
+                        "start": "08:00 am",
+                        "stop": "12:00 pm",
+                        "temp_setpoint": 24.5,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 9,
+                        "name": "Slot 9",
+                        "start": "08:00 am",
+                        "stop": "12:00 pm",
+                        "temp_setpoint": 24.5,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 2": {
+                "stage_id": 2,
+                "stage_name": "Stage 2",
+                "start_date": "2026-08-18",
+                "end_date": "2026-08-31",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 3": {
+                "stage_id": 3,
+                "stage_name": "Stage 3",
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-14",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 4": {
+                "stage_id": 4,
+                "stage_name": "Stage 4",
+                "start_date": "2026-09-15",
+                "end_date": "2026-09-28",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 5": {
+                "stage_id": 5,
+                "stage_name": "Stage 5",
+                "start_date": "2026-09-29",
+                "end_date": "2026-10-12",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 6": {
+                "stage_id": 6,
+                "stage_name": "Stage 6",
+                "start_date": "2026-10-13",
+                "end_date": "2026-10-26",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 7": {
+                "stage_id": 7,
+                "stage_name": "Stage 7",
+                "start_date": "2026-10-27",
+                "end_date": "2026-11-09",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 8": {
+                "stage_id": 8,
+                "stage_name": "Stage 8",
+                "start_date": "2026-11-10",
+                "end_date": "2026-11-23",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 9": {
+                "stage_id": 9,
+                "stage_name": "Stage 9",
+                "start_date": "2026-11-24",
+                "end_date": "2026-12-07",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 10": {
+                "stage_id": 10,
+                "stage_name": "Stage 10",
+                "start_date": "2026-12-08",
+                "end_date": "2026-12-21",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 6,
+                        "name": "Slot 6",
+                        "start": "08:00 am",
+                        "stop": "12:00 pm",
+                        "temp_setpoint": 24.5,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 7,
+                        "name": "Slot 7",
+                        "start": "08:00 am",
+                        "stop": "12:00 pm",
+                        "temp_setpoint": 24.5,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 8,
+                        "name": "Slot 8",
+                        "start": "08:00 am",
+                        "stop": "12:00 pm",
+                        "temp_setpoint": 24.5,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 9,
+                        "name": "Slot 9",
+                        "start": "08:00 am",
+                        "stop": "12:00 pm",
+                        "temp_setpoint": 24.5,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "prog_02": {
+        "program_id": "prog_02",
+        "program_name": "Crop Program 2",
+        "stages": {
+            "Stage 1": {
+                "stage_id": 1,
+                "stage_name": "Stage 1",
+                "start_date": "2026-08-04",
+                "end_date": "2026-08-17",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 2": {
+                "stage_id": 2,
+                "stage_name": "Stage 2",
+                "start_date": "2026-08-18",
+                "end_date": "2026-08-31",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 3": {
+                "stage_id": 3,
+                "stage_name": "Stage 3",
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-14",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 4": {
+                "stage_id": 4,
+                "stage_name": "Stage 4",
+                "start_date": "2026-09-15",
+                "end_date": "2026-09-28",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 5": {
+                "stage_id": 5,
+                "stage_name": "Stage 5",
+                "start_date": "2026-09-29",
+                "end_date": "2026-10-12",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 6": {
+                "stage_id": 6,
+                "stage_name": "Stage 6",
+                "start_date": "2026-10-13",
+                "end_date": "2026-10-26",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 7": {
+                "stage_id": 7,
+                "stage_name": "Stage 7",
+                "start_date": "2026-10-27",
+                "end_date": "2026-11-09",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 8": {
+                "stage_id": 8,
+                "stage_name": "Stage 8",
+                "start_date": "2026-11-10",
+                "end_date": "2026-11-23",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 9": {
+                "stage_id": 9,
+                "stage_name": "Stage 9",
+                "start_date": "2026-11-24",
+                "end_date": "2026-12-07",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Stage 10": {
+                "stage_id": 10,
+                "stage_name": "Stage 10",
+                "start_date": "2026-12-08",
+                "end_date": "2026-12-21",
+                "photoperiod": {
+                    "light_on": "06:00 am",
+                    "light_off": "08:00 pm",
+                    "enabled": true
+                },
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 am",
+                        "stop": "05:00 am",
+                        "temp_setpoint": 24.1,
+                        "humi_setpoint": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 am",
+                        "stop": "10:00 am",
+                        "temp_setpoint": 25.0,
+                        "humi_setpoint": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 am",
+                        "stop": "03:00 pm",
+                        "temp_setpoint": 27.2,
+                        "humi_setpoint": 70.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 pm",
+                        "stop": "08:00 pm",
+                        "temp_setpoint": 26.0,
+                        "humi_setpoint": 68.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 pm",
+                        "stop": "12:00 am",
+                        "temp_setpoint": 24.2,
+                        "humi_setpoint": 62.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    }
+}
