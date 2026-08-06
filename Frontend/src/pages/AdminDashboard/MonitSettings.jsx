@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { 
-  Save, CheckCircle2, RefreshCw, ChevronDown, Server, Radio, 
+  Save, CheckCircle2, RefreshCw, ChevronDown, Server, 
   Thermometer, Droplets, Zap, Clock, ShieldCheck, Activity, Sliders, 
-  Power, Lock, Key, FlaskConical, AlertCircle 
+  Power, FlaskConical, AlertCircle, Wind, Fan, RotateCw
 } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
@@ -12,14 +12,18 @@ const defaultSetpoints = {
   "EC MAX": 1.8,
   "PH LOW": 5.8,
   "PH HIGH": 6.5,
+  "S_TANK": 0.45,
 
-  // Climate Control
-  "TEMP MAX": 28.0,
+  // Climate Control (MD02 Temp & Humidity)
   "TEMP MIN": 22.0,
-  "HUMI MAX": 70.0,
+  "TEMP MED": 25.0,
+  "TEMP MAX": 28.0,
+  "TEMP Hyst": 0.5,
   "HUMI MIN": 50.0,
+  "HUMI MAX": 70.0,
+  "HUMI Hyst": 2.0,
 
-  // Humidifier Day/Night Cycle
+  // Fogger Humidifier Day/Night Cycle
   "HUMI Name": "FOGGER TIMER",
   "HUMI D_Start": "06:00",
   "HUMI D_Stop": "18:00",
@@ -35,21 +39,49 @@ const defaultSetpoints = {
   "HUMI N_Max": 80.0,
   "HUMI N_Min": 60.0,
 
-  // Cyclic Timer 1
-  "Timer1 Name": "Timer 1",
+  // Cooling Pad Pump
+  "PAD Name": "COOLING PAD PUMP",
+  "PAD Start": "06:00",
+  "PAD Stop": "18:00",
+  "PAD ON Min": 5,
+  "PAD OFF Min": 15,
+
+  // Air Circulation Fan (ACF)
+  "ACF Name": "AIR CIRCULATION FAN",
+  "ACF Start": "06:00",
+  "ACF Stop": "22:00",
+  "ACF ON Min": 10,
+  "ACF OFF Min": 20,
+
+  // Overhead Sprinkler
+  "Sprinkler Name": "SPRINKLER",
+  "Sprinkler Start": "08:00",
+  "Sprinkler Stop": "17:00",
+  "Sprinkler ON Min": 2,
+  "Sprinkler OFF Min": 30,
+
+  // Daytime Irrigation
+  "Irrigation Name": "IRRIGATION",
+  "Irrigation Start": "06:00",
+  "Irrigation Stop": "18:00",
+  "Irrigation ON Min": 15,
+  "Irrigation OFF Min": 45,
+
+  // Cyclic Timer 1 (Water Mixing Pump)
+  "Timer1 Name": "WATER MIXING PUMP",
   "Timer1 Start": "06:00",
   "Timer1 Stop": "18:00",
   "Timer1 ON Min": 5,
   "Timer1 OFF Min": 15,
 
   // Cyclic Timer 2
-  "Timer2 Name": "Timer 2",
+  "Timer2 Name": "CYCLIC TIMER 2",
   "Timer2 Start": "00:00",
   "Timer2 Stop": "23:59",
   "Timer2 ON Min": 10,
   "Timer2 OFF Min": 20,
 
-  // User Credentials
+  // Two-User Authentication Credentials
   "USER 1 Name": "Operator 1",
   "USER 1 PASSWORD": "1111",
   "USER 2 Name": "Operator 2",
@@ -68,9 +100,17 @@ const MonitSettings = () => {
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [toast, setToast] = useState({ show: false, type: 'success', message: '' });
 
   const token = localStorage.getItem('token');
   const API_BASE = import.meta.env.VITE_API_URL || '';
+
+  const showToast = (type, message) => {
+    setToast({ show: true, type, message });
+    setTimeout(() => {
+      setToast({ show: false, type: '', message: '' });
+    }, 4000);
+  };
 
   // Fetch Monit devices from database
   useEffect(() => {
@@ -151,15 +191,6 @@ const MonitSettings = () => {
     };
   }, [deviceRoot]);
 
-  const [toast, setToast] = useState({ show: false, type: 'success', message: '' });
-
-  const showToast = (type, message) => {
-    setToast({ show: true, type, message });
-    setTimeout(() => {
-      setToast({ show: false, type: '', message: '' });
-    }, 4000);
-  };
-
   const handleInputChange = (key, value) => {
     setSetpoints(prev => ({ ...prev, [key]: value }));
   };
@@ -221,14 +252,95 @@ const MonitSettings = () => {
     return (
       <div className="flex h-64 flex-col items-center justify-center rounded-2xl border border-slate-700 bg-slate-800/20 p-8 text-center">
         <Server className="mb-4 h-12 w-12 text-slate-600" />
-        <h3 className="text-lg font-semibold text-white">No Monit Controllers Found</h3>
+        <h3 className="text-lg font-semibold text-white">No Monnet Controllers Found</h3>
         <p className="mt-2 text-sm text-slate-400">Please register a device with type <code className="text-green-400 bg-slate-800 px-2 py-0.5 rounded">monit</code> on the Devices page first.</p>
       </div>
     );
   }
 
-  const ecVal = Number(liveData?.temp !== undefined ? liveData.ec : null);
-  const tdsPpm = Number.isFinite(ecVal) ? Math.round(ecVal * 500) : null;
+  const ecVal = Number(liveData?.ec !== undefined ? liveData.ec : null);
+  const tdsPpm = Number.isFinite(ecVal) && ecVal > 0 ? Math.round(ecVal * 500) : null;
+
+  // List of all 13 relays according to monit.py
+  const relaysList = [
+    { key: 'relay_ec1', name: 'EC1 Dosing Pump', icon: Zap },
+    { key: 'relay_ec2', name: 'EC2 Dosing Pump', icon: Zap },
+    { key: 'relay_ph', name: 'pH Minus Dosing Pump', icon: FlaskConical },
+    { key: 'relay_solenoid', name: 'S-Tank Solenoid Valve', icon: RotateCw },
+    { key: 'relay_fan1', name: 'Stage 1 Fan 1 (Fan 1st 50%)', icon: Fan },
+    { key: 'relay_fan2', name: 'Stage 2 Fan 2 (Fan 2nd 50%)', icon: Fan },
+    { key: 'relay_pad', name: 'Cooling Pad Pump', icon: Droplets },
+    { key: 'relay_fogger', name: 'Fogger Humidifier', icon: Wind },
+    { key: 'relay_acf', name: 'Air Circulation Fan (ACF)', icon: Fan },
+    { key: 'relay_sprinkler', name: 'Overhead Sprinkler', icon: Droplets },
+    { key: 'relay_irrigation', name: 'Daytime Irrigation Pump', icon: RotateCw },
+    { key: 'timer1', name: 'Cyclic Timer 1 (Water Mixing)', icon: Clock },
+    { key: 'timer2', name: 'Cyclic Timer 2', icon: Clock },
+  ];
+
+  // List of equipment cyclic timers according to monit.py
+  const equipmentTimersConfig = [
+    {
+      title: "Cooling Pad Pump (PAD)",
+      prefix: "PAD",
+      nameKey: "PAD Name", defaultName: "COOLING PAD PUMP",
+      startKey: "PAD Start", defaultStart: "06:00",
+      stopKey: "PAD Stop", defaultStop: "18:00",
+      onKey: "PAD ON Min", defaultOn: 5,
+      offKey: "PAD OFF Min", defaultOff: 15,
+      relayKey: "relay_pad"
+    },
+    {
+      title: "Air Circulation Fan (ACF)",
+      prefix: "ACF",
+      nameKey: "ACF Name", defaultName: "AIR CIRCULATION FAN",
+      startKey: "ACF Start", defaultStart: "06:00",
+      stopKey: "ACF Stop", defaultStop: "22:00",
+      onKey: "ACF ON Min", defaultOn: 10,
+      offKey: "ACF OFF Min", defaultOff: 20,
+      relayKey: "relay_acf"
+    },
+    {
+      title: "Overhead Sprinkler",
+      prefix: "Sprinkler",
+      nameKey: "Sprinkler Name", defaultName: "SPRINKLER",
+      startKey: "Sprinkler Start", defaultStart: "08:00",
+      stopKey: "Sprinkler Stop", defaultStop: "17:00",
+      onKey: "Sprinkler ON Min", defaultOn: 2,
+      offKey: "Sprinkler OFF Min", defaultOff: 30,
+      relayKey: "relay_sprinkler"
+    },
+    {
+      title: "Daytime Irrigation",
+      prefix: "Irrigation",
+      nameKey: "Irrigation Name", defaultName: "IRRIGATION",
+      startKey: "Irrigation Start", defaultStart: "06:00",
+      stopKey: "Irrigation Stop", defaultStop: "18:00",
+      onKey: "Irrigation ON Min", defaultOn: 15,
+      offKey: "Irrigation OFF Min", defaultOff: 45,
+      relayKey: "relay_irrigation"
+    },
+    {
+      title: "Cyclic Timer 1",
+      prefix: "Timer1",
+      nameKey: "Timer1 Name", defaultName: "WATER MIXING PUMP",
+      startKey: "Timer1 Start", defaultStart: "06:00",
+      stopKey: "Timer1 Stop", defaultStop: "18:00",
+      onKey: "Timer1 ON Min", defaultOn: 5,
+      offKey: "Timer1 OFF Min", defaultOff: 15,
+      relayKey: "timer1"
+    },
+    {
+      title: "Cyclic Timer 2",
+      prefix: "Timer2",
+      nameKey: "Timer2 Name", defaultName: "CYCLIC TIMER 2",
+      startKey: "Timer2 Start", defaultStart: "00:00",
+      stopKey: "Timer2 Stop", defaultStop: "23:59",
+      onKey: "Timer2 ON Min", defaultOn: 10,
+      offKey: "Timer2 OFF Min", defaultOff: 20,
+      relayKey: "timer2"
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -256,9 +368,9 @@ const MonitSettings = () => {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h3 className="text-base font-semibold text-white">
-            {selectedDevice?.name || 'Monnet Controller'}
+            {selectedDevice?.name || 'Monnet Group Farm Controller'}
           </h3>
-            <p className="text-sm text-slate-400 mt-1">Configure Monnet Setpoints </p>
+          <p className="text-sm text-slate-400 mt-1">Configure Monnet Farm Automation Setpoints & Live Telemetry</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -298,21 +410,28 @@ const MonitSettings = () => {
             )}
           </div>
 
+          <button
+            onClick={handleSyncRequest}
+            title="Request setpoints sync from device"
+            className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/50 px-3 py-2 text-xs font-medium text-slate-300 hover:border-slate-600 hover:text-white transition-all"
+          >
+            <RefreshCw className="h-3.5 w-3.5 text-slate-400" /> Sync Device
+          </button>
 
           {/* Broker Status Badge */}
-          <div className="min-w-[130px] flex justify-end">
+          <div className="min-w-[120px] flex justify-end">
             {status === 'connected' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
                 <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
               </span>
             )}
             {status !== 'connected' && status !== 'error' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                <span className="h-2 w-2 rounded-full bg-slate-600" /> Offline
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700">
+                <span className="h-2 w-2 rounded-full bg-slate-500" /> Offline
               </span>
             )}
             {status === 'error' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400 bg-red-500/10 px-3 py-1.5 rounded-xl border border-red-500/20">
                 <AlertCircle className="h-4 w-4" /> Connection Error
               </span>
             )}
@@ -340,7 +459,8 @@ const MonitSettings = () => {
       {viewMode === 'setpoints' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* LEFT COLUMN: NUTRIENTS & PH + FOGGER TIMER DAY/NIGHT TABLE */}
+            
+            {/* LEFT COLUMN: NUTRIENTS & PH + FOGGER HUMIDIFIER DAY/NIGHT */}
             <div className="space-y-6">
               {/* Nutrients & pH Limits Card */}
               <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4">
@@ -392,13 +512,24 @@ const MonitSettings = () => {
                       className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
                     />
                   </div>
+
+                  <div className="col-span-2 flex flex-col gap-1">
+                    <label className="text-xs font-medium text-slate-400">S-TANK Solenoid Threshold (mS/cm)</label>
+                    <input
+                      type="number"
+                      step="0.05"
+                      value={setpoints["S_TANK"] ?? 0.45}
+                      onChange={(e) => handleInputChange("S_TANK", parseFloat(e.target.value) || 0)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-amber-400 font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                    />
+                  </div>
                 </div>
               </div>
 
               {/* Fogger Day/Night Cycle Table Card */}
               <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4 overflow-x-auto">
                 <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2 border-b border-slate-700/50 pb-3">
-                  <Droplets className="w-4 h-4" /> Fogger Humidifier Day/Night Cycle
+                  <Wind className="w-4 h-4" /> Fogger Humidifier Day/Night Cycle
                 </h4>
 
                 <div className="flex justify-between items-center bg-slate-900/60 p-2.5 rounded-lg border border-slate-700/50">
@@ -539,26 +670,15 @@ const MonitSettings = () => {
               </div>
             </div>
 
-            {/* RIGHT COLUMN: CLIMATE CONTROL + CYCLIC TIMERS TABLE + USER CREDENTIALS */}
+            {/* RIGHT COLUMN: CLIMATE CONTROL + USER CREDENTIALS */}
             <div className="space-y-6">
-              {/* Climate Control Limits Card */}
+              {/* Climate Control Limits Card (Including TEMP MED and Hysteresis) */}
               <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4">
                 <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2 border-b border-slate-700/50 pb-3">
-                  <Thermometer className="w-4 h-4" /> Climate Temperature & Humidity Limits
+                  <Thermometer className="w-4 h-4" /> Climate Control & 2-Stage Fan Thresholds
                 </h4>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">TEMP MAX (°C)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={setpoints["TEMP MAX"] ?? 28.0}
-                      onChange={(e) => handleInputChange("TEMP MAX", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
-                    />
-                  </div>
-
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium text-slate-400">TEMP MIN (°C)</label>
                     <input
@@ -566,6 +686,50 @@ const MonitSettings = () => {
                       step="0.1"
                       value={setpoints["TEMP MIN"] ?? 22.0}
                       onChange={(e) => handleInputChange("TEMP MIN", parseFloat(e.target.value) || 0)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-slate-400">TEMP MED (Stage 1 Fan 1 °C)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={setpoints["TEMP MED"] ?? 25.0}
+                      onChange={(e) => handleInputChange("TEMP MED", parseFloat(e.target.value) || 0)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-emerald-400 font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-slate-400">TEMP MAX (Stage 2 Fan 2 & Pad °C)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={setpoints["TEMP MAX"] ?? 28.0}
+                      onChange={(e) => handleInputChange("TEMP MAX", parseFloat(e.target.value) || 0)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-red-400 font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-slate-400">TEMP Hysteresis (°C)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={setpoints["TEMP Hyst"] ?? 0.5}
+                      onChange={(e) => handleInputChange("TEMP Hyst", parseFloat(e.target.value) || 0)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-slate-400">HUMI MIN (%)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={setpoints["HUMI MIN"] ?? 50.0}
+                      onChange={(e) => handleInputChange("HUMI MIN", parseFloat(e.target.value) || 0)}
                       className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
                     />
                   </div>
@@ -581,137 +745,23 @@ const MonitSettings = () => {
                     />
                   </div>
 
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">HUMI MIN (%)</label>
+                  <div className="col-span-2 flex flex-col gap-1">
+                    <label className="text-xs font-medium text-slate-400">HUMI Safety Hysteresis / Buffer (%)</label>
                     <input
                       type="number"
                       step="0.1"
-                      value={setpoints["HUMI MIN"] ?? 50.0}
-                      onChange={(e) => handleInputChange("HUMI MIN", parseFloat(e.target.value) || 0)}
+                      value={setpoints["HUMI Hyst"] ?? 2.0}
+                      onChange={(e) => handleInputChange("HUMI Hyst", parseFloat(e.target.value) || 0)}
                       className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Cyclic Timers Side-by-Side Table Card */}
-              <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4 overflow-x-auto">
-                <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2 border-b border-slate-700/50 pb-3">
-                  <Clock className="w-4 h-4" /> Cyclic Timers Configuration
-                </h4>
-
-                <table className="w-full text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-700/60 bg-slate-800/40">
-                      <th className="py-2.5 px-3 text-left font-bold text-slate-400">Setting</th>
-                      <th className="py-2.5 px-3 text-center font-bold text-emerald-400 bg-emerald-500/10 rounded-tl-lg">Timer 1</th>
-                      <th className="py-2.5 px-3 text-center font-bold text-teal-400 bg-teal-500/10 rounded-tr-lg">Timer 2</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    <tr>
-                      <td className="py-2.5 px-3 font-semibold text-slate-300">Name:</td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="text"
-                          value={setpoints["Timer1 Name"] ?? "Timer 1"}
-                          onChange={(e) => handleInputChange("Timer1 Name", e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-bold text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="text"
-                          value={setpoints["Timer2 Name"] ?? "Timer 2"}
-                          onChange={(e) => handleInputChange("Timer2 Name", e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-bold text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2.5 px-3 font-semibold text-slate-300">Start:</td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="text"
-                          value={setpoints["Timer1 Start"] ?? "06:00"}
-                          onChange={(e) => handleInputChange("Timer1 Start", e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="text"
-                          value={setpoints["Timer2 Start"] ?? "00:00"}
-                          onChange={(e) => handleInputChange("Timer2 Start", e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2.5 px-3 font-semibold text-slate-300">Stop:</td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="text"
-                          value={setpoints["Timer1 Stop"] ?? "18:00"}
-                          onChange={(e) => handleInputChange("Timer1 Stop", e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="text"
-                          value={setpoints["Timer2 Stop"] ?? "23:59"}
-                          onChange={(e) => handleInputChange("Timer2 Stop", e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2.5 px-3 font-semibold text-slate-300">ON Min:</td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="number"
-                          value={setpoints["Timer1 ON Min"] ?? 5}
-                          onChange={(e) => handleInputChange("Timer1 ON Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-emerald-400 font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="number"
-                          value={setpoints["Timer2 ON Min"] ?? 10}
-                          onChange={(e) => handleInputChange("Timer2 ON Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-teal-400 font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2.5 px-3 font-semibold text-slate-300">OFF Min:</td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="number"
-                          value={setpoints["Timer1 OFF Min"] ?? 15}
-                          onChange={(e) => handleInputChange("Timer1 OFF Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-emerald-400 font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="number"
-                          value={setpoints["Timer2 OFF Min"] ?? 20}
-                          onChange={(e) => handleInputChange("Timer2 OFF Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-teal-400 font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
               {/* Security Credentials Card */}
               <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4">
                 <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2 border-b border-slate-700/50 pb-3">
-                  <ShieldCheck className="w-4 h-4" /> Two-User Security Credentials
+                  <ShieldCheck className="w-4 h-4" /> Two-User Security Access Credentials
                 </h4>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -755,11 +805,73 @@ const MonitSettings = () => {
             </div>
           </div>
 
-          <div className="pt-4">
+          {/* FULL EQUIPMENT CYCLIC TIMERS CONFIGURATION (ALL 6 TIMERS MATCHING MONIT.PY) */}
+          <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4 overflow-x-auto">
+            <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2 border-b border-slate-700/50 pb-3">
+              <Clock className="w-4 h-4" /> Equipment Cyclic Timers Configuration (All 6 Timers)
+            </h4>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {equipmentTimersConfig.map((timer) => (
+                <div key={timer.prefix} className="p-4 rounded-xl bg-slate-900/60 border border-slate-700/60 space-y-3">
+                  <div className="border-b border-slate-700/60 pb-2">
+                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Timer Label Name:</span>
+                    <input
+                      type="text"
+                      value={setpoints[timer.nameKey] ?? timer.defaultName}
+                      onChange={(e) => handleInputChange(timer.nameKey, e.target.value)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-green-400 font-bold outline-none focus:border-green-500"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="text-[11px] font-medium text-slate-400">Start Time</label>
+                      <input
+                        type="text"
+                        value={setpoints[timer.startKey] ?? timer.defaultStart}
+                        onChange={(e) => handleInputChange(timer.startKey, e.target.value)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-medium text-slate-400">Stop Time</label>
+                      <input
+                        type="text"
+                        value={setpoints[timer.stopKey] ?? timer.defaultStop}
+                        onChange={(e) => handleInputChange(timer.stopKey, e.target.value)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-medium text-slate-400">ON Min</label>
+                      <input
+                        type="number"
+                        value={setpoints[timer.onKey] ?? timer.defaultOn}
+                        onChange={(e) => handleInputChange(timer.onKey, parseFloat(e.target.value) || 0)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-emerald-400 font-mono text-center outline-none focus:border-green-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-medium text-slate-400">OFF Min</label>
+                      <input
+                        type="number"
+                        value={setpoints[timer.offKey] ?? timer.defaultOff}
+                        onChange={(e) => handleInputChange(timer.offKey, parseFloat(e.target.value) || 0)}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-teal-400 font-mono text-center outline-none focus:border-green-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-4 flex justify-end">
             <button
               onClick={handleSaveSetpoints}
               disabled={status !== 'connected'}
-              className="flex items-center gap-2 rounded-xl bg-green-500 hover:bg-green-400 px-6 py-2.5 text-sm font-semibold text-slate-950 transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 rounded-xl bg-green-500 hover:bg-green-400 px-6 py-3 text-sm font-semibold text-slate-950 transition-all shadow-lg shadow-green-500/20 disabled:opacity-50"
             >
               <Save className="h-4 w-4" /> Save & Push Monnet Setpoints
             </button>
@@ -777,21 +889,9 @@ const MonitSettings = () => {
               {/* Water Sensor */}
               <div>
                 <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-700/50 pb-2">
-                  <Droplets className="w-4 h-4" /> Water Sensor
+                  <Droplets className="w-4 h-4" /> Water Sensors Data
                 </h4>
                 <div className="space-y-2.5 text-xs font-mono">
-                  <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
-                    <span className="text-slate-400">Water Temp</span>
-                    <span className={`font-bold ${liveData?.temp !== undefined ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {liveData?.temp !== undefined ? `${liveData.temp} °C` : 'ERROR'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
-                    <span className="text-slate-400">Water Moisture</span>
-                    <span className={`font-bold ${liveData?.moist !== undefined ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {liveData?.moist !== undefined ? `${liveData.moist} %` : 'ERROR'}
-                    </span>
-                  </div>
                   <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
                     <span className="text-slate-400">Water EC</span>
                     <span className={`font-bold ${liveData?.ec !== undefined ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -813,75 +913,143 @@ const MonitSettings = () => {
                 </div>
               </div>
 
-              {/* Room Sensor */}
+              {/* Room Sensor (MD02) */}
               <div>
                 <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-700/50 pb-2">
-                  <Thermometer className="w-4 h-4" /> Room Sensor
+                  <Thermometer className="w-4 h-4" /> Room Climate Sensor (MD02)
                 </h4>
                 <div className="space-y-2.5 text-xs font-mono">
                   <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
                     <span className="text-slate-400">Room Temp</span>
-                    <span className={`font-bold ${liveData?.room_temp !== undefined ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {liveData?.room_temp !== undefined ? `${liveData.room_temp} °C` : 'ERROR'}
+                    <span className={`font-bold ${liveData?.room_temp !== undefined && liveData.room_temp !== null ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {liveData?.room_temp !== undefined && liveData.room_temp !== null ? `${liveData.room_temp} °C` : 'ERROR'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
                     <span className="text-slate-400">Room Humidity</span>
-                    <span className={`font-bold ${liveData?.room_humi !== undefined ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {liveData?.room_humi !== undefined ? `${liveData.room_humi} %` : 'ERROR'}
+                    <span className={`font-bold ${liveData?.room_humi !== undefined && liveData.room_humi !== null ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {liveData?.room_humi !== undefined && liveData.room_humi !== null ? `${liveData.room_humi} %` : 'ERROR'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Telemetry Status Card */}
+              <div>
+                <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-700/50 pb-2">
+                  <Activity className="w-4 h-4" /> Telemetry Info
+                </h4>
+                <div className="space-y-2 text-xs">
+                  <div className="p-2.5 rounded-lg bg-slate-900/50 border border-slate-700/40 font-mono">
+                    <span className="text-slate-400 block text-[10px]">MQTT Topic:</span>
+                    <span className="text-green-400 font-bold truncate block">inhydro/{deviceRoot}/telemetry/live</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-900/50 border border-slate-700/40 flex justify-between items-center">
+                    <span className="text-slate-400 text-[11px]">Stream Status:</span>
+                    <span className={`font-semibold text-xs flex items-center gap-1.5 ${liveData ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      <span className={`w-2 h-2 rounded-full ${liveData ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                      {liveData ? 'Live Telemetry' : 'Waiting...'}
                     </span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* COLUMN 2: RELAY STATUS DASHBOARD */}
-            <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4">
-              <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-700/50 pb-2">
-                <Power className="w-4 h-4" /> Relay Output Status
+            {/* COLUMN 2 & 3: ALL 12 RELAYS OUTPUT DASHBOARD */}
+            <div className="lg:col-span-2 rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-5">
+              <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider flex items-center justify-between border-b border-slate-700/50 pb-2">
+                <span className="flex items-center gap-2"><Power className="w-4 h-4" /> All 12 Relay Output Status (Modbus RTU)</span>
+                <span className="text-[11px] text-slate-400 font-normal">Slave ID: 1</span>
               </h4>
 
-              <div className="space-y-2.5 text-xs">
-                {[
-                  { name: 'Timer 1 Relay', state: liveData?.timer1 },
-                  { name: 'Timer 2 Relay', state: liveData?.timer2 },
-                  { name: 'Temp Relay (AC/Heater)', state: liveData?.relay_temp },
-                  { name: 'Humidity Relay (Fogger)', state: liveData?.relay_humi },
-                ].map((relay, idx) => (
-                  <div key={idx} className="flex justify-between items-center py-2 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
-                    <span className="text-slate-300 font-semibold">{relay.name}</span>
-                    <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-1.5 ${relay.state ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800 text-slate-400 border border-slate-700'}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${relay.state ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-                      {relay.state ? 'ACTIVE (ON)' : 'INACTIVE (OFF)'}
-                    </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {relaysList.map((relay) => {
+                  const RelayIcon = relay.icon;
+                  const isRelayOn = liveData ? Boolean(liveData[relay.key]) : false;
+                  return (
+                    <div
+                      key={relay.key}
+                      className={`p-3 rounded-xl border transition-all flex flex-col justify-between gap-2 ${isRelayOn
+                        ? 'bg-emerald-500/10 border-emerald-500/30 shadow-lg shadow-emerald-950/20'
+                        : 'bg-slate-900/60 border-slate-700/50'}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className={`p-1.5 rounded-lg ${isRelayOn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
+                            <RelayIcon className="w-4 h-4" />
+                          </div>
+                          <span className="text-xs font-semibold text-white truncate">{relay.name}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-800">
+                        <span className="text-[10px] font-mono text-slate-500">{relay.key}</span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1.5 ${isRelayOn ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400 border border-slate-700'}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${isRelayOn ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                          {isRelayOn ? 'ACTIVE (ON)' : 'OFF'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* LIVE EQUIPMENT TIMERS STATUS SUMMARY GRID */}
+              <div className="pt-3 border-t border-slate-700/50 space-y-3">
+                <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider flex items-center gap-2">
+                  <Clock className="w-4 h-4" /> Live Equipment Timers Summary
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+                  {/* Fogger Humidifier Timer Summary */}
+                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-white text-xs">{setpoints["HUMI Name"] || "FOGGER TIMER"}</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${liveData?.relay_fogger || liveData?.relay_humi ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
+                        {liveData?.relay_fogger || liveData?.relay_humi ? 'ON' : 'OFF'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 font-mono flex justify-between">
+                      <span>Day Cycle:</span>
+                      <span className="text-amber-400">{setpoints["HUMI D_ON Min"] || 10}m ON / {setpoints["HUMI D_OFF Min"] || 20}m OFF</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 font-mono flex justify-between">
+                      <span>Night Cycle:</span>
+                      <span className="text-indigo-400">{setpoints["HUMI N_ON Min"] || 5}m ON / {setpoints["HUMI N_OFF Min"] || 40}m OFF</span>
+                    </div>
                   </div>
-                ))}
-              </div>
-            </div>
 
-            {/* COLUMN 3: SYSTEM STATUS & INFO */}
-            <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4">
-              <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-700/50 pb-2">
-                <Activity className="w-4 h-4" /> Monit Controller Telemetry
-              </h4>
+                  {/* 6 Equipment Timers Summary */}
+                  {equipmentTimersConfig.map(t => {
+                    const isTimerActive = liveData ? Boolean(liveData[t.relayKey]) : false;
+                    const timerName = setpoints[t.nameKey] || t.defaultName;
+                    const startTime = setpoints[t.startKey] || t.defaultStart;
+                    const stopTime = setpoints[t.stopKey] || t.defaultStop;
+                    const onMin = setpoints[t.onKey] || t.defaultOn;
+                    const offMin = setpoints[t.offKey] || t.defaultOff;
 
-              <div className="space-y-3 text-xs">
-                <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-700/40 space-y-1">
-                  <span className="text-slate-400 block text-[11px]">Selected Machine:</span>
-                  <span className="font-bold text-white text-sm">{selectedDevice?.name || deviceRoot}</span>
-                </div>
-                <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-700/40 space-y-1 font-mono">
-                  <span className="text-slate-400 block text-[11px]">MQTT Topic:</span>
-                  <span className="text-green-400 font-bold">inhydro/{deviceRoot}/telemetry/live</span>
-                </div>
-                <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-700/40 space-y-1">
-                  <span className="text-slate-400 block text-[11px]">Data Status:</span>
-                  <span className={`font-semibold flex items-center gap-1.5 ${liveData ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    <span className={`w-2 h-2 rounded-full ${liveData ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                    {liveData ? 'Receiving Live Streams' : 'Waiting for Telemetry...'}
-                  </span>
+                    return (
+                      <div key={t.prefix} className="p-3 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <span className="font-bold text-white text-xs truncate max-w-[130px]">{timerName}</span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${isTimerActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
+                            {isTimerActive ? 'ON' : 'OFF'}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-mono flex justify-between">
+                          <span>Window:</span>
+                          <span className="text-slate-200">{startTime} - {stopTime}</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 font-mono flex justify-between">
+                          <span>Cycle:</span>
+                          <span className="text-emerald-400">{onMin}m ON / {offMin}m OFF</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
+
             </div>
 
           </div>

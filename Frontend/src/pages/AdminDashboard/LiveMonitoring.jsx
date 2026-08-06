@@ -187,8 +187,6 @@ const LiveMonitoring = () => {
         if (fields.length === 0) {
           const isMonitType = deviceMeta?.deviceType === 'monit' || deviceMeta?.deviceType === 'dosing';
           fields = isMonitType ? [
-            { key: 'field1', label: 'Water Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
-            { key: 'field2', label: 'Water Moisture', icon: Droplets, unit: '%', type: 'moisture' },
             { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
             { key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
             { key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
@@ -399,8 +397,6 @@ const LiveMonitoring = () => {
         const isMonitType = deviceMeta?.deviceType === 'monit' || deviceMeta?.deviceType === 'dosing';
 
         const currentMetrics = isMonitType ? {
-          field1: tempVal,
-          field2: moistVal,
           field3: ecVal,
           field4: phVal,
           field5: roomTempVal,
@@ -413,8 +409,6 @@ const LiveMonitoring = () => {
         };
 
         const fields = isMonitType ? [
-          { key: 'field1', label: 'Water Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
-          { key: 'field2', label: 'Water Moisture', icon: Droplets, unit: '%', type: 'moisture' },
           { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
           { key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
           { key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' },

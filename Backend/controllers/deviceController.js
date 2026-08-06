@@ -78,8 +78,8 @@ exports.getDevices = async (req, res) => {
           liveStats.ph = parseFloat(latestData.s3?.t || 0);
           liveStats.ec = parseFloat(latestData.s4?.t || 0);
         } else if (device.deviceType === 'monit' || device.deviceType === 'dosing') {
-          liveStats.temp = parseFloat(latestData.temp ?? latestData.water_temp ?? 0);
-          liveStats.moisture = parseFloat(latestData.moist ?? latestData.moisture ?? 0);
+          liveStats.temp = parseFloat(latestData.room_temp ?? 0);
+          liveStats.moisture = parseFloat(latestData.room_humi ?? 0);
           liveStats.ph = parseFloat(latestData.ph ?? 0);
           liveStats.ec = parseFloat(latestData.ec ?? 0);
         } else {
