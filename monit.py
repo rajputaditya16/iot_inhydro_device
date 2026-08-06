@@ -95,10 +95,11 @@ class ModbusRelay:
         self.is_active = False
         send_modbus_relay_cmd(self.channel, False)
 
-# Modbus RTU Relays (Slave ID 1, Channels 0-9)
+# Modbus RTU Relays (Slave ID 1, Channels 0-12)
 relay_ec1        = ModbusRelay(0, "EC1 ")
 relay_ec2        = ModbusRelay(1, "EC2 ")
 relay_ph         = ModbusRelay(2, "pH ")
+relay_solenoid   = ModbusRelay(12, "S-Tank Solenoid")
 relay_fan1       = ModbusRelay(3, "1. Fan ")
 relay_fan2       = ModbusRelay(4, "2. Fan ")
 relay_pad        = ModbusRelay(5, "Cooling Pad ")
@@ -114,7 +115,7 @@ relay_temp = relay_fan1
 relay_humi = relay_fogger
 
 def all_relays_off():
-    for r in [relay_ec1, relay_ec2, relay_ph, relay_fan1, relay_fan2, relay_pad, relay_fogger, relay_acf, relay_sprinkler, relay_irrigation, relay_timer1, relay_timer2]:
+    for r in [relay_ec1, relay_ec2, relay_ph, relay_solenoid, relay_fan1, relay_fan2, relay_pad, relay_fogger, relay_acf, relay_sprinkler, relay_irrigation, relay_timer1, relay_timer2]:
         try: r.off()
         except: pass
 
@@ -122,6 +123,7 @@ all_relays_off()
 
 ec_active      = False
 ph_active      = False
+solenoid_active = False
 temp_active    = False
 humi_active    = False
 humi_logic_active = False
@@ -148,6 +150,7 @@ setpoints = {
     "EC MAX": 1.8,
     "PH LOW": 5.8,
     "PH HIGH": 6.5,
+    "S_TANK": 2.0,
     
     # Climate Control (MD02 Temp & Humidity)
     "TEMP MIN": 22.0,
@@ -605,10 +608,10 @@ _pad_humi_allowed = True
 
 def control_system(water_data, md02_data):
     warnings = []
-    global ec_active, ph_active, temp_active, humi_active, last_ec, last_ph, ec_start_time, ph_start_time, _pad_humi_allowed
+    global ec_active, ph_active, solenoid_active, temp_active, humi_active, last_ec, last_ph, ec_start_time, ph_start_time, _pad_humi_allowed
 
     now = time.time()
-    # 1. WATER SENSOR DOSING LOGIC (EC & pH)
+    # 1. WATER SENSOR DOSING LOGIC (EC & pH & S-Tank Solenoid)
     if water_data:
         ec_val = water_data["ec"]
         ph_val = water_data["ph"]
@@ -617,6 +620,23 @@ def control_system(water_data, md02_data):
         ec_max = float(setpoints.get("EC MAX", 1.8))
         ph_low = float(setpoints.get("PH LOW", 5.5))
         ph_high = float(setpoints.get("PH HIGH", 6.5))
+        s_tank = float(setpoints.get("S_TANK", 2.0))
+
+        # Solenoid Control: Turns ON when EC >= S_TANK, stays ON until EC <= EC_MIN
+        if not solenoid_active and ec_val >= s_tank:
+            solenoid_active = True
+            relay_solenoid.on()
+            warnings.append(f"S-TANK SOLENOID ON (EC >= {s_tank})")
+        elif solenoid_active:
+            if ec_val <= ec_min:
+                solenoid_active = False
+                relay_solenoid.off()
+                warnings.append(f"S-TANK SOLENOID OFF (EC <= {ec_min})")
+            else:
+                relay_solenoid.on()
+                warnings.append(f"S-TANK SOLENOID ACTIVE (EC: {ec_val})")
+        else:
+            relay_solenoid.off()
 
         # EC Control (Doses for max 60s, then waits 180s / 3 min for mixing before re-evaluating)
         if not ec_active and ec_val < ec_min:
@@ -626,10 +646,10 @@ def control_system(water_data, md02_data):
                 relay_ec1.on()
                 relay_ec2.on()
                 last_ec = now
-                warnings.append("⚠ EC LOW – DOSING EC1 & EC2")
+                warnings.append("EC LOW - DOSING EC1 & EC2")
             else:
                 rem = int(180 - (now - last_ec))
-                warnings.append(f"⏳ EC MIXING PAUSE ({rem}s remaining)")
+                warnings.append(f"EC MIXING PAUSE ({rem}s remaining)")
         elif ec_active:
             if ec_val >= ec_max or (now - ec_start_time >= 60):
                 ec_active = False
@@ -639,7 +659,7 @@ def control_system(water_data, md02_data):
             else:
                 relay_ec1.on()
                 relay_ec2.on()
-                warnings.append("⚠ EC DOSING ACTIVE")
+                warnings.append("EC DOSING ACTIVE")
 
         # pH Control (Doses for max 60s, then waits 180s / 3 min for mixing before re-evaluating)
         if not ph_active and ph_val > ph_high:
@@ -648,10 +668,10 @@ def control_system(water_data, md02_data):
                 ph_start_time = now
                 relay_ph.on()
                 last_ph = now
-                warnings.append("⚠ PH HIGH – DOSING PH MINUS")
+                warnings.append("PH HIGH - DOSING PH MINUS")
             else:
                 rem = int(180 - (now - last_ph))
-                warnings.append(f"⏳ PH MIXING PAUSE ({rem}s remaining)")
+                warnings.append(f"PH MIXING PAUSE ({rem}s remaining)")
         elif ph_active:
             if ph_val <= ph_low or (now - ph_start_time >= 60):
                 ph_active = False
@@ -659,14 +679,16 @@ def control_system(water_data, md02_data):
                 last_ph = now
             else:
                 relay_ph.on()
-                warnings.append("⚠ PH DOSING ACTIVE")
+                warnings.append("PH DOSING ACTIVE")
     else:
         ec_active = False
         ph_active = False
+        solenoid_active = False
         relay_ec1.off()
         relay_ec2.off()
         relay_ph.off()
-        warnings.append("⚠ WATER SENSOR ERR – DOSING DISABLED")
+        relay_solenoid.off()
+        warnings.append("WATER SENSOR ERR - DOSING DISABLED")
 
     # 2. CLIMATE CONTROL (2-Stage Fan & Cooling Pad)
     if md02_data:
@@ -736,9 +758,9 @@ def control_system(water_data, md02_data):
         else: relay_fan2.off()
 
         if fan1_on and fan2_on:
-            warnings.append("⚠ TEMP HIGH (STAGE 2: ALL FANS ON)")
+            warnings.append("TEMP HIGH (STAGE 2: ALL FANS ON)")
         elif fan1_on:
-            warnings.append("⚠ TEMP MED (STAGE 1: FAN 1 ON)")
+            warnings.append("TEMP MED (STAGE 1: FAN 1 ON)")
 
         # Cooling Pad Pump Automation + Humidity Safety Interlock with Hysteresis
         # Cutoff ON when room_humi >= h_max; Pad re-enabled when room_humi < (h_max - h_buffer)
@@ -752,21 +774,21 @@ def control_system(water_data, md02_data):
         if room_temp >= t_max and pad_humi_allowed:
             process_generic_cyclic_timer("PAD", relay_pad)
             if relay_pad.is_active:
-                warnings.append("⚠ COOLING PAD PUMP ON")
+                warnings.append("COOLING PAD PUMP ON")
         else:
             relay_pad.off()
             if not pad_humi_allowed:
-                warnings.append("⚠ PAD CUTOFF (HUMIDITY HIGH)")
+                warnings.append("PAD CUTOFF (HUMIDITY HIGH)")
     else:
         relay_fan1.off()
         relay_fan2.off()
         relay_pad.off()
-        warnings.append("⚠ MD02 SENSOR ERR – CLIMATE DISABLED")
+        warnings.append("ROOM SENSOR ERROR")
 
     # 3. FOGGER AUTOMATION (Day/Night + Humi Threshold)
     humi_mode = process_humi_day_night_timer(relay_fogger, md02_data["room_humi"] if md02_data else None)
     if relay_fogger.is_active:
-        warnings.append(f"⚠ FOGGER ON ({humi_mode})")
+        warnings.append(f"FOGGER ON ({humi_mode})")
 
     # 4. SOW CYCLIC TIMERS
     process_generic_cyclic_timer("ACF", relay_acf)
@@ -779,12 +801,15 @@ def control_system(water_data, md02_data):
 
 def manual_stop():
     all_relays_off()
-    global ec_active, ph_active, temp_active, humi_active, humi_logic_active
-    ec_active = ph_active = temp_active = humi_active = humi_logic_active = False
+    global ec_active, ph_active, solenoid_active, temp_active, humi_active, humi_logic_active
+    ec_active = ph_active = solenoid_active = temp_active = humi_active = humi_logic_active = False
     for ts in timer_state.values():
         ts["state"] = "OFF"
         ts["last"] = 0.0
-    lbl_warn.config(text=" MANUAL STOP ALL RELAYS")
+    if 'warn_box_frame' in globals():
+        for child in warn_box_frame.winfo_children():
+            child.destroy()
+        tk.Label(warn_box_frame, text="MANUAL STOP ALL RELAYS", font=("Arial", 9, "bold"), fg="#dc2626", bg="#e0e0e0", anchor="w", justify="left").pack(anchor="w")
 
 def restart_program():
     manual_stop()
@@ -1084,7 +1109,7 @@ COLUMNS = [
     "timestamp", "temp", "moist", "ec", "ph",
     "room_temp", "room_humi", "timer1", "timer2",
     "relay_temp", "relay_humi", "relay_ec1", "relay_ec2",
-    "relay_ph", "relay_fan1", "relay_fan2", "relay_pad",
+    "relay_ph", "relay_solenoid", "relay_fan1", "relay_fan2", "relay_pad",
     "relay_fogger", "relay_acf", "relay_sprinkler", "relay_irrigation"
 ]
 
@@ -1108,6 +1133,7 @@ def publish_live_telemetry(water_data, md02_data):
             "relay_ec1": relay_ec1.is_active,
             "relay_ec2": relay_ec2.is_active,
             "relay_ph": relay_ph.is_active,
+            "relay_solenoid": relay_solenoid.is_active,
             "relay_fan1": relay_fan1.is_active,
             "relay_fan2": relay_fan2.is_active,
             "relay_pad": relay_pad.is_active,
@@ -1152,6 +1178,7 @@ def save_local_telemetry(water_data, md02_data):
         1 if relay_ec1.is_active else 0,
         1 if relay_ec2.is_active else 0,
         1 if relay_ph.is_active else 0,
+        1 if relay_solenoid.is_active else 0,
         1 if relay_fan1.is_active else 0,
         1 if relay_fan2.is_active else 0,
         1 if relay_pad.is_active else 0,
@@ -1203,13 +1230,14 @@ def unpack_row(r):
         "relay_ec1": bool(r[11]) if len(r) > 11 and r[11] is not None else False,
         "relay_ec2": bool(r[12]) if len(r) > 12 and r[12] is not None else False,
         "relay_ph": bool(r[13]) if len(r) > 13 and r[13] is not None else False,
-        "relay_fan1": bool(r[14]) if len(r) > 14 and r[14] is not None else False,
-        "relay_fan2": bool(r[15]) if len(r) > 15 and r[15] is not None else False,
-        "relay_pad": bool(r[16]) if len(r) > 16 and r[16] is not None else False,
-        "relay_fogger": bool(r[17]) if len(r) > 17 and r[17] is not None else False,
-        "relay_acf": bool(r[18]) if len(r) > 18 and r[18] is not None else False,
-        "relay_sprinkler": bool(r[19]) if len(r) > 19 and r[19] is not None else False,
-        "relay_irrigation": bool(r[20]) if len(r) > 20 and r[20] is not None else False
+        "relay_solenoid": bool(r[14]) if len(r) > 14 and r[14] is not None else False,
+        "relay_fan1": bool(r[15]) if len(r) > 15 and r[15] is not None else False,
+        "relay_fan2": bool(r[16]) if len(r) > 16 and r[16] is not None else False,
+        "relay_pad": bool(r[17]) if len(r) > 17 and r[17] is not None else False,
+        "relay_fogger": bool(r[18]) if len(r) > 18 and r[18] is not None else False,
+        "relay_acf": bool(r[19]) if len(r) > 19 and r[19] is not None else False,
+        "relay_sprinkler": bool(r[20]) if len(r) > 20 and r[20] is not None else False,
+        "relay_irrigation": bool(r[21]) if len(r) > 21 and r[21] is not None else False
     }
 
 def sync_offline_data_worker():
@@ -1402,9 +1430,9 @@ tk.Label(col_sensors, text="ROOM SENSOR", font=("Arial", 11, "bold"), fg="#1565c
 lbl_val_room_temp = create_sensor_row(col_sensors, "Room Temp")
 lbl_val_room_humi = create_sensor_row(col_sensors, "Room Humi")
 
-# Warning Banner at bottom of Column 1
-lbl_warn = tk.Label(col_sensors, text="", font=("Arial", 9, "bold"), fg="#c62828", bg="#e0e0e0", justify="left")
-lbl_warn.pack(pady=4, anchor="w")
+# Warning / Status Container at bottom of Column 1
+warn_box_frame = tk.Frame(col_sensors, bg="#e0e0e0")
+warn_box_frame.pack(pady=4, anchor="w", fill="x")
 
 # Sleek Divider Line 1 (Sleeker 2px thickness)
 sep1 = tk.Frame(content_grid, bg="black", width=2)
@@ -1421,8 +1449,9 @@ relay_items = [
     ("EC1 ",        "ec1"),
     ("EC2 ",        "ec2"),
     ("pH ",         "ph"),
-    ("Fan ",        "fan1"),
-    ("Fan ",        "fan2"),
+    ("S-Tank Solenoid", "solenoid"),
+    ("Fan(1st 50%)",       "fan1"),
+    ("Fan(2nd 50%)",       "fan2"),
     ("Cooling Pad", "pad"),
     ("Fogger ",     "fogger"),
     ("ACF Fan",     "acf"),
@@ -1978,6 +2007,7 @@ make_sp_cell(grid_dosing, "EC MIN", "EC Min:").grid(row=0, column=0, padx=4, pad
 make_sp_cell(grid_dosing, "EC MAX", "EC Max:").grid(row=0, column=1, padx=4, pady=3, sticky="ew")
 make_sp_cell(grid_dosing, "PH LOW", "pH Low:").grid(row=1, column=0, padx=4, pady=3, sticky="ew")
 make_sp_cell(grid_dosing, "PH HIGH", "pH High:").grid(row=1, column=1, padx=4, pady=3, sticky="ew")
+make_sp_cell(grid_dosing, "S_TANK", "S Tank:").grid(row=2, column=0, padx=4, pady=3, sticky="ew")
 
 # Card 3 (LEFT PANE): Climate Control
 card_climate_sp = tk.LabelFrame(left_sp_pane, text=" CLIMATE CONTROL ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
@@ -2238,6 +2268,7 @@ def update():
         "ec1": relay_ec1.is_active,
         "ec2": relay_ec2.is_active,
         "ph": relay_ph.is_active,
+        "solenoid": relay_solenoid.is_active,
         "fan1": relay_fan1.is_active,
         "fan2": relay_fan2.is_active,
         "pad": relay_pad.is_active,
@@ -2321,7 +2352,43 @@ def update():
         h_spec["day_cycle"].config(text=d_str, fg="#0f172a")
         h_spec["night_cycle"].config(text=n_str, fg="#0f172a")
 
-    lbl_warn.config(text="\n".join(warnings))
+    # Render Warning & Status Messages with Categorized Colors (Label Reuse - Zero Blinking)
+    if 'warn_box_frame' in globals():
+        existing_labels = list(warn_box_frame.winfo_children())
+        num_existing = len(existing_labels)
+        num_needed = len(warnings)
+
+        # Update existing labels only if text or color changed
+        for i in range(min(num_existing, num_needed)):
+            w_text = warnings[i]
+            m = w_text.upper()
+            if "ERR" in m or "CUTOFF" in m or "DISABLED" in m:
+                fg_col = "#dc2626"
+            elif "ON" in m or "ACTIVE" in m:
+                fg_col = "#15803d"
+            else:
+                fg_col = "#92400e"
+
+            lbl = existing_labels[i]
+            if lbl.cget("text") != w_text or lbl.cget("fg") != fg_col:
+                lbl.config(text=w_text, fg=fg_col)
+
+        # Create new labels for new messages
+        for i in range(num_existing, num_needed):
+            w_text = warnings[i]
+            m = w_text.upper()
+            if "ERR" in m or "CUTOFF" in m or "DISABLED" in m:
+                fg_col = "#dc2626"
+            elif "ON" in m or "ACTIVE" in m:
+                fg_col = "#15803d"
+            else:
+                fg_col = "#92400e"
+
+            tk.Label(warn_box_frame, text=w_text, font=("Arial", 9, "bold"), fg=fg_col, bg="#e0e0e0", anchor="w", justify="left").pack(anchor="w")
+
+        # Remove extra labels if count decreased
+        for i in range(num_needed, num_existing):
+            existing_labels[i].destroy()
 
     # Update Header Clock (Day, Date, Time)
     if 'lbl_clock' in globals():
