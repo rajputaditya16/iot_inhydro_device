@@ -1,4 +1,4 @@
-import os, sys, json, time, datetime, socket, glob
+import os, sys, json, time, datetime, socket, glob, fcntl
 import subprocess, threading
 import tkinter as tk
 from PIL import Image, ImageTk
@@ -317,29 +317,23 @@ def read_ph_meter():
             except Exception: pass
     return None
 
-last_valid_ec = 0.0
-last_valid_raw_ec = 0
-last_valid_ph = 0.0
-
 # Combined Water Sensor Reader combining EC and pH meter readings
 def read_water_sensor():
-    global last_valid_ec, last_valid_raw_ec, last_valid_ph
     ec_data = read_ec_meter()
     time.sleep(0.08)
     ph_data = read_ph_meter()
 
-    if ec_data and "ec" in ec_data and ec_data["ec"] > 0:
-        last_valid_ec = ec_data["ec"]
-        last_valid_raw_ec = ec_data.get("raw_ec", 0)
-    if ph_data and "ph" in ph_data and ph_data["ph"] > 0:
-        last_valid_ph = ph_data["ph"]
+    if ec_data is not None or ph_data is not None:
+        ec_val = ec_data["ec"] if (ec_data and "ec" in ec_data) else 0.0
+        raw_ec = ec_data.get("raw_ec", 0) if ec_data else 0
+        ph_val = ph_data["ph"] if (ph_data and "ph" in ph_data) else 0.0
 
-    if last_valid_ec > 0 or last_valid_ph > 0:
-        return {
-            "ec": last_valid_ec,
-            "raw_ec": last_valid_raw_ec,
-            "ph": last_valid_ph
-        }
+        if ec_val > 0 or ph_val > 0:
+            return {
+                "ec": ec_val,
+                "raw_ec": raw_ec,
+                "ph": ph_val
+            }
     return None
 
 # Read MD02 Temperature & Humidity Transmitter (Slave ID 1) STRICTLY via SERIAL_PORT_MD02
@@ -379,18 +373,14 @@ def sensor_polling_loop():
     global cached_water_data, cached_md02_data
     while True:
         try:
-            w_data = read_water_sensor()
-            if w_data:
-                cached_water_data = w_data
+            cached_water_data = read_water_sensor()
         except Exception:
-            pass
+            cached_water_data = None
 
         try:
-            m_data = read_md02_sensor()
-            if m_data:
-                cached_md02_data = m_data
+            cached_md02_data = read_md02_sensor()
         except Exception:
-            pass
+            cached_md02_data = None
 
         time.sleep(1.0)
 
@@ -628,17 +618,20 @@ def control_system(water_data, md02_data):
         ph_low = float(setpoints.get("PH LOW", 5.5))
         ph_high = float(setpoints.get("PH HIGH", 6.5))
 
-        # EC Control (Triggers immediately when ec_val < ec_min)
+        # EC Control (Doses for max 60s, then waits 180s / 3 min for mixing before re-evaluating)
         if not ec_active and ec_val < ec_min:
-            if now - last_ec > 5 or last_ec == 0:
+            if now - last_ec >= 180 or last_ec == 0:
                 ec_active = True
                 ec_start_time = now
                 relay_ec1.on()
                 relay_ec2.on()
                 last_ec = now
                 warnings.append("⚠ EC LOW – DOSING EC1 & EC2")
+            else:
+                rem = int(180 - (now - last_ec))
+                warnings.append(f"⏳ EC MIXING PAUSE ({rem}s remaining)")
         elif ec_active:
-            if ec_val >= ec_max or (now - ec_start_time > 60):
+            if ec_val >= ec_max or (now - ec_start_time >= 60):
                 ec_active = False
                 relay_ec1.off()
                 relay_ec2.off()
@@ -648,16 +641,19 @@ def control_system(water_data, md02_data):
                 relay_ec2.on()
                 warnings.append("⚠ EC DOSING ACTIVE")
 
-        # pH Control (Triggers immediately when ph_val > ph_high)
+        # pH Control (Doses for max 60s, then waits 180s / 3 min for mixing before re-evaluating)
         if not ph_active and ph_val > ph_high:
-            if now - last_ph > 5 or last_ph == 0:
+            if now - last_ph >= 180 or last_ph == 0:
                 ph_active = True
                 ph_start_time = now
                 relay_ph.on()
                 last_ph = now
                 warnings.append("⚠ PH HIGH – DOSING PH MINUS")
+            else:
+                rem = int(180 - (now - last_ph))
+                warnings.append(f"⏳ PH MIXING PAUSE ({rem}s remaining)")
         elif ph_active:
-            if ph_val <= ph_low or (now - ph_start_time > 60):
+            if ph_val <= ph_low or (now - ph_start_time >= 60):
                 ph_active = False
                 relay_ph.off()
                 last_ph = now
@@ -709,34 +705,40 @@ def control_system(water_data, md02_data):
         h_buffer = float(setpoints.get("HUMI BUFFER", setpoints.get("HUMI Hyst", 2.0)))
         h_hyst   = h_buffer
 
-        # 2-Stage Directional Exhaust Fan Control with Bidirectional Thermal Buffer (t_buffer)
-        # Fan 2 (Stage 2 - Upper Stage): ON at >= t_max, OFF when temp drops below (t_max - t_buffer)
-        if room_temp >= t_max:
-            fan2_on = True
-        elif room_temp < (t_max - t_buffer):
-            fan2_on = False
-        else:
-            fan2_on = relay_fan2.is_active
-
-        # Fan 1 (Stage 1 - Lower Stage): ON at >= t_med, OFF when temp drops below (t_min - t_buffer)
+        # 2-Stage Exhaust Fan Logic:
+        # Rising (Heat Up): 
+        #   - Fan 1 (1st Relay) turns ON at >= t_med
+        #   - Fan 2 (2nd Relay) turns ON at >= t_max (Both ON)
+        # Falling (Cool Down):
+        #   - Fan 2 (2nd Relay) turns OFF at < (t_med - t_buffer)
+        #   - Fan 1 (1st Relay) turns OFF at <= t_min
+        
+        # Fan 1 (1st Relay) State:
         if room_temp >= t_med:
             fan1_on = True
-        elif room_temp < (t_min - t_buffer):
+        elif room_temp <= t_min:
             fan1_on = False
         else:
             fan1_on = relay_fan1.is_active
 
-        if fan2_on:
-            relay_fan1.on()
-            relay_fan2.on()
-            warnings.append("⚠ TEMP HIGH (ALL FANS ON)")
-        elif fan1_on:
-            relay_fan1.on()
-            relay_fan2.off()
-            warnings.append("⚠ TEMP MED (50% FANS ON)")
+        # Fan 2 (2nd Relay) State:
+        if room_temp >= t_max:
+            fan2_on = True
+        elif room_temp < (t_med - t_buffer):
+            fan2_on = False
         else:
-            relay_fan1.off()
-            relay_fan2.off()
+            fan2_on = relay_fan2.is_active
+
+        if fan1_on: relay_fan1.on()
+        else: relay_fan1.off()
+
+        if fan2_on: relay_fan2.on()
+        else: relay_fan2.off()
+
+        if fan1_on and fan2_on:
+            warnings.append("⚠ TEMP HIGH (STAGE 2: ALL FANS ON)")
+        elif fan1_on:
+            warnings.append("⚠ TEMP MED (STAGE 1: FAN 1 ON)")
 
         # Cooling Pad Pump Automation + Humidity Safety Interlock with Hysteresis
         # Cutoff ON when room_humi >= h_max; Pad re-enabled when room_humi < (h_max - h_buffer)
@@ -794,18 +796,18 @@ def restart_program():
 
 def set_wifi(ssid, password):
     try:
-        subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True)
-        command = ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password]
+        subprocess.run(['nmcli', 'connection', 'delete', ssid], capture_output=True)
+        command = ['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password]
         result = subprocess.run(command, capture_output=True, text=True)
         if "key-mgmt" in result.stderr:
-            fallback_cmd = ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password, 'wifi-sec.key-mgmt', 'wpa-psk']
+            fallback_cmd = ['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password, 'wifi-sec.key-mgmt', 'wpa-psk']
             result_fallback = subprocess.run(fallback_cmd, capture_output=True, text=True)
             if result_fallback.returncode == 0:
-                return f"SUCCESS: Connected to {ssid} (Fallback mode)!"
+                return f"SUCCESS: Connected to '{ssid}'!"
             else:
                 return f"FAILED: {result_fallback.stderr.strip()}"
         if result.returncode == 0:
-            return f"SUCCESS: Connected to {ssid}!"
+            return f"SUCCESS: Connected to '{ssid}'!"
         else:
             return f"FAILED: {result.stderr.strip()}"
     except Exception as e:
@@ -813,93 +815,264 @@ def set_wifi(ssid, password):
 
 def scan_wifi():
     try:
-        command = ['sudo', 'nmcli', '-t', '-f', 'SSID', 'dev', 'wifi']
-        result = subprocess.run(command, capture_output=True, text=True)
+        command = ['nmcli', '-t', '-f', 'SSID,SIGNAL', 'dev', 'wifi', 'list']
+        result = subprocess.run(command, capture_output=True, text=True, timeout=8)
         if result.returncode == 0:
-            raw_names = [name.strip() for name in result.stdout.split('\n') if name.strip()]
-            unique_names = sorted(list(set(raw_names)))
-            if not unique_names:
-                return "No networks found..."
+            lines = result.stdout.strip().split('\n')
+            found = {}
+            for line in lines:
+                if ':' in line:
+                    parts = line.rsplit(':', 1)
+                    ssid = parts[0].strip()
+                    sig = parts[1].strip()
+                    if ssid and ssid not in found:
+                        found[ssid] = sig
+            if not found:
+                return "\r\n[NO WIFI NETWORKS FOUND]\r\n"
             response = "\r\n--- NEARBY WIFI NETWORKS ---\r\n"
-            for i, name in enumerate(unique_names, 1):
-                response += f"{i}. {name}\r\n"
-            response += "----------------------------"
+            for i, (ssid, sig) in enumerate(found.items(), 1):
+                response += f"{i}. {ssid} ({sig}% Signal)\r\n"
+            response += "\r\nUse command [4.] to connnect another wifi\r\n"
             return response
         else:
             return f"SCAN FAILED: {result.stderr.strip()}"
     except Exception as e:
         return f"SCAN ERROR: {str(e)}"
 
+active_bt_fds = set()
+
+def handle_bt_client_fd(fd_int):
+    active_bt_fds.add(fd_int)
+    try:
+        print(f" 📱 Bluetooth Client Connected (FD: {fd_int})")
+        welcome_msg = (
+            "\r\n--- INHYDRO CONTROLLER MENU ---\r\n\r\n"
+            #f"Device ID: {DEVICE_NAME}\r\n\r\n"
+            "COMMAND MENU:\r\n"
+            "1. PING\r\n"
+            "2. SCAN\r\n"
+            "3. STATUS\r\n"
+            "4. WIFI:SSID:PASSWORD\r\n\r\n"
+            #"5. ID:new_device_id\r\n\r\n"
+        )
+        os.write(fd_int, welcome_msg.encode('utf-8'))
+
+        buf = ""
+        while True:
+            raw = os.read(fd_int, 1024)
+            if not raw:
+                print(f" 📱 Bluetooth Client Disconnected (FD: {fd_int})")
+                break
+            buf += raw.decode('utf-8', errors='ignore')
+
+            lines = []
+            while "\n" in buf or "\r" in buf:
+                if "\r\n" in buf:
+                    line, buf = buf.split("\r\n", 1)
+                elif "\n" in buf:
+                    line, buf = buf.split("\n", 1)
+                else:
+                    line, buf = buf.split("\r", 1)
+                lines.append(line)
+
+            if not lines and buf.strip():
+                lines.append(buf)
+                buf = ""
+
+            for line in lines:
+                text = line.strip()
+                if not text: continue
+                print(f" 📩 BT Received Command: '{text}'")
+
+                if text.startswith("WIFI:") or text.startswith("4:"):
+                    raw_cmd = text[5:] if text.startswith("WIFI:") else text[2:]
+                    parts = raw_cmd.split(":")
+                    if len(parts) >= 2:
+                        ssid = parts[0].strip()
+                        passw = ":".join(parts[1:]).strip()
+                        os.write(fd_int, f"\r\nCONNECTING TO WIFI '{ssid}'...\r\n".encode('utf-8'))
+                        resp = set_wifi(ssid, passw)
+                        os.write(fd_int, f"\r\n{resp}\r\n\r\n".encode('utf-8'))
+                    else:
+                        os.write(fd_int, b"\r\nERROR: Format is WIFI:SSID:PASSWORD or 4:SSID:PASSWORD\r\n\r\n")
+                elif text.startswith("ID:") or text.startswith("5:"):
+                    raw_id = text[3:] if text.startswith("ID:") else text[2:]
+                    new_id = raw_id.strip()
+                    if new_id:
+                        with open(ID_FILE, "w") as f: f.write(new_id)
+                        os.write(fd_int, f"\r\nSUCCESS: Device ID set to {new_id}. Restarting...\r\n\r\n".encode('utf-8'))
+                        root.after(2000, restart_program)
+                elif text.upper() in ["SCAN", "2"]:
+                    os.write(fd_int, b"\r\nSCANNING NEARBY WIFI NETWORKS...\r\n")
+                    scan_res = scan_wifi()
+                    os.write(fd_int, f"{scan_res}\r\n".encode('utf-8'))
+                elif text.upper() in ["PING", "1"]:
+                    os.write(fd_int, b"\r\nPONG - System Alive & Ready!\r\n\r\n")
+                elif text.upper() in ["STATUS", "INFO", "3"]:
+                    if cached_water_data:
+                        w_ec = f"{cached_water_data.get('ec', 'SENSOR ERR')}"
+                        w_ph = f"{cached_water_data.get('ph', 'SENSOR ERR')}"
+                    else:
+                        w_ec = "SENSOR ERR"
+                        w_ph = "SENSOR ERR"
+
+                    if cached_md02_data:
+                        r_t = f"{cached_md02_data.get('room_temp', 'SENSOR ERR')} C"
+                        r_h = f"{cached_md02_data.get('room_humi', 'SENSOR ERR')} %"
+                    else:
+                        r_t = "SENSOR ERR"
+                        r_h = "SENSOR ERR"
+
+                    st_msg = (
+                        f"--- SYSTEM STATUS ---\r\n"
+                        f"Water EC  : {w_ec}\r\n"
+                        f"Water PH  : {w_ph}\r\n"
+                        f"Room Temp : {r_t}\r\n"
+                        f"Room Humi : {r_h}"
+                    )
+                    os.write(fd_int, f"\r\n{st_msg}\r\n\r\n".encode('utf-8'))
+                else:
+                    fallback_msg = f"\r\nACK: Received '{text}'\r\nCmds: 1.PING | 2.SCAN | 3.STATUS | 4.WIFI:SSID:PASS \r\n\r\n"
+                    os.write(fd_int, fallback_msg.encode('utf-8'))
+    except Exception as e:
+        print(f" Bluetooth FD Exception: {e}")
+    finally:
+        active_bt_fds.discard(fd_int)
+        try: os.close(fd_int)
+        except: pass
+
+def register_spp_dbus():
+    global dbus_spp_active
+    try:
+        import sys, glob
+        for path in glob.glob('/usr/lib/python3*/dist-packages'):
+            if path not in sys.path:
+                sys.path.append(path)
+        import dbus, dbus.service
+        from dbus.mainloop.glib import DBusGMainLoop
+        from gi.repository import GLib
+
+        DBusGMainLoop(set_as_default=True)
+
+        class BluetoothAgent(dbus.service.Object):
+            @dbus.service.method('org.bluez.Agent1', in_signature='', out_signature='')
+            def Release(self): pass
+
+            @dbus.service.method('org.bluez.Agent1', in_signature='os', out_signature='')
+            def AuthorizeService(self, device, uuid): return
+
+            @dbus.service.method('org.bluez.Agent1', in_signature='o', out_signature='s')
+            def RequestPinCode(self, device): return '0000'
+
+            @dbus.service.method('org.bluez.Agent1', in_signature='o', out_signature='u')
+            def RequestPasskey(self, device): return dbus.UInt32(123456)
+
+            @dbus.service.method('org.bluez.Agent1', in_signature='ouq', out_signature='')
+            def DisplayPasskey(self, device, passkey, entered): pass
+
+            @dbus.service.method('org.bluez.Agent1', in_signature='os', out_signature='')
+            def DisplayPinCode(self, device, pincode): pass
+
+            @dbus.service.method('org.bluez.Agent1', in_signature='ou', out_signature='')
+            def RequestConfirmation(self, device, passkey): return
+
+            @dbus.service.method('org.bluez.Agent1', in_signature='o', out_signature='')
+            def RequestAuthorization(self, device): return
+
+            @dbus.service.method('org.bluez.Agent1', in_signature='', out_signature='')
+            def Cancel(self): pass
+
+        class BluezProfile(dbus.service.Object):
+            @dbus.service.method('org.bluez.Profile1', in_signature='oha{sv}', out_signature='')
+            def NewConnection(self, path, fd, properties):
+                fd_int = fd.take()
+                flags = fcntl.fcntl(fd_int, fcntl.F_GETFL)
+                fcntl.fcntl(fd_int, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
+                threading.Thread(target=handle_bt_client_fd, args=(fd_int,), daemon=True).start()
+
+            @dbus.service.method('org.bluez.Profile1', in_signature='o', out_signature='')
+            def RequestDisconnection(self, path): pass
+
+        bus = dbus.SystemBus(mainloop=DBusGMainLoop())
+        agent_path = '/inhydro/auto_agent'
+        try:
+            agent = BluetoothAgent(bus, agent_path)
+            obj = bus.get_object('org.bluez', '/org/bluez')
+            manager = dbus.Interface(obj, 'org.bluez.AgentManager1')
+            manager.RegisterAgent(agent_path, 'NoInputNoOutput')
+            manager.RequestDefaultAgent(agent_path)
+            print(" ✅ Headless Auto-Pairing Bluetooth Agent Active (No PIN required)")
+        except Exception:
+            pass
+
+        profile_path = '/inhydro/spp_profile'
+        profile = BluezProfile(bus, profile_path)
+        manager_p = dbus.Interface(bus.get_object('org.bluez', '/org/bluez'), 'org.bluez.ProfileManager1')
+        opts = {
+            'AutoConnect': dbus.Boolean(True),
+            'Role': 'server',
+            'Name': f'Inhydro_{DEVICE_NAME}',
+            'Service': '00001101-0000-1000-8000-00805F9B34FB',
+            'Channel': dbus.UInt16(1),
+            'RequireAuthentication': dbus.Boolean(False),
+            'RequireAuthorization': dbus.Boolean(False)
+        }
+        manager_p.RegisterProfile(profile_path, '00001101-0000-1000-8000-00805F9B34FB', opts)
+        print(" ✅ DBus SPP Profile1 Registered with Full SDP Record!")
+
+        # Spin GLib MainLoop in background thread to process DBus signals/methods
+        mainloop = GLib.MainLoop()
+        threading.Thread(target=mainloop.run, daemon=True).start()
+        print(" ✅ GLib DBus Event Dispatcher Thread Started!")
+        dbus_spp_active = True
+    except Exception as e:
+        print(f" Notice: DBus Bluetooth setup fallback: {e}")
+        dbus_spp_active = False
+
 def auto_trust_devices():
     try:
-        btctl = subprocess.Popen(['bluetoothctl'], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
-        for c in ["power on\n", "agent NoInputNoOutput\n", "default-agent\n", "discoverable on\n", "pairable on\n"]:
-            btctl.stdin.write(c)
-        btctl.stdin.flush()
+        subprocess.run(["bluetoothctl", "power", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["bluetoothctl", "discoverable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["bluetoothctl", "pairable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception: pass
 
-    last_check = 0
     while True:
-        now = time.time()
-        if now - last_check >= 60:
-            try:
-                subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                last_check = now
-            except: pass
         try:
             output = subprocess.check_output(['bluetoothctl', 'paired-devices'], text=True)
             for line in output.split('\n'):
                 if line.startswith('Device '):
                     mac = line.split(" ")[1]
-                    os.system(f"sudo bluetoothctl trust {mac} >/dev/null 2>&1")
-        except: pass
-        time.sleep(5)
+                    subprocess.run(["bluetoothctl", "trust", mac], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception: pass
+        time.sleep(15)
 
 def start_bluetooth_server():
+    # Enforce Bluetooth Power, Discoverable and Pairable state via DBus Adapter
+    try:
+        import sys, glob
+        for path in glob.glob('/usr/lib/python3*/dist-packages'):
+            if path not in sys.path: sys.path.append(path)
+        import dbus
+        from dbus.mainloop.glib import DBusGMainLoop
+        DBusGMainLoop(set_as_default=True)
+        bus = dbus.SystemBus()
+        adapter_obj = bus.get_object('org.bluez', '/org/bluez/hci0')
+        adapter_props = dbus.Interface(adapter_obj, 'org.freedesktop.DBus.Properties')
+        adapter_props.Set('org.bluez.Adapter1', 'Powered', dbus.Boolean(True))
+        adapter_props.Set('org.bluez.Adapter1', 'Discoverable', dbus.Boolean(True))
+        adapter_props.Set('org.bluez.Adapter1', 'Pairable', dbus.Boolean(True))
+        adapter_props.Set('org.bluez.Adapter1', 'DiscoverableTimeout', dbus.UInt32(0))
+        adapter_props.Set('org.bluez.Adapter1', 'PairableTimeout', dbus.UInt32(0))
+        print(" ✅ Bluetooth Adapter Permanently Powered, Discoverable & Pairable (No Timeout)!")
+    except Exception as e:
+        print(f" Notice: Bluetooth adapter prop setup: {e}")
+
+    register_spp_dbus()
+
     while True:
-        server_sock = None
-        try:
-            os.system("sudo sdptool add --channel=1 SP >/dev/null 2>&1")
-            time.sleep(1)
-            server_sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-            server_sock.bind((socket.BDADDR_ANY, 1))
-            server_sock.listen(1)
-            while True:
-                client_sock = None
-                try:
-                    client_sock, client_info = server_sock.accept()
-                    client_sock.send(b"\r\n--- INHYDRO DEVICE CONTROLLER---\r\nCmds: WIFI:SSID:PASS | SCAN: SCANNING NETWORKS ON PROCESS... | PING\r\n")
-                    while True:
-                        data = client_sock.recv(1024)
-                        if not data: break
-                        text = data.decode('utf-8').strip()
-                        if text.startswith("WIFI:"):
-                            parts = text.split(":")
-                            if len(parts) >= 3:
-                                resp = set_wifi(parts[1], ":".join(parts[2:]))
-                                client_sock.send(f"\r\n{resp}\r\n".encode('utf-8'))
-                        elif text.startswith("ID:"):
-                            new_id = text.split(":", 1)[1].strip()
-                            if new_id:
-                                with open(ID_FILE, "w") as f: f.write(new_id)
-                                client_sock.send(f"\r\nSUCCESS: ID set to {new_id}. Restarting...\r\n".encode('utf-8'))
-                                root.after(2000, restart_program)
-                        elif text.upper() == "SCAN":
-                            client_sock.send((scan_wifi() + "\r\n").encode('utf-8'))
-                        elif text.upper() == "PING":
-                            client_sock.send(b"\r\nPONG - System Alive!\r\n")
-                except Exception: pass
-                finally:
-                    if client_sock:
-                        try: client_sock.close()
-                        except: pass
-        except Exception:
-            time.sleep(5)
-        finally:
-            if server_sock:
-                try: server_sock.close()
-                except: pass
+        time.sleep(3600)
 
 
 LOG_DIR = os.path.join(BASE_DIR, "local_logs")
@@ -910,7 +1083,9 @@ last_local_save_time = 0
 COLUMNS = [
     "timestamp", "temp", "moist", "ec", "ph",
     "room_temp", "room_humi", "timer1", "timer2",
-    "relay_temp", "relay_humi"
+    "relay_temp", "relay_humi", "relay_ec1", "relay_ec2",
+    "relay_ph", "relay_fan1", "relay_fan2", "relay_pad",
+    "relay_fogger", "relay_acf", "relay_sprinkler", "relay_irrigation"
 ]
 
 def publish_live_telemetry(water_data, md02_data):
@@ -929,7 +1104,17 @@ def publish_live_telemetry(water_data, md02_data):
             "timer1": relay_timer1.is_active,
             "timer2": relay_timer2.is_active,
             "relay_temp": relay_temp.is_active,
-            "relay_humi": relay_humi.is_active
+            "relay_humi": relay_humi.is_active,
+            "relay_ec1": relay_ec1.is_active,
+            "relay_ec2": relay_ec2.is_active,
+            "relay_ph": relay_ph.is_active,
+            "relay_fan1": relay_fan1.is_active,
+            "relay_fan2": relay_fan2.is_active,
+            "relay_pad": relay_pad.is_active,
+            "relay_fogger": relay_fogger.is_active,
+            "relay_acf": relay_acf.is_active,
+            "relay_sprinkler": relay_sprinkler.is_active,
+            "relay_irrigation": relay_irrigation.is_active
         }
         control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", json.dumps(payload), retain=False)
         control_client.publish(f"inhydro/{DEVICE_NAME}/room1/telemetry/live", json.dumps(payload), retain=False)
@@ -963,7 +1148,17 @@ def save_local_telemetry(water_data, md02_data):
         1 if relay_timer1.is_active else 0,
         1 if relay_timer2.is_active else 0,
         1 if relay_temp.is_active else 0,
-        1 if relay_humi.is_active else 0
+        1 if relay_humi.is_active else 0,
+        1 if relay_ec1.is_active else 0,
+        1 if relay_ec2.is_active else 0,
+        1 if relay_ph.is_active else 0,
+        1 if relay_fan1.is_active else 0,
+        1 if relay_fan2.is_active else 0,
+        1 if relay_pad.is_active else 0,
+        1 if relay_fogger.is_active else 0,
+        1 if relay_acf.is_active else 0,
+        1 if relay_sprinkler.is_active else 0,
+        1 if relay_irrigation.is_active else 0
     ]
 
     last_local_save_time = cur_time
@@ -1004,7 +1199,17 @@ def unpack_row(r):
         "timer1": bool(r[7]) if len(r) > 7 and r[7] is not None else False,
         "timer2": bool(r[8]) if len(r) > 8 and r[8] is not None else False,
         "relay_temp": bool(r[9]) if len(r) > 9 and r[9] is not None else False,
-        "relay_humi": bool(r[10]) if len(r) > 10 and r[10] is not None else False
+        "relay_humi": bool(r[10]) if len(r) > 10 and r[10] is not None else False,
+        "relay_ec1": bool(r[11]) if len(r) > 11 and r[11] is not None else False,
+        "relay_ec2": bool(r[12]) if len(r) > 12 and r[12] is not None else False,
+        "relay_ph": bool(r[13]) if len(r) > 13 and r[13] is not None else False,
+        "relay_fan1": bool(r[14]) if len(r) > 14 and r[14] is not None else False,
+        "relay_fan2": bool(r[15]) if len(r) > 15 and r[15] is not None else False,
+        "relay_pad": bool(r[16]) if len(r) > 16 and r[16] is not None else False,
+        "relay_fogger": bool(r[17]) if len(r) > 17 and r[17] is not None else False,
+        "relay_acf": bool(r[18]) if len(r) > 18 and r[18] is not None else False,
+        "relay_sprinkler": bool(r[19]) if len(r) > 19 and r[19] is not None else False,
+        "relay_irrigation": bool(r[20]) if len(r) > 20 and r[20] is not None else False
     }
 
 def sync_offline_data_worker():
@@ -1112,10 +1317,10 @@ root.attributes("-fullscreen", True)
 root.configure(bg="#ffffff")
 root.bind("<Escape>", lambda e: root.destroy())
 
-FONT_BIG   = ("Arial", 18, "bold")
-FONT_MED   = ("Arial", 14, "bold")
-FONT_SML   = ("Arial", 11, "bold")
-FONT_TINY  = ("Arial", 10)
+FONT_BIG   = ("Arial", 14, "bold")
+FONT_MED   = ("Arial", 11, "bold")
+FONT_SML   = ("Arial", 10, "bold")
+FONT_TINY  = ("Arial", 9)
 
 frame_main = tk.Frame(root, bg="#ffffff")
 frame_set  = tk.Frame(root, bg="#ffffff")
@@ -1146,70 +1351,70 @@ try:
     logo_img = ImageTk.PhotoImage(logo_img_raw)
     lbl_logo = tk.Label(root, image=logo_img, bg="#ffffff")
     lbl_logo.image = logo_img
-    lbl_logo.place(relx=0.98, y=8, anchor="ne")
+    lbl_logo.place(relx=0.98, y=6, anchor="ne")
 except Exception:
-    lbl_logo = tk.Label(root, text="INHYDRO", fg="#1565c0", bg="#ffffff", font=("Arial", 16, "bold"))
-    lbl_logo.place(relx=0.98, y=8, anchor="ne")
+    lbl_logo = tk.Label(root, text="INHYDRO", fg="#1565c0", bg="#ffffff", font=("Arial", 14, "bold"))
+    lbl_logo.place(relx=0.98, y=6, anchor="ne")
 
-lbl_clock = tk.Label(root, text="", font=("Arial", 12, "bold"), fg="#1565c0", bg="#ffffff")
-lbl_clock.place(x=15, y=10, anchor="nw")
+lbl_clock = tk.Label(root, text="", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff", justify="left")
+lbl_clock.place(x=10, y=8, anchor="nw")
 
 
-tk.Label(frame_main, text=f"MONNET GROUP FARM AUTOMATION", font=FONT_BIG, fg="#1565c0", bg="#ffffff").pack(pady=(8, 2))
+tk.Label(frame_main, text=f"MONNET GROUP FARM AUTOMATION", font=FONT_BIG, fg="#1565c0", bg="#ffffff").pack(pady=(4, 2))
 
 # Pack Footer FIRST at bottom with increased height
-footer_main = tk.Frame(frame_main, bg="#ffffff", height=60)
-footer_main.pack(side="bottom", fill="x", pady=6)
+footer_main = tk.Frame(frame_main, bg="#ffffff", height=45)
+footer_main.pack(side="bottom", fill="x", pady=4)
 footer_main.pack_propagate(False)
 
-tk.Button(footer_main, text="SETPOINTS", font=FONT_MED, bg="#0284c7", fg="white", width=12, command=lambda: request_setpoints_access()).pack(side="left", padx=15, pady=6)
-tk.Button(footer_main, text="STOP", font=FONT_MED, bg="#dc2626", fg="white", width=10, command=manual_stop).pack(side="left", padx=15, pady=6)
-tk.Button(footer_main, text="RESTART", font=FONT_MED, bg="#64748b", fg="white", width=10, command=restart_program).pack(side="left", padx=15, pady=6)
-tk.Button(footer_main, text="EXIT", font=FONT_MED, bg="#334155", fg="white", width=10, command=root.destroy).pack(side="right", padx=15, pady=6)
+tk.Button(footer_main, text="SETPOINTS", font=FONT_MED, bg="#0284c7", fg="white", width=12, command=lambda: request_setpoints_access()).pack(side="left", padx=10, pady=3)
+tk.Button(footer_main, text="STOP", font=FONT_MED, bg="#dc2626", fg="white", width=10, command=manual_stop).pack(side="left", padx=10, pady=3)
+tk.Button(footer_main, text="RESTART", font=FONT_MED, bg="#64748b", fg="white", width=10, command=restart_program).pack(side="left", padx=10, pady=3)
+tk.Button(footer_main, text="EXIT", font=FONT_MED, bg="#334155", fg="white", width=10, command=root.destroy).pack(side="right", padx=10, pady=3)
 
 content_grid = tk.Frame(frame_main, bg="#ffffff")
-content_grid.pack(expand=True, fill="both", padx=10, pady=(55, 6))
+content_grid.pack(expand=True, fill="both", padx=10, pady=(63, 6))
 
 # Column 1 (LEFT COLUMN - SENSORS DATA)
 col_sensors = tk.Frame(content_grid, bg="#e0e0e0")
-col_sensors.pack(side="left", fill="both", expand=True, padx=8)
+col_sensors.pack(side="left", fill="both", expand=True, padx=4)
 
 # Section 1: Water Sensor
-tk.Label(col_sensors, text="WATER SENSOR", font=("Arial", 14, "bold"), fg="#1565c0", bg="#e0e0e0").pack(anchor="w", pady=(6, 2))
+tk.Label(col_sensors, text="WATER SENSOR", font=("Arial", 11, "bold"), fg="#1565c0", bg="#e0e0e0").pack(anchor="w", pady=(4, 1))
 
 def create_sensor_row(parent, label_text, is_ec=False):
     f = tk.Frame(parent, bg="#e0e0e0")
-    f.pack(fill="x", pady=2)
-    tk.Label(f, text=label_text, font=FONT_SML, fg="#333333", bg="#e0e0e0", width=12, anchor="w").pack(side="left")
-    val_w = 23 if is_ec else 15
-    lbl_val = tk.Label(f, text="---", font=("Arial", 15, "bold"), fg="#0d47a1", bg="#e0e0e0", width=val_w, anchor="e")
+    f.pack(fill="x", pady=1)
+    tk.Label(f, text=label_text, font=FONT_SML, fg="#333333", bg="#e0e0e0", width=11, anchor="w").pack(side="left")
+    val_w = 20 if is_ec else 14
+    lbl_val = tk.Label(f, text="---", font=("Arial", 11, "bold"), fg="#0d47a1", bg="#e0e0e0", width=val_w, anchor="e")
     lbl_val.pack(side="right")
     return lbl_val
 
 lbl_val_ec         = create_sensor_row(col_sensors, "EC", is_ec=True)
 lbl_val_ph         = create_sensor_row(col_sensors, "pH")
 
-tk.Frame(col_sensors, bg="black", height=2).pack(fill="x", pady=8)
+tk.Frame(col_sensors, bg="black", height=1).pack(fill="x", pady=4)
 
 # Section 2: Room Sensor (MD02)
-tk.Label(col_sensors, text="ROOM SENSOR", font=("Arial", 14, "bold"), fg="#1565c0", bg="#e0e0e0").pack(anchor="w", pady=(2, 2))
+tk.Label(col_sensors, text="ROOM SENSOR", font=("Arial", 11, "bold"), fg="#1565c0", bg="#e0e0e0").pack(anchor="w", pady=(2, 1))
 
 lbl_val_room_temp = create_sensor_row(col_sensors, "Room Temp")
 lbl_val_room_humi = create_sensor_row(col_sensors, "Room Humi")
 
 # Warning Banner at bottom of Column 1
-lbl_warn = tk.Label(col_sensors, text="", font=("Arial", 12, "bold"), fg="#c62828", bg="#e0e0e0", justify="left")
-lbl_warn.pack(pady=10, anchor="w")
+lbl_warn = tk.Label(col_sensors, text="", font=("Arial", 9, "bold"), fg="#c62828", bg="#e0e0e0", justify="left")
+lbl_warn.pack(pady=4, anchor="w")
 
 # Sleek Divider Line 1 (Sleeker 2px thickness)
 sep1 = tk.Frame(content_grid, bg="black", width=2)
-sep1.pack(side="left", fill="y", pady=10)
+sep1.pack(side="left", fill="y", pady=4)
 
 # Column 2 (MIDDLE COLUMN - RELAY STATUS)
 col_relays = tk.Frame(content_grid, bg="#e0e0e0")
-col_relays.pack(side="left", fill="both", expand=True, padx=8)
+col_relays.pack(side="left", fill="both", expand=True, padx=4)
 
-tk.Label(col_relays, text="RELAY STATUS", font=("Arial", 16, "bold"), fg="#1565c0", bg="#e0e0e0").pack(pady=(6, 4))
+tk.Label(col_relays, text="RELAY STATUS", font=("Arial", 11, "bold"), fg="#1565c0", bg="#e0e0e0").pack(pady=(4, 2))
 
 labels_relays = {}
 relay_items = [
@@ -1228,44 +1433,44 @@ relay_items = [
 ]
 for lbl_txt, r_key in relay_items:
     f = tk.Frame(col_relays, bg="#e0e0e0")
-    f.pack(fill="x", pady=1)
-    tk.Label(f, text=lbl_txt, font=("Arial", 12, "bold"), fg="#333333", bg="#e0e0e0", width=17, anchor="w").pack(side="left")
-    lbl_st = tk.Label(f, text="OFF", font=("Arial", 13, "bold"), fg="#c62828", bg="#e0e0e0", anchor="e")
+    f.pack(fill="x", pady=0)
+    tk.Label(f, text=lbl_txt, font=("Arial", 9, "bold"), fg="#333333", bg="#e0e0e0", width=15, anchor="w").pack(side="left")
+    lbl_st = tk.Label(f, text="OFF", font=("Arial", 9, "bold"), fg="#c62828", bg="#e0e0e0", anchor="e")
     lbl_st.pack(side="right")
     labels_relays[r_key] = lbl_st
 
 # Sleek Divider Line 2 (Sleeker 2px thickness)
 sep2 = tk.Frame(content_grid, bg="black", width=2)
-sep2.pack(side="left", fill="y", pady=10)
+sep2.pack(side="left", fill="y", pady=4)
 
 # Column 3 (RIGHT COLUMN - CYCLIC TIMERS TOP-TO-BOTTOM FILLING RIGHT SIDE SPACE)
 col_timers = tk.Frame(content_grid, bg="#e0e0e0")
-col_timers.pack(side="left", fill="both", expand=True, padx=8)
+col_timers.pack(side="left", fill="both", expand=True, padx=4)
 
-tk.Label(col_timers, text="CYCLIC TIMERS", font=("Arial", 16, "bold"), fg="#1565c0", bg="#e0e0e0").pack(pady=(6, 4))
+tk.Label(col_timers, text="CYCLIC TIMERS", font=("Arial", 11, "bold"), fg="#1565c0", bg="#e0e0e0").pack(pady=(4, 2))
 
 labels_timers = {}
 
 def create_timer_widget(parent, prefix, default_name):
     t_name = setpoints.get(f"{prefix} Name", default_name)
 
-    card = tk.LabelFrame(parent, text="", bg="#ffffff", bd=2, relief="groove")
-    card.pack(fill="x", pady=6, padx=4)
+    card = tk.LabelFrame(parent, text="", bg="#ffffff", bd=1, relief="groove")
+    card.pack(fill="x", pady=3, padx=2)
 
-    lbl_tname = tk.Label(card, text=str(t_name).upper(), font=("Arial", 14, "bold"), fg="#1565c0", bg="#ffffff")
-    lbl_tname.pack(pady=(6, 4))
+    lbl_tname = tk.Label(card, text=str(t_name).upper(), font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff")
+    lbl_tname.pack(pady=(3, 2))
     labels_timers[f"tname_{prefix}"] = lbl_tname
 
-    sub_lbl_font = ("Arial", 13, "bold")
-    sub_val_font = ("Arial", 13, "bold")
+    sub_lbl_font = ("Arial", 9, "bold")
+    sub_val_font = ("Arial", 9, "bold")
 
     t_sub_labels = {}
     for sub_key, sub_lbl in [("status", "Status"), ("window", "Window"), ("cycle", "Cycle")]:
         f = tk.Frame(card, bg="#f1f5f9")
-        f.pack(fill="x", pady=2, padx=6)
-        tk.Label(f, text=sub_lbl, font=sub_lbl_font, fg="#475569", bg="#f1f5f9", width=11, anchor="w").pack(side="left", padx=6, pady=3)
+        f.pack(fill="x", pady=1, padx=4)
+        tk.Label(f, text=sub_lbl, font=sub_lbl_font, fg="#475569", bg="#f1f5f9", width=10, anchor="w").pack(side="left", padx=4, pady=1)
         lbl_v = tk.Label(f, text="---", font=sub_val_font, fg="#0f172a", bg="#f1f5f9", anchor="e")
-        lbl_v.pack(side="right", padx=6, pady=3)
+        lbl_v.pack(side="right", padx=4, pady=1)
         t_sub_labels[sub_key] = lbl_v
 
     labels_timers[prefix] = t_sub_labels
@@ -1273,24 +1478,26 @@ def create_timer_widget(parent, prefix, default_name):
 def create_humi_timer_widget(parent):
     h_name = setpoints.get("HUMI Name", "FOGGER TIMER")
 
-    card = tk.LabelFrame(parent, text="", bg="#ffffff", bd=2, relief="groove")
-    card.pack(fill="x", pady=6, padx=4)
+    card = tk.LabelFrame(parent, text="", bg="#ffffff", bd=1, relief="groove")
+    card.pack(fill="x", pady=3, padx=2)
 
-    lbl_tname = tk.Label(card, text=str(h_name).upper(), font=("Arial", 14, "bold"), fg="#1565c0", bg="#ffffff")
-    lbl_tname.pack(pady=(6, 4))
+    lbl_tname = tk.Label(card, text=str(h_name).upper(), font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff")
+    lbl_tname.pack(pady=(3, 2))
     labels_timers["tname_humi"] = lbl_tname
 
-    sub_lbl_font = ("Arial", 13, "bold")
-    sub_val_font = ("Arial", 13, "bold")
+    sub_lbl_font = ("Arial", 9, "bold")
+    sub_val_font = ("Arial", 9, "bold")
 
     t_sub_labels = {}
     for sub_key, sub_lbl in [("status", "Status"), ("day_cycle", "Day Cycle"), ("night_cycle", "Night Cycle")]:
         f = tk.Frame(card, bg="#f1f5f9")
-        f.pack(fill="x", pady=2, padx=6)
-        tk.Label(f, text=sub_lbl, font=sub_lbl_font, fg="#475569", bg="#f1f5f9", width=12, anchor="w").pack(side="left", padx=6, pady=3)
+        f.pack(fill="x", pady=1, padx=4)
+        tk.Label(f, text=sub_lbl, font=sub_lbl_font, fg="#475569", bg="#f1f5f9", width=11, anchor="w").pack(side="left", padx=4, pady=1)
         lbl_v = tk.Label(f, text="---", font=sub_val_font, fg="#0f172a", bg="#f1f5f9", anchor="e")
-        lbl_v.pack(side="right", padx=6, pady=3)
+        lbl_v.pack(side="right", padx=4, pady=1)
         t_sub_labels[sub_key] = lbl_v
+
+    labels_timers["humi"] = t_sub_labels[sub_key] = lbl_v
 
     labels_timers["humi"] = t_sub_labels
 
@@ -1333,11 +1540,11 @@ def request_setpoints_access():
     win.attributes("-fullscreen", True)
     win.grab_set()
 
-    lbl_auth_clock = tk.Label(win, text="", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff")
+    lbl_auth_clock = tk.Label(win, text="", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff", justify="left")
     lbl_auth_clock.place(x=15, y=10, anchor="nw")
     def update_auth_clock():
         if win.winfo_exists():
-            lbl_auth_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y  |  %I:%M:%S %p"))
+            lbl_auth_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y\n%I:%M:%S %p"))
             win.after(1000, update_auth_clock)
     update_auth_clock()
 
@@ -1398,11 +1605,11 @@ def request_setpoints_access():
         pop.attributes("-fullscreen", True)
         pop.grab_set()
 
-        lbl_pop_clock = tk.Label(pop, text="", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff")
+        lbl_pop_clock = tk.Label(pop, text="", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff", justify="left")
         lbl_pop_clock.place(x=15, y=10, anchor="nw")
         def update_pop_clock():
             if pop.winfo_exists():
-                lbl_pop_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y  |  %I:%M:%S %p"))
+                lbl_pop_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y\n%I:%M:%S %p"))
                 pop.after(1000, update_pop_clock)
         update_pop_clock()
 
@@ -1472,11 +1679,11 @@ def request_setpoints_access():
         pop.attributes("-fullscreen", True)
         pop.grab_set()
 
-        lbl_pop_clock = tk.Label(pop, text="", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff")
+        lbl_pop_clock = tk.Label(pop, text="", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff", justify="left")
         lbl_pop_clock.place(x=15, y=10, anchor="nw")
         def update_pop_clock():
             if pop.winfo_exists():
-                lbl_pop_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y  |  %I:%M:%S %p"))
+                lbl_pop_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y\n%I:%M:%S %p"))
                 pop.after(1000, update_pop_clock)
         update_pop_clock()
 
@@ -1695,20 +1902,37 @@ def request_setpoints_access():
 
     select_user(1)
 
-tk.Label(frame_set, text="SYSTEM SETPOINTS CONFIGURATION", font=FONT_BIG, fg="#1565c0", bg="#ffffff").pack(pady=(8, 2))
+tk.Label(frame_set, text="SYSTEM SETPOINTS CONFIGURATION", font=FONT_BIG, fg="#1565c0", bg="#ffffff").pack(pady=(4, 1))
 
 # Setpoint Footer (Packed FIRST at side="bottom" like control121.py)
-footer_set = tk.Frame(frame_set, bg="#ffffff", height=50)
+footer_set = tk.Frame(frame_set, bg="#ffffff", height=45)
 footer_set.pack(side="bottom", fill="x")
 footer_set.pack_propagate(False)
 
 tk.Button(footer_set, text="SAVE & RETURN", font=FONT_MED, bg="#0284c7", fg="white", width=18,
-          command=lambda: (save_setpoints(), show(frame_main))).pack(pady=8)
+          command=lambda: (save_setpoints(), show(frame_main))).pack(pady=4)
 
-sp_container = tk.Frame(frame_set, bg="#ffffff")
-sp_container.pack(fill="both", expand=True, padx=15, pady=(45, 2))
+# Setpoints Scrollable Canvas & Vertical Touch Slider (Fits Full Width of 7-inch Display)
+sp_canvas = tk.Canvas(frame_set, bg="#ffffff", highlightthickness=0)
+sp_scrollbar = tk.Scrollbar(frame_set, orient="vertical", command=sp_canvas.yview, width=28, bd=2, relief="raised")
+sp_container = tk.Frame(sp_canvas, bg="#ffffff")
 
-# Top Section: 2 Columns (Left: Dosing & Climate, Right: Humidifier)
+sp_canvas_win = sp_canvas.create_window((0, 0), window=sp_container, anchor="nw")
+
+def _on_sp_container_cfg(e):
+    sp_canvas.configure(scrollregion=sp_canvas.bbox("all"))
+
+def _on_sp_canvas_resize(e):
+    sp_canvas.itemconfig(sp_canvas_win, width=e.width)
+
+sp_container.bind("<Configure>", _on_sp_container_cfg)
+sp_canvas.bind("<Configure>", _on_sp_canvas_resize)
+sp_canvas.configure(yscrollcommand=sp_scrollbar.set)
+
+sp_scrollbar.pack(side="right", fill="y", pady=(32, 0))
+sp_canvas.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=(32, 0))
+
+# Top Section: 2 Equal Columns (Left: Dosing & Climate, Right: Humidifier)
 sp_top_container = tk.Frame(sp_container, bg="#ffffff")
 sp_top_container.pack(fill="x", side="top", pady=(0, 4))
 
@@ -1718,9 +1942,9 @@ left_sp_pane.pack(side="left", fill="both", expand=True, padx=4)
 right_sp_pane = tk.Frame(sp_top_container, bg="#ffffff")
 right_sp_pane.pack(side="right", fill="both", expand=True, padx=4)
 
-# Bottom Section: Full 100% Width for Equipment Cyclic Timers
+# Bottom Section: 2 Vertical Stacked Cards for Equipment Cyclic Timers
 sp_bottom_container = tk.Frame(sp_container, bg="#ffffff")
-sp_bottom_container.pack(fill="both", expand=True, side="bottom", pady=(2, 2))
+sp_bottom_container.pack(fill="x", side="top", pady=(4, 6), padx=4)
 
 sp_labels = {}
 sp_selected_key = None
@@ -1731,29 +1955,32 @@ def make_sp_cell(parent, key, label_text=None, width_lbl=10, default_val=0.0):
         setpoints[key] = default_val
     lbl_txt = label_text if label_text else key
     cell = tk.Frame(parent, bg="#ffffff")
-    
-    tk.Label(cell, text=lbl_txt, font=("Arial", 11, "bold"), fg="#0f172a", bg="#ffffff", anchor="w", width=width_lbl).pack(side="left", padx=3)
-    val_lbl = tk.Label(cell, text=str(setpoints[key]), font=("Arial", 11, "bold"), fg="#e65100", bg="#f8fafc", width=8, anchor="center", relief="sunken", bd=1)
-    val_lbl.pack(side="left", padx=4)
-    
-    btn = tk.Button(cell, text="EDIT", font=("Arial", 11, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=3, padx=3,
+
+    tk.Label(cell, text=lbl_txt, font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", anchor="w", width=width_lbl).pack(side="left", padx=2)
+    val_lbl = tk.Label(cell, text=str(setpoints[key]), font=("Arial", 10, "bold"), fg="#e65100", bg="#f8fafc", width=6, anchor="center", relief="sunken", bd=1)
+    val_lbl.pack(side="left", padx=(2, 4))
+
+    btn = tk.Button(cell, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
                     command=lambda k=key: open_keypad_sp(k))
-    btn.pack(side="left", padx=3)
+    btn.pack(side="right", padx=2)
     sp_labels[key] = val_lbl
     return cell
 
 # Card 1 (LEFT PANE): Nutrients & pH
-card_dosing = tk.LabelFrame(left_sp_pane, text=" NUTRIENTS & PH ", font=FONT_MED, fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
+card_dosing = tk.LabelFrame(left_sp_pane, text=" NUTRIENTS & PH ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
 card_dosing.pack(fill="x", pady=4, padx=4)
 grid_dosing = tk.Frame(card_dosing, bg="#ffffff")
-grid_dosing.pack(pady=5, padx=6, fill="x")
-make_sp_cell(grid_dosing, "EC MIN", "EC Min:").grid(row=0, column=0, padx=6, pady=5)
-make_sp_cell(grid_dosing, "EC MAX", "EC Max:").grid(row=0, column=1, padx=6, pady=5)
-make_sp_cell(grid_dosing, "PH LOW", "pH Low:").grid(row=1, column=0, padx=6, pady=5)
-make_sp_cell(grid_dosing, "PH HIGH", "pH High:").grid(row=1, column=1, padx=6, pady=5)
+grid_dosing.pack(pady=4, padx=6, fill="x")
+grid_dosing.columnconfigure(0, weight=1)
+grid_dosing.columnconfigure(1, weight=1)
+
+make_sp_cell(grid_dosing, "EC MIN", "EC Min:").grid(row=0, column=0, padx=4, pady=3, sticky="ew")
+make_sp_cell(grid_dosing, "EC MAX", "EC Max:").grid(row=0, column=1, padx=4, pady=3, sticky="ew")
+make_sp_cell(grid_dosing, "PH LOW", "pH Low:").grid(row=1, column=0, padx=4, pady=3, sticky="ew")
+make_sp_cell(grid_dosing, "PH HIGH", "pH High:").grid(row=1, column=1, padx=4, pady=3, sticky="ew")
 
 # Card 3 (LEFT PANE): Climate Control
-card_climate_sp = tk.LabelFrame(left_sp_pane, text=" CLIMATE CONTROL ", font=FONT_MED, fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
+card_climate_sp = tk.LabelFrame(left_sp_pane, text=" CLIMATE CONTROL ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
 card_climate_sp.pack(fill="x", pady=4, padx=4)
 grid_climate_sp = tk.Frame(card_climate_sp, bg="#ffffff")
 grid_climate_sp.pack(pady=4, padx=6, fill="x")
@@ -1761,41 +1988,41 @@ grid_climate_sp.pack(pady=4, padx=6, fill="x")
 # Left Section: Temperature Setpoints (Top to Bottom)
 temp_section = tk.Frame(grid_climate_sp, bg="#ffffff")
 temp_section.pack(side="left", fill="both", expand=True, padx=4)
-tk.Label(temp_section, text="TEMPERATURE SETPOINTS", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w", pady=(2, 4))
+tk.Label(temp_section, text="TEMPERATURE SETPOINTS", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w", pady=(1, 3))
 make_sp_cell(temp_section, "TEMP MIN", "Temp Min:").pack(fill="x", pady=3)
 make_sp_cell(temp_section, "TEMP MED", "Temp Med:").pack(fill="x", pady=3)
 make_sp_cell(temp_section, "TEMP MAX", "Temp Max:").pack(fill="x", pady=3)
 make_sp_cell(temp_section, "TEMP Hyst", "Safety:").pack(fill="x", pady=3)
 
 # Vertical Separator Line
-tk.Frame(grid_climate_sp, bg="#cbd5e1", width=2).pack(side="left", fill="y", padx=8, pady=4)
+tk.Frame(grid_climate_sp, bg="#cbd5e1", width=1).pack(side="left", fill="y", padx=4, pady=2)
 
 # Right Section: Humidity Setpoints (Day & Night Independent Thresholds + Safety)
 humi_section = tk.Frame(grid_climate_sp, bg="#ffffff")
 humi_section.pack(side="right", fill="both", expand=True, padx=4)
-tk.Label(humi_section, text="HUMIDITY SETPOINTS", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w", pady=(2, 4))
-make_sp_cell(humi_section, "HUMI D_Min", "Day Min:  ").pack(fill="x", pady=2)
-make_sp_cell(humi_section, "HUMI D_Max", "Day Max:  ").pack(fill="x", pady=2)
-make_sp_cell(humi_section, "HUMI N_Min", "Night Min:").pack(fill="x", pady=2)
-make_sp_cell(humi_section, "HUMI N_Max", "Night Max:").pack(fill="x", pady=2)
-make_sp_cell(humi_section, "HUMI BUFFER", "Safety Hyst:").pack(fill="x", pady=2)
+tk.Label(humi_section, text="HUMIDITY SETPOINTS", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w", pady=(1, 3))
+make_sp_cell(humi_section, "HUMI D_Min", "Day Min:  ").pack(fill="x", pady=3)
+make_sp_cell(humi_section, "HUMI D_Max", "Day Max:  ").pack(fill="x", pady=3)
+make_sp_cell(humi_section, "HUMI N_Min", "Night Min:").pack(fill="x", pady=3)
+make_sp_cell(humi_section, "HUMI N_Max", "Night Max:").pack(fill="x", pady=3)
+make_sp_cell(humi_section, "HUMI BUFFER", "Safety:").pack(fill="x", pady=3)
 
 # Card 2 (RIGHT PANE): Humidifier Day/Night Cyclic Timer
-card_humi_sp = tk.LabelFrame(right_sp_pane, text=f" {str(setpoints.get('HUMI Name', 'HUMIDIFIER')).upper()} DAY/NIGHT TIMER ", font=FONT_MED, fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
-card_humi_sp.pack(fill="x", pady=4, padx=4)
+card_humi_sp = tk.LabelFrame(right_sp_pane, text=f" {str(setpoints.get('HUMI Name', 'HUMIDIFIER')).upper()} DAY/NIGHT TIMER ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
+card_humi_sp.pack(fill="x", pady=(45, 2), padx=4)
 
 humi_hdr = tk.Frame(card_humi_sp, bg="#f1f5f9")
-humi_hdr.pack(fill="x", pady=4, padx=4)
-tk.Label(humi_hdr, text="Setting", font=("Arial", 10, "bold"), fg="#64748b", bg="#f1f5f9", width=10, anchor="w").pack(side="left", padx=4)
-tk.Label(humi_hdr, text="DAY WINDOW", font=("Arial", 10, "bold"), fg="#1565c0", bg="#f1f5f9", width=16, anchor="center").pack(side="left", expand=True)
-tk.Label(humi_hdr, text="NIGHT WINDOW", font=("Arial", 10, "bold"), fg="#1565c0", bg="#f1f5f9", width=16, anchor="center").pack(side="left", expand=True)
+humi_hdr.pack(fill="x", pady=4, padx=6)
+tk.Label(humi_hdr, text="Setting", font=("Arial", 10, "bold"), fg="#64748b", bg="#f1f5f9", width=10, anchor="w").pack(side="left", padx=2)
+tk.Label(humi_hdr, text="DAY WINDOW", font=("Arial", 10, "bold"), fg="#1565c0", bg="#f1f5f9", width=15, anchor="center").pack(side="left", expand=True)
+tk.Label(humi_hdr, text="NIGHT WINDOW", font=("Arial", 10, "bold"), fg="#1565c0", bg="#f1f5f9", width=15, anchor="center").pack(side="left", expand=True)
 
 r_name = tk.Frame(card_humi_sp, bg="#ffffff")
-r_name.pack(fill="x", pady=4, padx=4)
-tk.Label(r_name, text="Timer Name", font=("Arial", 11, "bold"), fg="#0f172a", bg="#ffffff", width=10, anchor="w").pack(side="left", padx=4)
-v_name = tk.Label(r_name, text=str(setpoints.get("HUMI Name", "HUMIDIFIER")), font=("Arial", 11, "bold"), fg="#0f172a", bg="#f8fafc", anchor="center", relief="sunken", bd=1)
+r_name.pack(fill="x", pady=4, padx=6)
+tk.Label(r_name, text="Timer Name", font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", width=10, anchor="w").pack(side="left", padx=2)
+v_name = tk.Label(r_name, text=str(setpoints.get("HUMI Name", "HUMIDIFIER")), font=("Arial", 10, "bold"), fg="#0f172a", bg="#f8fafc", anchor="center", relief="sunken", bd=1)
 v_name.pack(side="left", expand=True, fill="x", padx=4)
-btn_name = tk.Button(r_name, text="EDIT", font=("Arial", 11, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=3, padx=3,
+btn_name = tk.Button(r_name, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
                      command=lambda: open_keypad_sp("HUMI Name"))
 btn_name.pack(side="right", padx=2)
 sp_labels["HUMI Name"] = v_name
@@ -1809,138 +2036,161 @@ humi_rows = [
 
 for r_lbl, d_k, n_k in humi_rows:
     r_f = tk.Frame(card_humi_sp, bg="#ffffff")
-    r_f.pack(fill="x", pady=4, padx=4)
-    tk.Label(r_f, text=r_lbl, font=("Arial", 11, "bold"), fg="#0f172a", bg="#ffffff", width=10, anchor="w").pack(side="left", padx=4)
+    r_f.pack(fill="x", pady=4, padx=6)
+    tk.Label(r_f, text=r_lbl, font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", width=10, anchor="w").pack(side="left", padx=2)
 
     c_day = tk.Frame(r_f, bg="#ffffff")
     c_day.pack(side="left", expand=True, fill="x")
-    v_d = tk.Label(c_day, text=str(setpoints.get(d_k, "")), font=("Arial", 11, "bold"), fg="#e65100", bg="#f8fafc", width=6, anchor="center", relief="sunken", bd=1)
+    v_d = tk.Label(c_day, text=str(setpoints.get(d_k, "")), font=("Arial", 10, "bold"), fg="#e65100", bg="#f8fafc", width=6, anchor="center", relief="sunken", bd=1)
     v_d.pack(side="left", expand=True, padx=2)
-    tk.Button(c_day, text="EDIT", font=("Arial", 11, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=3, padx=3,
+    tk.Button(c_day, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
               command=lambda k=d_k: open_keypad_sp(k)).pack(side="right", padx=2)
     sp_labels[d_k] = v_d
 
     c_night = tk.Frame(r_f, bg="#ffffff")
     c_night.pack(side="left", expand=True, fill="x")
-    v_n = tk.Label(c_night, text=str(setpoints.get(n_k, "")), font=("Arial", 11, "bold"), fg="#e65100", bg="#f8fafc", width=6, anchor="center", relief="sunken", bd=1)
+    v_n = tk.Label(c_night, text=str(setpoints.get(n_k, "")), font=("Arial", 10, "bold"), fg="#e65100", bg="#f8fafc", width=6, anchor="center", relief="sunken", bd=1)
     v_n.pack(side="left", expand=True, padx=2)
-    tk.Button(c_night, text="EDIT", font=("Arial", 11, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=3, padx=3,
+    tk.Button(c_night, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
               command=lambda k=n_k: open_keypad_sp(k)).pack(side="right", padx=2)
     sp_labels[n_k] = v_n
 
-# Bottom Section: Full 100% Width for Equipment Cyclic Timers (Relaxed & Touch-Friendly)
-sp_bottom_container = tk.Frame(sp_container, bg="#ffffff")
-sp_bottom_container.pack(fill="x", side="bottom", pady=(4, 4))
+# Bottom Section: 2 Vertical Stacked Cards (Top & Bottom) for Equipment Cyclic Timers
+# Grid Box 1: Top Card (3 Equipment Timers: Pad Pump, ACF Fan, Sprinkler)
+card_timers_1 = tk.LabelFrame(sp_bottom_container, text=" CYCLIC TIMERS 1 - 3 ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
+card_timers_1.pack(fill="x", pady=(3, 6), padx=4)
 
-# Card 4 (BOTTOM FULL 100% WIDTH PANE): Equipment Cyclic Timers Configuration
-card_timers_sp = tk.LabelFrame(sp_bottom_container, text=" EQUIPMENT CYCLIC TIMERS ", font=FONT_MED, fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
-card_timers_sp.pack(fill="x", pady=4, padx=6)
-
-cols = [
+cols_group1 = [
     {"name": "Pad Pump",   "keys": {"Name": "PAD Name", "Start": "PAD Start", "Stop": "PAD Stop", "ON Min": "PAD ON Min", "OFF Min": "PAD OFF Min"}},
     {"name": "ACF Fan",    "keys": {"Name": "ACF Name", "Start": "ACF Start", "Stop": "ACF Stop", "ON Min": "ACF ON Min", "OFF Min": "ACF OFF Min"}},
-    {"name": "Sprinkler",  "keys": {"Name": "Sprinkler Name", "Start": "Sprinkler Start", "Stop": "Sprinkler Stop", "ON Min": "Sprinkler ON Min", "OFF Min": "Sprinkler OFF Min"}},
+    {"name": "Sprinkler",  "keys": {"Name": "Sprinkler Name", "Start": "Sprinkler Start", "Stop": "Sprinkler Stop", "ON Min": "Sprinkler ON Min", "OFF Min": "Sprinkler OFF Min"}}
+]
+
+# Grid Box 2: Bottom Card (3 Equipment Timers: Irrigation, Timer 1, Timer 2)
+card_timers_2 = tk.LabelFrame(sp_bottom_container, text=" CYCLIC TIMERS 4 - 6 ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
+card_timers_2.pack(fill="x", pady=(3, 6), padx=4)
+
+cols_group2 = [
     {"name": "Irrigation", "keys": {"Name": "Irrigation Name", "Start": "Irrigation Start", "Stop": "Irrigation Stop", "ON Min": "Irrigation ON Min", "OFF Min": "Irrigation OFF Min"}},
     {"name": "Timer 1",    "keys": {"Name": "Timer1 Name", "Start": "Timer1 Start", "Stop": "Timer1 Stop", "ON Min": "Timer1 ON Min", "OFF Min": "Timer1 OFF Min"}},
     {"name": "Timer 2",    "keys": {"Name": "Timer2 Name", "Start": "Timer2 Start", "Stop": "Timer2 Stop", "ON Min": "Timer2 ON Min", "OFF Min": "Timer2 OFF Min"}}
 ]
 
-header_frame = tk.Frame(card_timers_sp, bg="#f1f5f9")
-header_frame.pack(fill="x", pady=5, padx=4)
-tk.Label(header_frame, text="Setting", font=("Arial", 11, "bold"), fg="#475569", bg="#f1f5f9", width=10, anchor="w").pack(side="left", padx=4)
+def build_timer_grid_box(parent_card, cols_group):
+    header_frame = tk.Frame(parent_card, bg="#f1f5f9")
+    header_frame.pack(fill="x", pady=4, padx=6)
+    tk.Label(header_frame, text="Setting", font=("Arial", 10, "bold"), fg="#64748b", bg="#f1f5f9", width=10, anchor="w").pack(side="left", padx=2)
 
-for col in cols:
-    col_hdr = tk.Frame(header_frame, bg="#f1f5f9")
-    col_hdr.pack(side="left", expand=True, fill="x", padx=2)
-    name_k = col["keys"]["Name"]
-    cur_name = str(setpoints.get(name_k, col["name"])).upper()
-    
-    lbl_n = tk.Label(col_hdr, text=cur_name, font=("Arial", 10, "bold"), fg="#1565c0", bg="#f1f5f9", anchor="center")
-    lbl_n.pack(side="left", expand=True, padx=2)
-    sp_labels[name_k] = lbl_n
-    
-    btn_edit_name = tk.Button(col_hdr, text="EDIT", font=("Arial", 11, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=3, padx=3,
-                              command=lambda k=name_k: open_keypad_sp(k))
-    btn_edit_name.pack(side="right", padx=2)
+    for col in cols_group:
+        col_hdr = tk.Frame(header_frame, bg="#f1f5f9")
+        col_hdr.pack(side="left", expand=True, fill="x", padx=3)
+        name_k = col["keys"]["Name"]
+        cur_name = str(setpoints.get(name_k, col["name"])).upper()
 
-row_keys = [("Start", "Start:"), ("Stop", "Stop:"), ("ON Min", "ON Min:"), ("OFF Min", "OFF Min:")]
+        lbl_n = tk.Label(col_hdr, text=cur_name, font=("Arial", 10, "bold"), fg="#1565c0", bg="#f1f5f9", anchor="center")
+        lbl_n.pack(side="left", expand=True, padx=2)
+        sp_labels[name_k] = lbl_n
 
-for r_key, r_lbl in row_keys:
-    r_frame = tk.Frame(card_timers_sp, bg="#ffffff")
-    r_frame.pack(fill="x", pady=5, padx=4)
-    tk.Label(r_frame, text=r_lbl, font=("Arial", 11, "bold"), fg="#0f172a", bg="#ffffff", width=10, anchor="w").pack(side="left", padx=4)
-    for col in cols:
-        col_frame = tk.Frame(r_frame, bg="#ffffff")
-        col_frame.pack(side="left", expand=True, fill="x", padx=2)
-        full_key = col["keys"].get(r_key)
-        if full_key and full_key in setpoints:
-            val_lbl = tk.Label(col_frame, text=str(setpoints[full_key]), font=("Arial", 11, "bold"), fg="#e65100", bg="#f8fafc", width=6, anchor="center", relief="sunken", bd=1)
-            val_lbl.pack(side="left", expand=True, padx=2)
-            btn = tk.Button(col_frame, text="EDIT", font=("Arial", 11, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=3, padx=3,
-                            command=lambda k=full_key: open_keypad_sp(k))
-            btn.pack(side="right", padx=2)
-            sp_labels[full_key] = val_lbl
+        btn_edit_name = tk.Button(col_hdr, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
+                                  command=lambda k=name_k: open_keypad_sp(k))
+        btn_edit_name.pack(side="right", padx=2)
 
-# Keypad Modal Frame for Setpoints Page (Enlarged Height & Width for Easy Touchscreen Use)
-kp_sp_frame   = tk.Frame(frame_set, bg="#ffffff", bd=3, relief="solid", padx=25, pady=20)
-kp_sp_title   = tk.Label(kp_sp_frame, font=("Arial", 16, "bold"), fg="#1565c0", bg="#ffffff")
-kp_sp_title.pack(pady=6)
-kp_sp_display = tk.Label(kp_sp_frame, font=("Arial", 22, "bold"), fg="#2e7d32", bg="#f1f5f9", width=18, relief="sunken", bd=2)
-kp_sp_display.pack(pady=8)
-kp_sp_buttons = tk.Frame(kp_sp_frame, bg="#ffffff")
-kp_sp_buttons.pack(pady=8)
-kp_sp_actions = tk.Frame(kp_sp_frame, bg="#ffffff")
-kp_sp_actions.pack(pady=8)
+    row_keys = [("Start", "Start:"), ("Stop", "Stop:"), ("ON Min", "ON Min:"), ("OFF Min", "OFF Min:")]
 
-def kp_sp_press(v):
-    global sp_entered_value
-    sp_entered_value += str(v)
-    kp_sp_display.config(text=sp_entered_value)
+    for r_key, r_lbl in row_keys:
+        r_frame = tk.Frame(parent_card, bg="#ffffff")
+        r_frame.pack(fill="x", pady=4, padx=6)
+        tk.Label(r_frame, text=r_lbl, font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", width=10, anchor="w").pack(side="left", padx=2)
+        for col in cols_group:
+            col_frame = tk.Frame(r_frame, bg="#ffffff")
+            col_frame.pack(side="left", expand=True, fill="x", padx=3)
+            full_key = col["keys"].get(r_key)
+            if full_key and full_key in setpoints:
+                val_lbl = tk.Label(col_frame, text=str(setpoints[full_key]), font=("Arial", 10, "bold"), fg="#e65100", bg="#f8fafc", width=6, anchor="center", relief="sunken", bd=1)
+                val_lbl.pack(side="left", expand=True, padx=2)
+                btn = tk.Button(col_frame, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
+                                command=lambda k=full_key: open_keypad_sp(k))
+                btn.pack(side="right", padx=2)
+                sp_labels[full_key] = val_lbl
 
-def kp_sp_clear():
-    global sp_entered_value
-    sp_entered_value = ""
-    kp_sp_display.config(text="")
-
-def kp_sp_back():
-    global sp_entered_value
-    sp_entered_value = sp_entered_value[:-1]
-    kp_sp_display.config(text=sp_entered_value)
-
-def kp_sp_confirm():
-    global sp_entered_value
-    try:
-        if sp_selected_key.endswith("Name"):
-            val = str(sp_entered_value).strip()
-        elif ":" in str(sp_entered_value):
-            val = str(sp_entered_value).strip()
-            datetime.datetime.strptime(val, "%H:%M")
-        else:
-            val = float(sp_entered_value)
-        setpoints[sp_selected_key] = val
-
-        save_setpoints()
-
-        if sp_selected_key in sp_labels:
-            sp_labels[sp_selected_key].config(text=str(val))
-
-        kp_sp_frame.pack_forget()
-        sp_container.pack(fill="both", expand=True, padx=15, pady=(45, 2))
-    except Exception:
-        kp_sp_display.config(text="INVALID INPUT")
-
-def kp_sp_cancel():
-    kp_sp_frame.pack_forget()
-    sp_container.pack(fill="both", expand=True, padx=15, pady=(45, 2))
+build_timer_grid_box(card_timers_1, cols_group1)
+build_timer_grid_box(card_timers_2, cols_group2)
 
 def open_keypad_sp(key):
     global sp_selected_key, sp_entered_value
     sp_selected_key = key
     sp_entered_value = ""
-    kp_sp_display.config(text="")
-    kp_sp_title.config(text=f"Editing {key}")
-    for w in kp_sp_buttons.winfo_children(): w.destroy()
-    for w in kp_sp_actions.winfo_children(): w.destroy()
+
+    sw = root.winfo_screenwidth()
+    sh = root.winfo_screenheight()
+
+    pop = tk.Toplevel(root)
+    pop.title(f"Editing {key}")
+    pop.configure(bg="#ffffff")
+    pop.geometry(f"{sw}x{sh}+0+0")
+    pop.focus_force()
+    pop.update()
+    pop.attributes("-fullscreen", True)
+    pop.grab_set()
+
+    lbl_pop_clock = tk.Label(pop, text="", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff", justify="left")
+    lbl_pop_clock.place(x=15, y=10, anchor="nw")
+    def update_pop_clock():
+        if pop.winfo_exists():
+            lbl_pop_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y\n%I:%M:%S %p"))
+            pop.after(1000, update_pop_clock)
+    update_pop_clock()
+
+    def close_pop():
+        pop.destroy()
+
+    container = tk.Frame(pop, bg="#ffffff")
+    container.place(relx=0.5, rely=0.5, anchor="center")
+
+    kp_sp_title = tk.Label(container, text=f"EDIT {key.upper()}", font=("Arial", 16, "bold"), fg="#1565c0", bg="#ffffff")
+    kp_sp_title.pack(pady=8)
+
+    kp_sp_display = tk.Label(container, text="", font=("Arial", 22, "bold"), fg="#2e7d32", bg="#f1f5f9", width=18, relief="sunken", bd=2)
+    kp_sp_display.pack(pady=10)
+
+    kp_sp_buttons = tk.Frame(container, bg="#ffffff")
+    kp_sp_buttons.pack(pady=10)
+
+    kp_sp_actions = tk.Frame(container, bg="#ffffff")
+    kp_sp_actions.pack(pady=10)
+
+    def kp_sp_press(v):
+        global sp_entered_value
+        sp_entered_value += str(v)
+        kp_sp_display.config(text=sp_entered_value)
+
+    def kp_sp_clear():
+        global sp_entered_value
+        sp_entered_value = ""
+        kp_sp_display.config(text="")
+
+    def kp_sp_back():
+        global sp_entered_value
+        sp_entered_value = sp_entered_value[:-1]
+        kp_sp_display.config(text=sp_entered_value)
+
+    def kp_sp_confirm():
+        global sp_entered_value
+        try:
+            if sp_selected_key.endswith("Name"):
+                val = str(sp_entered_value).strip()
+            elif ":" in str(sp_entered_value):
+                val = str(sp_entered_value).strip()
+                datetime.datetime.strptime(val, "%H:%M")
+            else:
+                val = float(sp_entered_value)
+            setpoints[sp_selected_key] = val
+            save_setpoints()
+            if sp_selected_key in sp_labels:
+                sp_labels[sp_selected_key].config(text=str(val))
+            close_pop()
+        except Exception:
+            kp_sp_display.config(text="INVALID INPUT")
 
     if key.endswith("Name"):
         for ri, row_k in enumerate([list("1234567890"), list("QWERTYUIOP"), list("ASDFGHJKL:"), list("ZXCVBNM._ ")]):
@@ -1956,11 +2206,8 @@ def open_keypad_sp(key):
         w_btn = 7
 
     for txt, bg, fg, cmd in [("DEL", "#f97316", "white", kp_sp_back), ("CLR", "#dc2626", "white", kp_sp_clear),
-                             ("CONFIRM", "#0284c7", "white", kp_sp_confirm), ("CANCEL", "#64748b", "white", kp_sp_cancel)]:
-        tk.Button(kp_sp_actions, text=txt, font=("Arial", 12, "bold"), bg=bg, fg=fg, width=w_btn+2, pady=4, command=cmd).pack(side="left", padx=6)
-
-    sp_container.pack_forget()
-    kp_sp_frame.pack(pady=10, padx=20, expand=True)
+                             ("CONFIRM", "#0284c7", "white", kp_sp_confirm), ("CANCEL", "#64748b", "white", close_pop)]:
+        tk.Button(kp_sp_actions, text=txt, font=("Arial", 12, "bold"), bg=bg, fg=fg, width=w_btn+2, pady=6, command=cmd).pack(side="left", padx=8)
 
 
 def update():
@@ -2078,7 +2325,7 @@ def update():
 
     # Update Header Clock (Day, Date, Time)
     if 'lbl_clock' in globals():
-        lbl_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y  |  %I:%M:%S %p"))
+        lbl_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y\n%I:%M:%S %p"))
 
     # Live Telemetry and Offline Sync Logging (1 Second Frequency)
     publish_live_telemetry(water_data, md02_data)
