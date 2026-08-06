@@ -152,15 +152,15 @@ setpoints = {
     "PH HIGH": 6.5,
     "S_TANK": 2.0,
     
-    # Climate Control (MD02 Temp & Cooling Pad Humidity Safety)
+    # Climate Control (MD02 Temp & Humidity)
     "TEMP MIN": 22.0,
     "TEMP MED": 25.0,
     "TEMP MAX": 28.0,
+    "HUMI MIN": 50.0,
+    "HUMI MAX": 70.0,
     "TEMP Hyst": 0.5,
-    "PAD H_Max": 75.0,
-    "PAD Safety": 2.0,
     
-    # Cooling Pad Pump Timer
+    # Cooling Pad Pump
     "PAD Start": "06:00",
     "PAD Stop": "18:00",
     "PAD ON Min": 5,
@@ -605,11 +605,10 @@ def process_humi_day_night_timer(relay_obj, room_humi=None):
     return status_msg
 
 _pad_humi_allowed = True
-_pad_temp_active = False
 
 def control_system(water_data, md02_data):
     warnings = []
-    global ec_active, ph_active, solenoid_active, temp_active, humi_active, last_ec, last_ph, ec_start_time, ph_start_time, _pad_humi_allowed, _pad_temp_active
+    global ec_active, ph_active, solenoid_active, temp_active, humi_active, last_ec, last_ph, ec_start_time, ph_start_time, _pad_humi_allowed
 
     now = time.time()
     # 1. WATER SENSOR DOSING LOGIC (EC & pH & S-Tank Solenoid)
@@ -701,9 +700,32 @@ def control_system(water_data, md02_data):
         t_max    = float(setpoints.get("TEMP MAX", 28.0))
         t_buffer = float(setpoints.get("TEMP BUFFER", setpoints.get("TEMP Hyst", 0.5)))
         t_hyst   = t_buffer
-        # Cooling Pad Pump Independent Humidity Interlock & Safety Buffer
-        pad_h_max = float(setpoints.get("PAD H_Max", setpoints.get("PAD H_MAX", 75.0)))
-        pad_safety = float(setpoints.get("PAD Safety", setpoints.get("PAD Hyst", 2.0)))
+        # Determine active Day vs Night humidity cutoff for Cooling Pad Safety Interlock
+        d_start = str(setpoints.get("HUMI D_Start", "06:00"))
+        d_stop  = str(setpoints.get("HUMI D_Stop", "18:00"))
+        n_start = str(setpoints.get("HUMI N_Start", "18:00"))
+        n_stop  = str(setpoints.get("HUMI N_Stop", "06:00"))
+
+        cur_time = datetime.datetime.now().time()
+        def _is_window_active(s_str, e_str):
+            try:
+                ts = datetime.datetime.strptime(s_str, "%H:%M").time()
+                te = datetime.datetime.strptime(e_str, "%H:%M").time()
+                if ts <= te: return (ts <= cur_time <= te)
+                else: return (cur_time >= ts or cur_time <= te)
+            except Exception:
+                return False
+
+        in_day_win   = _is_window_active(d_start, d_stop)
+        in_night_win = _is_window_active(n_start, n_stop)
+
+        if in_night_win and not in_day_win:
+            h_max = float(setpoints.get("HUMI N_Max", 80.0))
+        else:
+            h_max = float(setpoints.get("HUMI D_Max", 75.0))
+
+        h_buffer = float(setpoints.get("HUMI BUFFER", setpoints.get("HUMI Hyst", 2.0)))
+        h_hyst   = h_buffer
 
         # 2-Stage Exhaust Fan Logic:
         # Rising (Heat Up): 
@@ -740,30 +762,23 @@ def control_system(water_data, md02_data):
         elif fan1_on:
             warnings.append("TEMP MED (STAGE 1: FAN 1 ON)")
 
-        # Cooling Pad Pump Temperature Hysteresis (ON at >= t_max, stays active until <= t_min)
-        if room_temp >= t_max:
-            _pad_temp_active = True
-        elif room_temp <= t_min:
-            _pad_temp_active = False
-
         # Cooling Pad Pump Automation + Humidity Safety Interlock with Hysteresis
-        # Cutoff ON when room_humi >= pad_h_max; Pad re-enabled when room_humi < (pad_h_max - pad_safety)
-        if room_humi >= pad_h_max:
+        # Cutoff ON when room_humi >= h_max; Pad re-enabled when room_humi < (h_max - h_buffer)
+        if room_humi >= h_max:
             _pad_humi_allowed = False
-        elif room_humi < (pad_h_max - pad_safety):
+        elif room_humi < (h_max - h_buffer):
             _pad_humi_allowed = True
 
         pad_humi_allowed = _pad_humi_allowed
-        pad_temp_allowed = _pad_temp_active
 
-        if pad_temp_allowed and pad_humi_allowed:
+        if room_temp >= t_max and pad_humi_allowed:
             process_generic_cyclic_timer("PAD", relay_pad)
             if relay_pad.is_active:
                 warnings.append("COOLING PAD PUMP ON")
         else:
             relay_pad.off()
             if not pad_humi_allowed:
-                warnings.append("COOLING PAD CUTOFF (HUMIDITY HIGH)")
+                warnings.append("PAD CUTOFF (HUMIDITY HIGH)")
     else:
         relay_fan1.off()
         relay_fan2.off()
@@ -786,8 +801,8 @@ def control_system(water_data, md02_data):
 
 def manual_stop():
     all_relays_off()
-    global ec_active, ph_active, solenoid_active, temp_active, humi_active, humi_logic_active, _pad_temp_active
-    ec_active = ph_active = solenoid_active = temp_active = humi_active = humi_logic_active = _pad_temp_active = False
+    global ec_active, ph_active, solenoid_active, temp_active, humi_active, humi_logic_active
+    ec_active = ph_active = solenoid_active = temp_active = humi_active = humi_logic_active = False
     for ts in timer_state.values():
         ts["state"] = "OFF"
         ts["last"] = 0.0
@@ -2012,12 +2027,15 @@ make_sp_cell(temp_section, "TEMP Hyst", "Safety:").pack(fill="x", pady=3)
 # Vertical Separator Line
 tk.Frame(grid_climate_sp, bg="#cbd5e1", width=1).pack(side="left", fill="y", padx=4, pady=2)
 
-# Right Section: Cooling Pad Humidity Interlock & Safety Buffer
+# Right Section: Humidity Setpoints (Day & Night Independent Thresholds + Safety)
 humi_section = tk.Frame(grid_climate_sp, bg="#ffffff")
 humi_section.pack(side="right", fill="both", expand=True, padx=4)
-tk.Label(humi_section, text="COOLING PAD HUMIDITY", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w", pady=(1, 3))
-make_sp_cell(humi_section, "PAD H_Max", "Max_Humi:").pack(fill="x", pady=3)
-make_sp_cell(humi_section, "PAD Safety", "Safety:   ").pack(fill="x", pady=3)
+tk.Label(humi_section, text="HUMIDITY SETPOINTS", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w", pady=(1, 3))
+make_sp_cell(humi_section, "HUMI D_Min", "Day Min:  ").pack(fill="x", pady=3)
+make_sp_cell(humi_section, "HUMI D_Max", "Day Max:  ").pack(fill="x", pady=3)
+make_sp_cell(humi_section, "HUMI N_Min", "Night Min:").pack(fill="x", pady=3)
+make_sp_cell(humi_section, "HUMI N_Max", "Night Max:").pack(fill="x", pady=3)
+make_sp_cell(humi_section, "HUMI BUFFER", "Safety:").pack(fill="x", pady=3)
 
 # Card 2 (RIGHT PANE): Humidifier Day/Night Cyclic Timer
 card_humi_sp = tk.LabelFrame(right_sp_pane, text=f" {str(setpoints.get('HUMI Name', 'HUMIDIFIER')).upper()} DAY/NIGHT TIMER ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
@@ -2044,8 +2062,6 @@ humi_rows = [
     ("Stop Time",  "HUMI D_Stop",   "HUMI N_Stop"),
     ("ON Min",     "HUMI D_ON Min",  "HUMI N_ON Min"),
     ("OFF Min",    "HUMI D_OFF Min", "HUMI N_OFF Min"),
-    ("H Min %",    "HUMI D_Min",     "HUMI N_Min"),
-    ("H Max %",    "HUMI D_Max",     "HUMI N_Max"),
 ]
 
 for r_lbl, d_k, n_k in humi_rows:

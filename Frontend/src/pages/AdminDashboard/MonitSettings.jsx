@@ -12,16 +12,15 @@ const defaultSetpoints = {
   "EC MAX": 1.8,
   "PH LOW": 5.8,
   "PH HIGH": 6.5,
-  "S_TANK": 0.45,
+  "S_TANK": 2.0,
 
-  // Climate Control (MD02 Temp & Humidity)
+  // Climate Control (MD02 Temp & Cooling Pad Humidity Safety)
   "TEMP MIN": 22.0,
   "TEMP MED": 25.0,
   "TEMP MAX": 28.0,
   "TEMP Hyst": 0.5,
-  "HUMI MIN": 50.0,
-  "HUMI MAX": 70.0,
-  "HUMI Hyst": 2.0,
+  "PAD H_Max": 75.0,
+  "PAD Safety": 2.0,
 
   // Fogger Humidifier Day/Night Cycle
   "HUMI Name": "FOGGER TIMER",
@@ -724,35 +723,24 @@ const MonitSettings = () => {
                   </div>
 
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">HUMI MIN (%)</label>
+                    <label className="text-xs font-medium text-slate-400">Pad Max Humi Cutoff (PAD H_Max %)</label>
                     <input
                       type="number"
                       step="0.1"
-                      value={setpoints["HUMI MIN"] ?? 50.0}
-                      onChange={(e) => handleInputChange("HUMI MIN", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      value={setpoints["PAD H_Max"] ?? 75.0}
+                      onChange={(e) => handleInputChange("PAD H_Max", parseFloat(e.target.value) || 0)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-cyan-400 font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
                     />
                   </div>
 
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">HUMI MAX (%)</label>
+                    <label className="text-xs font-medium text-slate-400">Pad Safety Buffer (PAD Safety %)</label>
                     <input
                       type="number"
                       step="0.1"
-                      value={setpoints["HUMI MAX"] ?? 70.0}
-                      onChange={(e) => handleInputChange("HUMI MAX", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
-                    />
-                  </div>
-
-                  <div className="col-span-2 flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">HUMI Safety Hysteresis / Buffer (%)</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={setpoints["HUMI Hyst"] ?? 2.0}
-                      onChange={(e) => handleInputChange("HUMI Hyst", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      value={setpoints["PAD Safety"] ?? 2.0}
+                      onChange={(e) => handleInputChange("PAD Safety", parseFloat(e.target.value) || 0)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-cyan-400 font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
                     />
                   </div>
                 </div>
