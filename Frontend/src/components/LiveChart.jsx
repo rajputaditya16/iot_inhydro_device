@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 
 const colorSchemes = {
@@ -23,7 +24,21 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
-const LiveChart = ({ data, type = 'temperature', title, unit, subtitle = 'Last 24 hours' }) => {
+const areEqual = (prevProps, nextProps) => {
+  if (prevProps.type !== nextProps.type) return false;
+  if (prevProps.title !== nextProps.title) return false;
+  if (prevProps.unit !== nextProps.unit) return false;
+  if (prevProps.data === nextProps.data) return true;
+  if (!prevProps.data || !nextProps.data) return false;
+  if (prevProps.data.length !== nextProps.data.length) return false;
+  if (prevProps.data.length === 0) return true;
+  
+  const prevLast = prevProps.data[prevProps.data.length - 1];
+  const nextLast = nextProps.data[nextProps.data.length - 1];
+  return prevLast?.time === nextLast?.time && prevLast?.value === nextLast?.value && prevLast?.room1Value === nextLast?.room1Value;
+};
+
+const LiveChart = memo(({ data, type = 'temperature', title, unit, subtitle = 'Last 24 hours' }) => {
   const colors = colorSchemes[type] || colorSchemes.temperature;
   const gradientId = `gradient-${type}`;
   const isBoth = data && data[0]?.isBoth;
@@ -62,6 +77,7 @@ const LiveChart = ({ data, type = 'temperature', title, unit, subtitle = 'Last 2
                 strokeWidth={2}
                 name="Room 1"
                 dot={false}
+                isAnimationActive={false}
                 activeDot={{ r: 4, fill: '#3b82f6', stroke: '#0f172a', strokeWidth: 2 }}
               />
               <Line
@@ -71,6 +87,7 @@ const LiveChart = ({ data, type = 'temperature', title, unit, subtitle = 'Last 2
                 strokeWidth={2}
                 name="Room 2"
                 dot={false}
+                isAnimationActive={false}
                 activeDot={{ r: 4, fill: '#a855f7', stroke: '#0f172a', strokeWidth: 2 }}
               />
               <Line
@@ -80,6 +97,7 @@ const LiveChart = ({ data, type = 'temperature', title, unit, subtitle = 'Last 2
                 strokeWidth={2}
                 name="Room 3"
                 dot={false}
+                isAnimationActive={false}
                 activeDot={{ r: 4, fill: '#10b981', stroke: '#0f172a', strokeWidth: 2 }}
               />
             </LineChart>
@@ -112,6 +130,7 @@ const LiveChart = ({ data, type = 'temperature', title, unit, subtitle = 'Last 2
                 strokeWidth={2}
                 fill={`url(#${gradientId})`}
                 dot={false}
+                isAnimationActive={false}
                 activeDot={{ r: 4, fill: colors.stroke, stroke: '#0f172a', strokeWidth: 2 }}
               />
             </AreaChart>
@@ -120,6 +139,9 @@ const LiveChart = ({ data, type = 'temperature', title, unit, subtitle = 'Last 2
       </div>
     </div>
   );
-};
+}, areEqual);
+
+LiveChart.displayName = 'LiveChart';
 
 export default LiveChart;
+

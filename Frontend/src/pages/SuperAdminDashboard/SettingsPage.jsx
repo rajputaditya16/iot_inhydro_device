@@ -161,7 +161,7 @@ const SettingsPage = () => {
       { key: 'light_motor_pump_config', label: 'Light Motor Pump Setup', icon: Monitor },
       { key: 'office_control_config', label: 'Office Control Setup', icon: Monitor },
       { key: 'controlling_config', label: 'Controller Setup', icon: Monitor },
-      { key: 'monit_config', label: 'Monit Setup', icon: Monitor },
+      { key: 'monit_config', label: 'Monnet Setup', icon: Monitor },
     ] : []),
     // { key: 'notifications', label: 'Notifications', icon: Bell },
     // { key: 'appearance', label: 'Appearance', icon: Palette },
@@ -174,35 +174,38 @@ const SettingsPage = () => {
         <p className="text-sm text-slate-400">Manage your account and preferences</p>
       </div>
 
-      <div className="flex flex-col gap-6 lg:flex-row">
-        {/* Tab Navigation */}
-        <div className="w-full lg:w-56 shrink-0">
-          <div className="flex gap-1 lg:flex-col rounded-xl bg-slate-800/30 p-1">
-            {tabs.map((tab) => (
+      {/* Top Horizontal Tab Navigation */}
+      <div className="overflow-x-auto scrollbar-none rounded-2xl border border-slate-700/50 bg-slate-800/30 p-1.5">
+        <div className="flex items-center gap-1.5 min-w-max">
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.key;
+            return (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${activeTab === tab.key
-                  ? 'bg-green-500/10 text-green-400'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                  }`}
+                className={`flex items-center gap-2.5 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap ${
+                  isActive
+                    ? 'bg-green-500/10 text-green-400 border border-green-500/30 shadow-sm'
+                    : 'text-slate-400 hover:bg-slate-800/80 hover:text-white border border-transparent'
+                }`}
               >
-                <tab.icon className="h-4 w-4 shrink-0" />
-                <span className="hidden lg:block">{tab.label}</span>
+                <tab.icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-green-400' : 'text-slate-400'}`} />
+                <span>{tab.label}</span>
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
+      </div>
 
-        {/* Content */}
-        <div className="flex-1">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.3 }}
-            className="rounded-2xl border border-slate-700/50 bg-slate-800/30 p-6"
-          >
+      {/* Rendered Content Below */}
+      <div className="w-full">
+        <motion.div
+          key={activeTab}
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="rounded-2xl border border-slate-700/50 bg-slate-800/30 p-6"
+        >
             {/* Device Control */}
             {activeTab === 'device_config' && (
               <DeviceSettings />
@@ -363,7 +366,6 @@ const SettingsPage = () => {
 
           </motion.div>
         </div>
-      </div>
 
       {/* Toast Notification */}
       <AnimatePresence>

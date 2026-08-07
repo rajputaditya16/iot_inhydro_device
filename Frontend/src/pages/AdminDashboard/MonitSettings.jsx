@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   Save, CheckCircle2, RefreshCw, ChevronDown, Server, 
   Thermometer, Droplets, Zap, Clock, ShieldCheck, Activity, Sliders, 
-  Power, FlaskConical, AlertCircle, Wind, Fan, RotateCw
+  Power, FlaskConical, AlertCircle, Wind, Fan, RotateCw, Edit3
 } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
@@ -100,6 +100,8 @@ const MonitSettings = () => {
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [toast, setToast] = useState({ show: false, type: 'success', message: '' });
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState('');
 
   const token = localStorage.getItem('token');
   const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -141,6 +143,34 @@ const MonitSettings = () => {
   }, [token, API_BASE]);
 
   const selectedDevice = monitDevices.find(d => (d.mqttId || d._id) === deviceRoot);
+
+  useEffect(() => {
+    setTempName(selectedDevice?.name || 'Monnet Device');
+    setIsEditingName(false);
+  }, [deviceRoot, selectedDevice]);
+
+  const handleNameSave = async () => {
+    if (!tempName.trim() || !selectedDevice) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/devices/${selectedDevice._id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ name: tempName }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMonitDevices(prev => prev.map(d => d._id === selectedDevice._id ? { ...d, name: tempName } : d));
+        setIsEditingName(false);
+        showToast('success', 'Device renamed successfully');
+      }
+    } catch (err) {
+      console.error('Failed to update name', err);
+      showToast('error', 'Failed to rename device');
+    }
+  };
 
   useEffect(() => {
     if (!deviceRoot) return;
@@ -366,21 +396,40 @@ const MonitSettings = () => {
       {/* Top Header Controls */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h3 className="text-base font-semibold text-white">
-            {selectedDevice?.name || 'Monnet Group Farm Controller'}
-          </h3>
+          <div className="flex items-center gap-3">
+            {isEditingName ? (
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  type="text"
+                  value={tempName}
+                  onChange={(e) => setTempName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleNameSave()}
+                  className="rounded border border-green-500 bg-slate-900/50 px-2 py-0.5 text-base font-semibold text-white outline-none"
+                />
+                <button onClick={handleNameSave} className="rounded bg-green-500/20 px-2 py-1 text-xs font-semibold text-green-400 hover:bg-green-500/30 transition-all">Save</button>
+              </div>
+            ) : (
+              <h3 className="flex items-center gap-2 text-base font-semibold text-white">
+                {selectedDevice?.name || 'Monnet Device'}
+                <button onClick={() => setIsEditingName(true)} className="text-slate-500 transition hover:text-green-400" title="Rename Machine">
+                  <Edit3 className="h-4 w-4" />
+                </button>
+              </h3>
+            )}
+          </div>
           <p className="text-sm text-slate-400 mt-1">Configure Monnet Farm Automation Setpoints & Live Telemetry</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-4">
           {/* Device Selector */}
           <div className="relative">
             <button
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium text-white outline-none transition-all ${isDropdownOpen ? 'border-green-500 bg-slate-800' : 'border-slate-700 bg-slate-900/50 hover:border-green-500 hover:bg-slate-800'}`}
+              className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium text-white outline-none transition-all ${isDropdownOpen ? 'border-green-500 bg-slate-800' : 'border-slate-700 bg-slate-900/50 hover:border-green-500 hover:bg-slate-800'}`}
             >
               <Server className="h-4 w-4 text-green-400" />
-              <span className="max-w-[150px] truncate">{selectedDevice?.name || deviceRoot}</span>
+              <span className="max-w-[150px] truncate">{selectedDevice?.name || 'Select Device'}</span>
               <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
 
@@ -412,25 +461,25 @@ const MonitSettings = () => {
           <button
             onClick={handleSyncRequest}
             title="Request setpoints sync from device"
-            className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/50 px-3 py-2 text-xs font-medium text-slate-300 hover:border-slate-600 hover:text-white transition-all"
+            className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-xs font-medium text-slate-300 hover:border-green-500 hover:text-white transition-all"
           >
-            <RefreshCw className="h-3.5 w-3.5 text-slate-400" /> Sync Device
+            <RefreshCw className="h-4 w-4 text-slate-400" /> Sync Device
           </button>
 
           {/* Broker Status Badge */}
-          <div className="min-w-[120px] flex justify-end">
+          <div className="min-w-[140px] flex justify-end">
             {status === 'connected' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
                 <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
               </span>
             )}
             {status !== 'connected' && status !== 'error' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700">
-                <span className="h-2 w-2 rounded-full bg-slate-500" /> Offline
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+                <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
               </span>
             )}
             {status === 'error' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400 bg-red-500/10 px-3 py-1.5 rounded-xl border border-red-500/20">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
                 <AlertCircle className="h-4 w-4" /> Connection Error
               </span>
             )}
@@ -519,7 +568,7 @@ const MonitSettings = () => {
                       step="0.05"
                       value={setpoints["S_TANK"] ?? 0.45}
                       onChange={(e) => handleInputChange("S_TANK", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-amber-400 font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
                     />
                   </div>
                 </div>
@@ -545,8 +594,8 @@ const MonitSettings = () => {
                   <thead>
                     <tr className="border-b border-slate-700/60 bg-slate-800/40">
                       <th className="py-2.5 px-3 text-left font-bold text-slate-400">Setting</th>
-                      <th className="py-2.5 px-3 text-center font-bold text-amber-400 bg-amber-500/10 rounded-tl-lg">Day Cycle</th>
-                      <th className="py-2.5 px-3 text-center font-bold text-indigo-400 bg-indigo-500/10 rounded-tr-lg">Night Cycle</th>
+                      <th className="py-2.5 px-3 text-center font-bold  rounded-tl-lg">Day Cycle</th>
+                      <th className="py-2.5 px-3 text-center font-bold rounded-tr-lg">Night Cycle</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
@@ -595,7 +644,7 @@ const MonitSettings = () => {
                           type="number"
                           value={setpoints["HUMI D_ON Min"] ?? 10}
                           onChange={(e) => handleInputChange("HUMI D_ON Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-amber-400 font-mono text-center outline-none focus:border-green-500"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
                         />
                       </td>
                       <td className="py-2 px-3">
@@ -603,7 +652,7 @@ const MonitSettings = () => {
                           type="number"
                           value={setpoints["HUMI N_ON Min"] ?? 5}
                           onChange={(e) => handleInputChange("HUMI N_ON Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-indigo-400 font-mono text-center outline-none focus:border-green-500"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
                         />
                       </td>
                     </tr>
@@ -614,7 +663,7 @@ const MonitSettings = () => {
                           type="number"
                           value={setpoints["HUMI D_OFF Min"] ?? 20}
                           onChange={(e) => handleInputChange("HUMI D_OFF Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-amber-400 font-mono text-center outline-none focus:border-green-500"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
                         />
                       </td>
                       <td className="py-2 px-3">
@@ -622,7 +671,7 @@ const MonitSettings = () => {
                           type="number"
                           value={setpoints["HUMI N_OFF Min"] ?? 40}
                           onChange={(e) => handleInputChange("HUMI N_OFF Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-indigo-400 font-mono text-center outline-none focus:border-green-500"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
                         />
                       </td>
                     </tr>
@@ -633,7 +682,7 @@ const MonitSettings = () => {
                           type="number"
                           value={setpoints["HUMI D_Max"] ?? 75.0}
                           onChange={(e) => handleInputChange("HUMI D_Max", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-amber-400 font-mono text-center outline-none focus:border-green-500"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
                         />
                       </td>
                       <td className="py-2 px-3">
@@ -641,7 +690,7 @@ const MonitSettings = () => {
                           type="number"
                           value={setpoints["HUMI N_Max"] ?? 80.0}
                           onChange={(e) => handleInputChange("HUMI N_Max", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-indigo-400 font-mono text-center outline-none focus:border-green-500"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
                         />
                       </td>
                     </tr>
@@ -652,7 +701,7 @@ const MonitSettings = () => {
                           type="number"
                           value={setpoints["HUMI D_Min"] ?? 55.0}
                           onChange={(e) => handleInputChange("HUMI D_Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-amber-400 font-mono text-center outline-none focus:border-green-500"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
                         />
                       </td>
                       <td className="py-2 px-3">
@@ -660,7 +709,7 @@ const MonitSettings = () => {
                           type="number"
                           value={setpoints["HUMI N_Min"] ?? 60.0}
                           onChange={(e) => handleInputChange("HUMI N_Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-indigo-400 font-mono text-center outline-none focus:border-green-500"
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
                         />
                       </td>
                     </tr>
@@ -696,7 +745,7 @@ const MonitSettings = () => {
                       step="0.1"
                       value={setpoints["TEMP MED"] ?? 25.0}
                       onChange={(e) => handleInputChange("TEMP MED", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-emerald-400 font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2  font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
                     />
                   </div>
 
@@ -707,7 +756,7 @@ const MonitSettings = () => {
                       step="0.1"
                       value={setpoints["TEMP MAX"] ?? 28.0}
                       onChange={(e) => handleInputChange("TEMP MAX", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-red-400 font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm  font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
                     />
                   </div>
 
@@ -729,7 +778,7 @@ const MonitSettings = () => {
                       step="0.1"
                       value={setpoints["PAD H_Max"] ?? 75.0}
                       onChange={(e) => handleInputChange("PAD H_Max", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-cyan-400 font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
                     />
                   </div>
 
@@ -740,7 +789,7 @@ const MonitSettings = () => {
                       step="0.1"
                       value={setpoints["PAD Safety"] ?? 2.0}
                       onChange={(e) => handleInputChange("PAD Safety", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-cyan-400 font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm  font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
                     />
                   </div>
                 </div>
@@ -832,21 +881,21 @@ const MonitSettings = () => {
                       />
                     </div>
                     <div>
-                      <label className="text-[11px] font-medium text-slate-400">ON Min</label>
+                      <label className="text-[11px] font-medium ">ON Min</label>
                       <input
                         type="number"
                         value={setpoints[timer.onKey] ?? timer.defaultOn}
                         onChange={(e) => handleInputChange(timer.onKey, parseFloat(e.target.value) || 0)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-emerald-400 font-mono text-center outline-none focus:border-green-500"
+                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs font-mono text-center outline-none focus:border-green-500"
                       />
                     </div>
                     <div>
-                      <label className="text-[11px] font-medium text-slate-400">OFF Min</label>
+                      <label className="text-[11px] font-medium">OFF Min</label>
                       <input
                         type="number"
                         value={setpoints[timer.offKey] ?? timer.defaultOff}
                         onChange={(e) => handleInputChange(timer.offKey, parseFloat(e.target.value) || 0)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-teal-400 font-mono text-center outline-none focus:border-green-500"
+                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
                       />
                     </div>
                   </div>
@@ -855,11 +904,11 @@ const MonitSettings = () => {
             </div>
           </div>
 
-          <div className="pt-4 flex justify-end">
+          <div className="pt-4">
             <button
               onClick={handleSaveSetpoints}
               disabled={status !== 'connected'}
-              className="flex items-center gap-2 rounded-xl bg-green-500 hover:bg-green-400 px-6 py-3 text-sm font-semibold text-slate-950 transition-all shadow-lg shadow-green-500/20 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 active:scale-95 disabled:opacity-50 hover:opacity-90 transition-all"
             >
               <Save className="h-4 w-4" /> Save & Push Monnet Setpoints
             </button>
@@ -895,7 +944,7 @@ const MonitSettings = () => {
                   {tdsPpm !== null && (
                     <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
                       <span className="text-slate-400">Calculated TDS</span>
-                      <span className="font-bold text-amber-400">{tdsPpm} PPM</span>
+                      <span className="font-bold ">{tdsPpm} PPM</span>
                     </div>
                   )}
                 </div>
@@ -923,7 +972,7 @@ const MonitSettings = () => {
               </div>
 
               {/* Telemetry Status Card */}
-              <div>
+              {/* <div>
                 <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-700/50 pb-2">
                   <Activity className="w-4 h-4" /> Telemetry Info
                 </h4>
@@ -934,13 +983,13 @@ const MonitSettings = () => {
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-900/50 border border-slate-700/40 flex justify-between items-center">
                     <span className="text-slate-400 text-[11px]">Stream Status:</span>
-                    <span className={`font-semibold text-xs flex items-center gap-1.5 ${liveData ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    <span className={`font-semibold text-xs flex items-center gap-1.5 ${liveData ? 'text-emerald-400' : ''}`}>
                       <span className={`w-2 h-2 rounded-full ${liveData ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
                       {liveData ? 'Live Telemetry' : 'Waiting...'}
                     </span>
                   </div>
                 </div>
-              </div>
+              </div> */}
             </div>
 
             {/* COLUMN 2 & 3: ALL 12 RELAYS OUTPUT DASHBOARD */}
@@ -999,11 +1048,11 @@ const MonitSettings = () => {
                     </div>
                     <div className="text-[11px] text-slate-400 font-mono flex justify-between">
                       <span>Day Cycle:</span>
-                      <span className="text-amber-400">{setpoints["HUMI D_ON Min"] || 10}m ON / {setpoints["HUMI D_OFF Min"] || 20}m OFF</span>
+                      <span className="">{setpoints["HUMI D_ON Min"] || 10}m ON / {setpoints["HUMI D_OFF Min"] || 20}m OFF</span>
                     </div>
                     <div className="text-[11px] text-slate-400 font-mono flex justify-between">
                       <span>Night Cycle:</span>
-                      <span className="text-indigo-400">{setpoints["HUMI N_ON Min"] || 5}m ON / {setpoints["HUMI N_OFF Min"] || 40}m OFF</span>
+                      <span className="">{setpoints["HUMI N_ON Min"] || 5}m ON / {setpoints["HUMI N_OFF Min"] || 40}m OFF</span>
                     </div>
                   </div>
 

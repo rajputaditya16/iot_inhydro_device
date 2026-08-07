@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 /**
  * Animated counter hook for live values
  */
-export const useAnimatedCounter = (targetValue, duration = 800) => {
+export const useAnimatedCounter = (targetValue, duration = 400) => {
   const [displayValue, setDisplayValue] = useState(targetValue);
   const prevValue = useRef(targetValue);
 
@@ -12,13 +12,15 @@ export const useAnimatedCounter = (targetValue, duration = 800) => {
     const end = targetValue;
     const diff = end - start;
 
-    if (Math.abs(diff) < 0.01) {
+    if (Math.abs(diff) < 0.01 || duration === 0 || (typeof document !== 'undefined' && document.hidden)) {
       setDisplayValue(end);
       prevValue.current = end;
       return;
     }
 
     let startTime = null;
+    let animationFrameId = null;
+
     const step = (timestamp) => {
       if (!startTime) startTime = timestamp;
       const progress = Math.min((timestamp - startTime) / duration, 1);
@@ -26,13 +28,19 @@ export const useAnimatedCounter = (targetValue, duration = 800) => {
       setDisplayValue(start + diff * eased);
 
       if (progress < 1) {
-        requestAnimationFrame(step);
+        animationFrameId = requestAnimationFrame(step);
       } else {
         prevValue.current = end;
       }
     };
 
-    requestAnimationFrame(step);
+    animationFrameId = requestAnimationFrame(step);
+
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
   }, [targetValue, duration]);
 
   return displayValue;
