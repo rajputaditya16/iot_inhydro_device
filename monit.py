@@ -231,8 +231,18 @@ if os.path.exists(SETPOINT_FILE):
     try:
         with open(SETPOINT_FILE) as f:
             setpoints.update(json.load(f))
-    except Exception:
-        pass
+            print(f" Loaded setpoints from {SETPOINT_FILE}")
+    except Exception as e:
+        print(f" Error reading setpoint file: {e}")
+else:
+    alt_files = glob.glob(os.path.join(BASE_DIR, "setpoints_*.json"))
+    if alt_files:
+        try:
+            with open(alt_files[0]) as f:
+                setpoints.update(json.load(f))
+                print(f" Inherited setpoints from alternate file: {alt_files[0]}")
+        except Exception as e:
+            print(f" Error reading alt setpoint file: {e}")
 
 # Legacy auto-migration from uS/cm (1200/1800)D to mS/cm (1.2/1.8)
 if float(setpoints.get("EC MIN", 1.2)) > 100:
@@ -244,11 +254,15 @@ def save_setpoints():
     try:
         with open(SETPOINT_FILE, "w") as f:
             json.dump(setpoints, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
         if 'control_client' in globals() and control_client.is_connected():
             control_client.publish(CURRENT_SETP_TOPIC, json.dumps(setpoints), retain=True)
             print(" Pushed setpoints to cloud broker.")
     except Exception as e:
         print(f"Error saving setpoints: {e}")
+
+save_setpoints()
 
 def open_modbus_instrument(port, slave_id, baudrate=9600):
     try:
@@ -405,18 +419,28 @@ def on_control_message(client, userdata, msg):
             control_client.publish(CURRENT_SETP_TOPIC, json.dumps(setpoints), retain=True)
             return
 
-        new_data = json.loads(msg.payload.decode())
-        setpoints.update(new_data)
-        save_setpoints()
-            
-        def update_ui():
-            if 'sp_labels' in globals():
-                for key in new_data:
-                    if key in sp_labels:
-                        sp_labels[key].config(text=str(setpoints[key]))
-        if 'root' in globals():
-            try: root.after(0, update_ui)
-            except Exception: pass
+        # Ignore retained messages so stale broker payloads don't overwrite local HMI disk setpoints on restart
+        if msg.retain:
+            print(" Ignoring retained setpoint update from MQTT broker.")
+            return
+
+        payload_str = msg.payload.decode().strip()
+        if not payload_str:
+            return
+
+        new_data = json.loads(payload_str)
+        if isinstance(new_data, dict) and new_data:
+            setpoints.update(new_data)
+            save_setpoints()
+                
+            def update_ui():
+                if 'sp_labels' in globals():
+                    for key in new_data:
+                        if key in sp_labels:
+                            sp_labels[key].config(text=str(setpoints[key]))
+            if 'root' in globals():
+                try: root.after(0, update_ui)
+                except Exception: pass
     except Exception as e:
         print(f"❌ Private Control MQTT Update Error: {e}")
 

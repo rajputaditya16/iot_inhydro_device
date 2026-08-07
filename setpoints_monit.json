@@ -1,15 +1,14 @@
 {
     "EC MIN": 1.2,
-    "EC MAX": 2,
+    "EC MAX": 1.8,
     "PH LOW": 5.8,
-    "PH HIGH": 7.5,
-    "S_TANK": 0.45,
-    "TEMP MIN": 22,
-    "TEMP MED": 25,
-    "TEMP MAX": 28,
-    "TEMP Hyst": 0.5,
-    "PAD H_Max": 75,
-    "PAD Safety": 2,
+    "PH HIGH": 6.5,
+    "TEMP MIN": 31.0,
+    "TEMP MED": 33.0,
+    "TEMP MAX": 36.0,
+    "HUMI MIN": 50.0,
+    "HUMI MAX": 78.5,
+    "TEMP Hyst": 0.2,
     "PAD Start": "06:00",
     "PAD Stop": "18:00",
     "PAD ON Min": 5,
@@ -19,12 +18,12 @@
     "ACF Stop": "22:00",
     "ACF ON Min": 10,
     "ACF OFF Min": 20,
-    "Sprinkler Name": " SPRINKLER",
+    "Sprinkler Name": "SPRINKLER",
     "Sprinkler Start": "08:00",
     "Sprinkler Stop": "17:00",
     "Sprinkler ON Min": 2,
-    "Sprinkler OFF Min": 30,
-    "Irrigation Name": " IRRIGATION",
+    "Sprinkler OFF Min": 1.0,
+    "Irrigation Name": "DAYTIME IRRIGATION",
     "Irrigation Start": "06:00",
     "Irrigation Stop": "18:00",
     "Irrigation ON Min": 15,
@@ -34,20 +33,20 @@
     "HUMI D_Stop": "18:00",
     "HUMI D_ON Min": 10,
     "HUMI D_OFF Min": 20,
-    "HUMI D_Max": 75,
-    "HUMI D_Min": 55,
+    "HUMI D_Max": 78.5,
+    "HUMI D_Min": 55.0,
     "HUMI N_Start": "18:00",
     "HUMI N_Stop": "06:00",
     "HUMI N_ON Min": 5,
     "HUMI N_OFF Min": 40,
-    "HUMI N_Max": 80,
-    "HUMI N_Min": 60,
-    "Timer1 Name": "WATER MIXING PUMP",
+    "HUMI N_Max": 78.5,
+    "HUMI N_Min": 60.0,
+    "Timer1 Name": "Timer 1",
     "Timer1 Start": "06:00",
     "Timer1 Stop": "18:00",
     "Timer1 ON Min": 5,
     "Timer1 OFF Min": 15,
-    "Timer2 Name": "CYCLIC TIMER 2",
+    "Timer2 Name": "Timer 2",
     "Timer2 Start": "00:00",
     "Timer2 Stop": "23:59",
     "Timer2 ON Min": 10,
@@ -57,9 +56,4825 @@
     "USER 2 Name": "Operator 2",
     "USER 2 PASSWORD": "2222",
     "PORT": 1883,
-    "HUMI MIN": 50,
-    "HUMI MAX": 70,
-    "HUMI BUFFER": 0,
-    "HUMI Hyst": 2,
-    "PAD Name": "COOLING PAD PUMP"
+    "S1": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "06:00 AM",
+                        "stop": "09:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "09:00 AM",
+                        "stop": "01:00 PM",
+                        "t_set": 24.0,
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_set": 60.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "01:00 PM",
+                        "stop": "05:00 PM",
+                        "t_set": 24.0,
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_set": 60.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "05:00 PM",
+                        "stop": "09:00 PM",
+                        "t_set": 24.0,
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "12:00 PM",
+                        "stop": "04:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 6,
+                        "name": "Slot 6",
+                        "start": "12:00 PM",
+                        "stop": "04:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ],
+                "name": "Setting A",
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting F": {
+                "name": "Crop Stage 6",
+                "start_date": "2026-09-16",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting G": {
+                "name": "Crop Stage 7",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting H": {
+                "name": "Crop Stage 8",
+                "start_date": "2026-10-16",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting I": {
+                "name": "Crop Stage 9",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting J": {
+                "name": "Crop Stage 10",
+                "start_date": "2026-11-16",
+                "end_date": "2026-11-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        },
+        "active_program": "prog_02",
+        "active_stage": "Stage 10"
+    },
+    "S2": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "06:00 AM",
+                        "stop": "09:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "09:00 AM",
+                        "stop": "01:00 PM",
+                        "t_set": 24.0,
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_set": 60.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "01:00 PM",
+                        "stop": "05:00 PM",
+                        "t_set": 24.0,
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_set": 60.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "05:00 PM",
+                        "stop": "09:00 PM",
+                        "t_set": 24.0,
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "09:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_set": 60.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ],
+                "name": "Setting A",
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM"
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting F": {
+                "name": "Crop Stage 6",
+                "start_date": "2026-09-16",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting G": {
+                "name": "Crop Stage 7",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting H": {
+                "name": "Crop Stage 8",
+                "start_date": "2026-10-16",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting I": {
+                "name": "Crop Stage 9",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting J": {
+                "name": "Crop Stage 10",
+                "start_date": "2026-11-16",
+                "end_date": "2026-11-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "S3": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting F": {
+                "name": "Crop Stage 6",
+                "start_date": "2026-09-16",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting G": {
+                "name": "Crop Stage 7",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting H": {
+                "name": "Crop Stage 8",
+                "start_date": "2026-10-16",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting I": {
+                "name": "Crop Stage 9",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting J": {
+                "name": "Crop Stage 10",
+                "start_date": "2026-11-16",
+                "end_date": "2026-11-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "S4": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting F": {
+                "name": "Crop Stage 6",
+                "start_date": "2026-09-16",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting G": {
+                "name": "Crop Stage 7",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting H": {
+                "name": "Crop Stage 8",
+                "start_date": "2026-10-16",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting I": {
+                "name": "Crop Stage 9",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting J": {
+                "name": "Crop Stage 10",
+                "start_date": "2026-11-16",
+                "end_date": "2026-11-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "S5": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting F": {
+                "name": "Crop Stage 6",
+                "start_date": "2026-09-16",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting G": {
+                "name": "Crop Stage 7",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting H": {
+                "name": "Crop Stage 8",
+                "start_date": "2026-10-16",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting I": {
+                "name": "Crop Stage 9",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting J": {
+                "name": "Crop Stage 10",
+                "start_date": "2026-11-16",
+                "end_date": "2026-11-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "S6": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Frame 1",
+                        "start": "06:00 AM",
+                        "stop": "09:00 AM",
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Frame 2",
+                        "start": "09:00 AM",
+                        "stop": "01:00 PM",
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Frame 3",
+                        "start": "01:00 PM",
+                        "stop": "05:00 PM",
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Frame 4",
+                        "start": "05:00 PM",
+                        "stop": "09:00 PM",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Frame 5",
+                        "start": "09:00 PM",
+                        "stop": "06:00 AM",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ],
+                "name": "Setting A",
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting F": {
+                "name": "Crop Stage 6",
+                "start_date": "2026-09-16",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting G": {
+                "name": "Crop Stage 7",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting H": {
+                "name": "Crop Stage 8",
+                "start_date": "2026-10-16",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting I": {
+                "name": "Crop Stage 9",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting J": {
+                "name": "Crop Stage 10",
+                "start_date": "2026-11-16",
+                "end_date": "2026-11-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "S7": {
+        "mode": "SCHEDULED",
+        "active_setting": "Setting A",
+        "T MIN": 10.0,
+        "T MAX": 30.0,
+        "H MIN": 30.0,
+        "H MAX": 80.0,
+        "settings": {
+            "Setting A": {
+                "start_date": "2026-07-01",
+                "end_date": "2026-08-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Frame 1",
+                        "start": "06:00 AM",
+                        "stop": "09:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 24.5,
+                        "t_min": 20.5,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Frame 2",
+                        "start": "09:00 AM",
+                        "stop": "01:00 PM",
+                        "t_set": 24.0,
+                        "t_max": 26.0,
+                        "t_min": 22.0,
+                        "h_set": 60.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Frame 3",
+                        "start": "01:00 PM",
+                        "stop": "05:00 PM",
+                        "t_set": 24.0,
+                        "t_max": 27.5,
+                        "t_min": 23.5,
+                        "h_set": 60.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Frame 4",
+                        "start": "05:00 PM",
+                        "stop": "09:00 PM",
+                        "t_set": 24.0,
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Frame 5",
+                        "start": "09:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_set": 60.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 6,
+                        "name": "Slot 6",
+                        "start": "12:00 PM",
+                        "stop": "04:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ],
+                "name": "Setting A",
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true
+            },
+            "Setting B": {
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 25.0,
+                        "t_min": 21.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "start_date": "2026-11-01",
+                "end_date": "2026-12-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 19.0,
+                        "t_min": 15.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "start_date": "2027-01-01",
+                "end_date": "2027-03-31",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 21.0,
+                        "t_min": 17.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 23.0,
+                        "t_min": 19.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 22.0,
+                        "t_min": 18.0,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 20.0,
+                        "t_min": 16.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "start_date": "2027-04-01",
+                "end_date": "2027-06-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "start": "06:00",
+                        "stop": "09:00",
+                        "t_max": 24.0,
+                        "t_min": 20.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "start": "09:00",
+                        "stop": "13:00",
+                        "t_max": 26.5,
+                        "t_min": 22.5,
+                        "h_max": 65.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "start": "13:00",
+                        "stop": "17:00",
+                        "t_max": 28.0,
+                        "t_min": 24.0,
+                        "h_max": 60.0,
+                        "h_min": 50.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "start": "17:00",
+                        "stop": "21:00",
+                        "t_max": 25.5,
+                        "t_min": 21.5,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "start": "21:00",
+                        "stop": "06:00",
+                        "t_max": 22.5,
+                        "t_min": 18.5,
+                        "h_max": 75.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting F": {
+                "name": "Crop Stage 6",
+                "start_date": "2026-09-16",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting G": {
+                "name": "Crop Stage 7",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting H": {
+                "name": "Crop Stage 8",
+                "start_date": "2026-10-16",
+                "end_date": "2026-10-31",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting I": {
+                "name": "Crop Stage 9",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-15",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting J": {
+                "name": "Crop Stage 10",
+                "start_date": "2026-11-16",
+                "end_date": "2026-11-30",
+                "enabled": true,
+                "photoperiod_on": "06:00 AM",
+                "photoperiod_off": "08:00 PM",
+                "lighting_enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Slot 1",
+                        "start": "12:00 AM",
+                        "stop": "05:00 AM",
+                        "t_set": 24.1,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 60.0,
+                        "h_max": 70.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Slot 2",
+                        "start": "05:00 AM",
+                        "stop": "10:00 AM",
+                        "t_set": 25.0,
+                        "t_max": 26.0,
+                        "t_min": 21.0,
+                        "h_set": 65.0,
+                        "h_max": 70.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Slot 3",
+                        "start": "10:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 27.2,
+                        "t_max": 28.0,
+                        "t_min": 23.0,
+                        "h_set": 70.0,
+                        "h_max": 75.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Slot 4",
+                        "start": "03:00 PM",
+                        "stop": "08:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 27.0,
+                        "t_min": 22.0,
+                        "h_set": 68.0,
+                        "h_max": 72.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Slot 5",
+                        "start": "08:00 PM",
+                        "stop": "12:00 AM",
+                        "t_set": 24.2,
+                        "t_max": 25.0,
+                        "t_min": 20.0,
+                        "h_set": 62.0,
+                        "h_max": 68.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        }
+    },
+    "HUMI Hyst": 0.0,
+    "PAD Name": "FAN PAD",
+    "HUMI BUFFER": 5.0
 }

@@ -199,7 +199,7 @@ const MonitSettings = () => {
 
     if (client && client.connected) {
       try {
-        client.publish(`inhydro/${deviceRoot}/setpoints/update`, JSON.stringify(setpoints), { retain: true });
+        client.publish(`inhydro/${deviceRoot}/setpoints/update`, JSON.stringify(setpoints), { retain: false });
         published = true;
         setSaveSuccess(true);
         showToast('success', `Setpoints pushed to device "${selectedDevice?.name || deviceRoot}" successfully!`);
