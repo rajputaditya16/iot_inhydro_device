@@ -187,17 +187,17 @@ const MonitSettings = () => {
       mqttClient.publish(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
     });
 
-    mqttClient.on('message', (topic, message) => {
-      if (topic === `inhydro/${deviceRoot}/telemetry/live` || topic === `inhydro/${deviceRoot}/room1/telemetry/live`) {
+    const handleIncomingPacket = (topic, messageData) => {
+      if (topic === `inhydro/${deviceRoot}/telemetry/live` || topic === `inhydro/${deviceRoot}/room1/telemetry/live` || topic?.includes('/telemetry/live')) {
         try {
-          const parsed = JSON.parse(message.toString());
+          const parsed = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
           const payload = Array.isArray(parsed) ? parsed[parsed.length - 1] : parsed;
           setLiveData(payload);
         } catch (e) { }
       }
-      else if (topic === `inhydro/${deviceRoot}/setpoints/current`) {
+      else if (topic === `inhydro/${deviceRoot}/setpoints/current` || topic?.includes('/setpoints/')) {
         try {
-          const incomingData = JSON.parse(message.toString());
+          const incomingData = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
           setSetpoints(prev => ({
             ...prev,
             ...incomingData
@@ -206,19 +206,41 @@ const MonitSettings = () => {
           console.error("Error parsing current setpoints from device", error);
         }
       }
+    };
+
+    mqttClient.on('message', (topic, message) => {
+      handleIncomingPacket(topic, message.toString());
     });
 
     mqttClient.on('error', (err) => {
-      setStatus('error');
-      console.error("MQTT Error:", err);
+      console.error("Direct Browser MQTT Error over HTTPS:", err);
     });
 
     setClient(mqttClient);
 
-    return () => {
-      mqttClient.end();
+    // Real-time SSE Stream Fallback (100% reliable over HTTPS cloud deployment)
+    const sseUrl = `${API_BASE}/api/devices/stream`;
+    const eventSource = new EventSource(sseUrl);
+
+    eventSource.onopen = () => {
+      setStatus('connected');
     };
-  }, [deviceRoot]);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const packet = JSON.parse(event.data);
+        if (packet.mqttId === deviceRoot || packet.topic?.includes(deviceRoot)) {
+          setStatus('connected');
+          handleIncomingPacket(packet.topic, packet.data);
+        }
+      } catch (e) {}
+    };
+
+    return () => {
+      if (mqttClient) mqttClient.end();
+      eventSource.close();
+    };
+  }, [deviceRoot, API_BASE]);
 
   const handleInputChange = (key, value) => {
     setSetpoints(prev => ({ ...prev, [key]: value }));
@@ -264,9 +286,31 @@ const MonitSettings = () => {
     }
   };
 
-  const handleSyncRequest = () => {
-    if (!client || status !== 'connected') return;
-    client.publish(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
+  const handleSyncRequest = async () => {
+    if (!selectedDevice) return;
+    if (client && client.connected) {
+      client.publish(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
+      showToast('success', 'Sync request published to device');
+    } else {
+      try {
+        const res = await fetch(`${API_BASE}/api/devices/${selectedDevice._id}/push-config?action=sync`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('success', 'Device sync requested via Backend Broker');
+        } else {
+          showToast('error', data.message || 'Failed to request sync');
+        }
+      } catch (err) {
+        console.error('Sync Request Error:', err);
+        showToast('error', 'Failed to request sync');
+      }
+    }
   };
 
   if (loading) {
@@ -907,7 +951,7 @@ const MonitSettings = () => {
           <div className="pt-4">
             <button
               onClick={handleSaveSetpoints}
-              disabled={status !== 'connected'}
+              disabled={!selectedDevice}
               className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 active:scale-95 disabled:opacity-50 hover:opacity-90 transition-all"
             >
               <Save className="h-4 w-4" /> Save & Push Monnet Setpoints
