@@ -584,35 +584,47 @@ exports.streamTelemetry = (req, res) => {
     res.flush();
   }
 
+  let isClosed = false;
+
+  const cleanup = () => {
+    if (isClosed) return;
+    isClosed = true;
+    clearInterval(pingInterval);
+    telemetryEmitter.off('telemetry', onTelemetry);
+  };
+
   // Periodic heartbeat ping to prevent cloud load balancers/proxies (Render, Cloudflare, Nginx) from dropping connection
   const pingInterval = setInterval(() => {
+    if (isClosed) return;
     try {
       res.write(': ping\n\n');
       if (typeof res.flush === 'function') {
         res.flush();
       }
     } catch (e) {
-      clearInterval(pingInterval);
+      cleanup();
     }
   }, 15000);
 
   const onTelemetry = (payload) => {
+    if (isClosed) return;
     try {
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
       if (typeof res.flush === 'function') {
         res.flush();
       }
     } catch (e) {
-      // client disconnected
+      cleanup();
     }
   };
 
   telemetryEmitter.on('telemetry', onTelemetry);
 
-  req.on('close', () => {
-    clearInterval(pingInterval);
-    telemetryEmitter.off('telemetry', onTelemetry);
-  });
+  req.on('close', cleanup);
+  req.on('end', cleanup);
+  res.on('close', cleanup);
+  res.on('finish', cleanup);
+  res.on('error', cleanup);
 };
 
 

@@ -8,6 +8,7 @@ telemetryEmitter.setMaxListeners(100);
 
 const BROKER_URL = process.env.MQTT_BROKER_URL || 'mqtt://147.93.106.142:1883';
 const deviceCache = new Map(); // Caches mqttId -> deviceId to prevent redundant DB queries
+const deviceStatusCache = new Map(); // Caches deviceId -> { status, lastCheck, lastUpdate }
 
 /**
  * Resolves the device ID for a given MQTT ID, using memory cache or DB query.
@@ -128,21 +129,32 @@ const startMqttSubscriber = () => {
         return;
       }
 
-      // Check if device is blocked
-      const deviceCheck = await Device.findById(deviceId).select('status');
-      if (deviceCheck && deviceCheck.status === 'blocked') {
+      // Check if device is blocked (cached for 10 seconds to prevent DB saturation)
+      const now = Date.now();
+      let cachedStatus = deviceStatusCache.get(String(deviceId));
+      if (!cachedStatus || now - cachedStatus.lastCheck > 10000) {
+        const deviceCheck = await Device.findById(deviceId).select('status');
+        cachedStatus = {
+          status: deviceCheck ? deviceCheck.status : 'active',
+          lastCheck: now,
+          lastUpdate: cachedStatus ? cachedStatus.lastUpdate : 0
+        };
+        deviceStatusCache.set(String(deviceId), cachedStatus);
+      }
+
+      if (cachedStatus.status === 'blocked') {
         return; // Device is blocked, ignore telemetry
       }
 
-      // Update status to online and lastUpdated to now
-
-      try {
-        await Device.findByIdAndUpdate(deviceId, {
+      // Throttle DB online status update to at most once per 15 seconds per device
+      if (now - cachedStatus.lastUpdate > 15000) {
+        cachedStatus.lastUpdate = now;
+        Device.findByIdAndUpdate(deviceId, {
           status: 'online',
           lastUpdated: new Date()
+        }).catch(err => {
+          console.error(`[MQTT Subscriber] Failed to update device online status: ${err.message}`);
         });
-      } catch (err) {
-        console.error(`[MQTT Subscriber] Failed to update device online status: ${err.message}`);
       }
 
       // Get the correct dynamic model for this device's collection
