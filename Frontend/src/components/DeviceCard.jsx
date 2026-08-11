@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Thermometer, Droplets, Zap, FlaskConical, Wifi, WifiOff } from 'lucide-react';
+import { Thermometer, Wifi, WifiOff } from 'lucide-react';
 import { getStatusBg, getStatusDot, getMetricStatus, getMetricColor, formatTimestamp } from '../utils/helpers';
 import { useAnimatedCounter } from '../hooks/useAnimatedCounter';
 

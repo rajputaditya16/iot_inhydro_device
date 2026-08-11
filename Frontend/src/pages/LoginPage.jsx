@@ -181,7 +181,7 @@ const LoginPage = () => {
             </span>
           </motion.h1>
 
-          <motion.p
+          {/* <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.7 }}
@@ -191,7 +191,7 @@ const LoginPage = () => {
             }}
           >
             Precision agriculture through real-time IoT sensing and intelligent data analytics.
-          </motion.p>
+          </motion.p> */}
 
           {/* Feature pills */}
           <motion.div

@@ -16,30 +16,10 @@ const UserDashboard = () => {
   const token = localStorage.getItem('token');
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
-  // Transform ThingSpeak API response to device format
-  const transformApiData = (apiData, dbDevice) => {
-    if (!apiData || !apiData.entry_id) return null;
-    const lastUpdatedTime = new Date(apiData.created_at);
-    const diffMs = Date.now() - lastUpdatedTime.getTime();
-    // 5 minutes threshold
-    const isOnline = diffMs < 5 * 60 * 1000;
-    return {
-      id: dbDevice._id,
-      name: dbDevice.name,
-      location: dbDevice.location,
-      status: isOnline ? 'online' : 'offline',
-      temp: parseFloat(apiData.field1) || 0,
-      moisture: parseFloat(apiData.field2) || 0,  
-      ph: parseFloat(apiData.field3) || 0,
-      ec: parseFloat(apiData.field4) || 0,
-      lastUpdated: apiData.created_at,
-    };
-  };
-
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Step 1: Fetch all devices from our backend
+        // Step 1: Fetch all devices assigned to user from backend (connected via Mosquitto Private MQTT broker)
         const res = await fetch(`${API_BASE}/api/devices`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -58,74 +38,25 @@ const UserDashboard = () => {
 
         const dbDevices = data.data || [];
 
-        // Step 2: For each device that has ThingSpeak config, fetch latest data
-        const thingspeakDevices = dbDevices.filter(
-          (d) => d.thingspeak?.channelId && d.thingspeak?.readApiKey
-        );
+        // Step 2: Map backend devices containing MongoDB-backed live metrics
+        const allDevices = dbDevices.map((d) => {
+          const stats = d.liveStats || { temp: 0, moisture: 0, ph: 0, ec: 0 };
+          const lastUpdatedTime = d.latestPacketTime || d.lastUpdated || d.updatedAt;
+          const diffMs = lastUpdatedTime ? (Date.now() - new Date(lastUpdatedTime).getTime()) : Infinity;
+          const isDbOnline = d.status === 'online' || diffMs < 5 * 60 * 1000;
 
-        if (thingspeakDevices.length === 0) {
-          // Show DB devices without live data
-          const offlineDevices = dbDevices.map((d) => ({
+          return {
             id: d._id,
             name: d.name,
             location: d.location,
-            status: d.status || 'offline',
-            temp: 0,
-            moisture: 0,
-            ph: 0,
-            ec: 0,
-            lastUpdated: d.lastUpdated || d.updatedAt,
-          }));
-          setDevices(offlineDevices);
-          setHasNewData(false);
-          setLoading(false);
-          return;
-        }
-
-        // Fetch ThingSpeak data for each device in parallel
-        const liveDevicePromises = thingspeakDevices.map(async (dbDevice) => {
-          try {
-            const { channelId, readApiKey } = dbDevice.thingspeak;
-            const tsRes = await fetch(
-              `https://api.thingspeak.com/channels/${channelId}/feeds.json?api_key=${readApiKey}&results=1`
-            );
-            const tsResult = await tsRes.json();
-            const latestFeed = tsResult?.feeds?.[0];
-            const liveDevice = transformApiData(latestFeed, dbDevice);
-            return liveDevice || {
-              id: dbDevice._id,
-              name: dbDevice.name,
-              location: dbDevice.location,
-              status: 'offline',
-              temp: 0, moisture: 0, ph: 0, ec: 0,
-              lastUpdated: dbDevice.lastUpdated || dbDevice.updatedAt,
-            };
-          } catch {
-            return {
-              id: dbDevice._id,
-              name: dbDevice.name,
-              location: dbDevice.location,
-              status: 'offline',
-              temp: 0, moisture: 0, ph: 0, ec: 0,
-              lastUpdated: dbDevice.lastUpdated || dbDevice.updatedAt,
-            };
-          }
+            status: d.status === 'blocked' ? 'blocked' : (isDbOnline ? 'online' : 'offline'),
+            temp: stats.temp,
+            moisture: stats.moisture,
+            ph: stats.ph,
+            ec: stats.ec,
+            lastUpdated: lastUpdatedTime,
+          };
         });
-
-        // Include devices without ThingSpeak as offline
-        const devicesWithoutTS = dbDevices
-          .filter((d) => !d.thingspeak?.channelId || !d.thingspeak?.readApiKey)
-          .map((d) => ({
-            id: d._id,
-            name: d.name,
-            location: d.location,
-            status: d.status || 'offline',
-            temp: 0, moisture: 0, ph: 0, ec: 0,
-            lastUpdated: d.lastUpdated || d.updatedAt,
-          }));
-
-        const liveDevices = await Promise.all(liveDevicePromises);
-        const allDevices = [...liveDevices, ...devicesWithoutTS];
 
         // Check if data changed
         const currentKey = JSON.stringify(allDevices.map((d) => ({ t: d.temp, m: d.moisture, e: d.ec, p: d.ph })));

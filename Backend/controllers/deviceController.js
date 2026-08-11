@@ -29,19 +29,6 @@ exports.getDevices = async (req, res) => {
 
     const updatedDevices = await Promise.all(
       devices.map(async (device) => {
-        let status = device.status;
-
-        // If device is online but hasn't sent telemetry in 2 minutes, mark as offline
-        if (
-          status === 'online' &&
-          device.lastUpdated &&
-          now - new Date(device.lastUpdated) > 120000
-        ) {
-          status = 'offline';
-          device.status = 'offline';
-          await device.save();
-        }
-
         // Fetch latest telemetry packet from the dynamic collection
         const mqttId = device.mqttId || device._id.toString();
         let latestPacket = null;
@@ -50,6 +37,29 @@ exports.getDevices = async (req, res) => {
           latestPacket = await TelemetryModel.findOne({ deviceId: device._id }).sort({ timestamp: -1 });
         } catch (e) {
           console.warn(`[DeviceController] Could not fetch latest packet for ${mqttId}: ${e.message}`);
+        }
+
+        const lastSeenTime = latestPacket?.timestamp || device.lastUpdated;
+        const diffMs = lastSeenTime ? (now - new Date(lastSeenTime)) : Infinity;
+        // 5 minutes threshold for considering device online
+        const isOnline = diffMs < 5 * 60 * 1000;
+
+        let status = device.status;
+        if (device.status !== 'blocked') {
+          if (isOnline) {
+            status = 'online';
+            if (device.status !== 'online' || !device.lastUpdated || (latestPacket && new Date(device.lastUpdated) < new Date(latestPacket.timestamp))) {
+              device.status = 'online';
+              if (latestPacket) device.lastUpdated = latestPacket.timestamp;
+              await device.save();
+            }
+          } else {
+            status = 'offline';
+            if (device.status === 'online') {
+              device.status = 'offline';
+              await device.save();
+            }
+          }
         }
 
         let latestData = {};
@@ -432,8 +442,8 @@ exports.getDeviceAnalytics = async (req, res) => {
           mappedFeeds.push({
             created_at: p.timestamp.toISOString(),
             entry_id: mappedFeeds.length + 1,
-            field1: d.temp !== undefined && d.temp !== null ? String(d.temp) : (d.water_temp !== undefined ? String(d.water_temp) : null),
-            field2: d.moist !== undefined && d.moist !== null ? String(d.moist) : (d.moisture !== undefined ? String(d.moisture) : null),
+            field1: null,
+            field2: null,
             field3: d.ec !== undefined && d.ec !== null ? String(d.ec) : null,
             field4: d.ph !== undefined && d.ph !== null ? String(d.ph) : null,
             field5: d.room_temp !== undefined && d.room_temp !== null ? String(d.room_temp) : null,
@@ -523,8 +533,8 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field7 = 'Cold Room 7 Temp';
       channelData.field8 = 'Field 8';
     } else if (device.deviceType === 'monit') {
-      channelData.field1 = 'Water Temp';
-      channelData.field2 = 'Water Moisture';
+      channelData.field1 = 'Field 1';
+      channelData.field2 = 'Field 2';
       channelData.field3 = 'Water EC';
       channelData.field4 = 'Water pH';
       channelData.field5 = 'Room Temp';
@@ -538,24 +548,6 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field6 = 'Room Humidity';
       channelData.field7 = 'ORP';
       channelData.field8 = 'CO2';
-    }
-
-    if (channelId && readApiKey) {
-      try {
-        const metadataUrl = `https://api.thingspeak.com/channels/${channelId}/feeds.json?api_key=${readApiKey}&results=0`;
-        const metaRes = await fetch(metadataUrl);
-        if (metaRes.ok) {
-          const metaResult = await metaRes.json();
-          if (metaResult && metaResult.channel) {
-            channelData = {
-              ...channelData,
-              ...metaResult.channel,
-            };
-          }
-        }
-      } catch (metaErr) {
-        console.warn(`[Analytics API] Failed to fetch channel metadata from ThingSpeak: ${metaErr.message}. Falling back to default field names.`);
-      }
     }
 
     res.status(200).json({

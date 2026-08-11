@@ -694,14 +694,14 @@ const LiveMonitoring = () => {
                   ) : (
                     <>
                       <BigMetric
-                        label="Soil Temp"
+                        label=" Temp"
                         value={officeControlData[activeRoomTab].soil?.soil_temp}
                         unit="°C"
                         icon={Thermometer}
                         type="temperature"
                       />
                       <BigMetric
-                        label="Soil Moisture"
+                        label="Moisture"
                         value={officeControlData[activeRoomTab].soil?.moisture}
                         unit="%"
                         icon={Droplets}
@@ -729,7 +729,7 @@ const LiveMonitoring = () => {
                               <div className={`rounded-lg p-1.5 ${ecColor} bg-white/5`}>
                                 <Zap className="h-4 w-4" />
                               </div>
-                              <span className="text-sm font-medium text-slate-400">Soil EC</span>
+                              <span className="text-sm font-medium text-slate-400"> EC</span>
                             </div>
                             <div className="mt-3 flex items-baseline gap-1.5 flex-wrap">
                               <span className={`text-2xl font-bold tabular-nums ${ecColor}`}>
@@ -750,7 +750,7 @@ const LiveMonitoring = () => {
                         );
                       })()}
                       <BigMetric
-                        label="Soil pH"
+                        label="pH"
                         value={officeControlData[activeRoomTab].soil?.ph}
                         unit="pH"
                         icon={FlaskConical}
@@ -846,25 +846,25 @@ const LiveMonitoring = () => {
                       <LiveChart
                         data={officeControlHistory[activeRoomTab].soil_temp}
                         type="temperature"
-                        title="Soil Temperature Trend"
+                        title="Temperature Trend"
                         unit="°C"
                       />
                       <LiveChart
                         data={officeControlHistory[activeRoomTab].moisture}
                         type="moisture"
-                        title="Soil Moisture Trend"
+                        title="Moisture Trend"
                         unit="%"
                       />
                       <LiveChart
                         data={officeControlHistory[activeRoomTab].ec}
                         type="ec"
-                        title="Soil EC Trend"
+                        title=" EC Trend"
                         unit="mS/cm"
                       />
                       <LiveChart
                         data={officeControlHistory[activeRoomTab].ph}
                         type="ph"
-                        title="Soil pH Trend"
+                        title=" pH Trend"
                         unit="pH"
                       />
                       <LiveChart
