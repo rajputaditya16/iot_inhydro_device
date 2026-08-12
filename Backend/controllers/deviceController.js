@@ -87,7 +87,7 @@ exports.getDevices = async (req, res) => {
           liveStats.moisture = parseFloat(latestData.s2?.t || 0);
           liveStats.ph = parseFloat(latestData.s3?.t || 0);
           liveStats.ec = parseFloat(latestData.s4?.t || 0);
-        } else if (device.deviceType === 'monit' || device.deviceType === 'dosing') {
+        } else if (device.deviceType === 'monit' || device.deviceType === 'monnet') {
           liveStats.temp = parseFloat(latestData.room_temp ?? 0);
           liveStats.moisture = parseFloat(latestData.room_humi ?? 0);
           liveStats.ph = parseFloat(latestData.ph ?? 0);
@@ -438,7 +438,7 @@ exports.getDeviceAnalytics = async (req, res) => {
             field16: tel.p !== undefined && tel.p !== null ? String(tel.p) : null,
             field17: tel.k !== undefined && tel.k !== null ? String(tel.k) : null,
           });
-        } else if (device.deviceType === 'monit' || device.deviceType === 'dosing') {
+        } else if (device.deviceType === 'monit' || device.deviceType === 'monnet' || device.deviceType === 'dosing') {
           mappedFeeds.push({
             created_at: p.timestamp.toISOString(),
             entry_id: mappedFeeds.length + 1,
@@ -532,7 +532,7 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field6 = 'Cold Room 6 Temp';
       channelData.field7 = 'Cold Room 7 Temp';
       channelData.field8 = 'Field 8';
-    } else if (device.deviceType === 'monit') {
+    } else if (device.deviceType === 'monit' || device.deviceType === 'monnet') {
       channelData.field1 = 'Field 1';
       channelData.field2 = 'Field 2';
       channelData.field3 = 'Water EC';

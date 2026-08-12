@@ -397,7 +397,7 @@ const DevicesPage = () => {
                     <option value="system2">Standard System (system2.py)</option>
                     <option value="controlling">InHydro Controller (controlling.py)</option>
                     <option value="monit">Monnet Controller (monit.py)</option>
-                    <option value="dosing">Dosing Controller (dosing.py)</option>
+                    <option value="monnet">Monnet Controller (monnet.py)</option>
                     <option value="almora">Almora Machine (almora1.py)</option>
                     <option value="almora2">Almora Machine 2 (CO2/Temp/Hum)</option>
                     <option value="almora2_full">Almora Machine 2 Full Controller (almora2_full.py)</option>
@@ -546,7 +546,8 @@ const DevicesPage = () => {
                                 selectedDeviceDetails.deviceType === 'multi_sensor' ? 'Cold Storage (Multi)' :
                                   selectedDeviceDetails.deviceType === 'light_motor_pump' ? 'Light Motor Pump' :
                                     selectedDeviceDetails.deviceType === 'office_control' ? 'Office Control' :
-                                      selectedDeviceDetails.deviceType || 'Unknown'
+                                      selectedDeviceDetails.deviceType === 'monit' || selectedDeviceDetails.deviceType === 'monnet' ? 'Monnet Controller' :
+                                        selectedDeviceDetails.deviceType || 'Unknown'
                       }</span>
                     </p>
                   </div>

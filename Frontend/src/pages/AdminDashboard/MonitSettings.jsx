@@ -127,7 +127,7 @@ const MonitSettings = () => {
         }
         const data = await res.json();
         if (data.success) {
-          const filtered = data.data.filter(d => d.deviceType === 'monit' || d.deviceType === 'monit_device' || d.deviceType === 'dosing');
+          const filtered = data.data.filter(d => d.deviceType === 'monit' || d.deviceType === 'monnet' || d.deviceType === 'monit_device' || d.deviceType === 'dosing');
           setMonitDevices(filtered);
           if (filtered.length > 0 && !deviceRoot) {
             setDeviceRoot(filtered[0].mqttId || filtered[0]._id);

@@ -327,7 +327,7 @@ const AnalyticsPage = () => {
       // Backend already returns correct date-filtered feeds
       const exactFeeds = result.feeds || [];
       const cFields = [];
-      const isMonitDevice = selectedDevice?.deviceType === 'monit' || selectedDevice?.name?.toLowerCase().includes('monit');
+      const isMonitDevice = selectedDevice?.deviceType === 'monit' || selectedDevice?.deviceType === 'monnet' || selectedDevice?.name?.toLowerCase().includes('monit') || selectedDevice?.name?.toLowerCase().includes('monnet');
 
       for (let i = 1; i <= 17; i++) {
         const key = `field${i}`;

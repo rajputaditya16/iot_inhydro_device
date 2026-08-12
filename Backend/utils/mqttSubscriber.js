@@ -27,7 +27,7 @@ const resolveDeviceId = async (mqttId, topic) => {
   if (topic.includes('/monitor/')) {
     typeCriteria = { deviceType: 'controlling' };
   } else if (topic.includes('/room1/') || topic.includes('/room2/') || topic.includes('/room3/')) {
-    typeCriteria = { deviceType: { $in: ['office_control', 'system2', 'monit',] } };
+    typeCriteria = { deviceType: { $in: ['office_control', 'system2', 'monit', 'monnet'] } };
   } else {
     // default/multi_sensor
     typeCriteria = { deviceType: { $nin: ['controlling', 'office_control', 'system2'] } };

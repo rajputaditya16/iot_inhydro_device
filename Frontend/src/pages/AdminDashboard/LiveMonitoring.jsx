@@ -1,35 +1,14 @@
-import { useState, useEffect, useCallback, useRef, useMemo, memo, useTransition } from 'react';
+import { useState, useEffect, useCallback, useRef} from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Thermometer, Droplets, Zap, FlaskConical, RefreshCw, Clock, Radio, AlertTriangle, Cpu, ChevronDown, Activity } from 'lucide-react';
+import { Thermometer, Droplets, Zap, FlaskConical, RefreshCw, Clock, Radio, Cpu, ChevronDown, Activity, ArrowUpDown } from 'lucide-react';
 import LiveChart from '../../components/LiveChart';
 import { SkeletonCard } from '../../components/Skeleton';
-import { useAnimatedCounter } from '../../hooks/useAnimatedCounter';
+
 import { getStatusBg, getStatusDot, getMetricStatus, getMetricColor, formatTimestamp } from '../../utils/helpers';
 
-// Static Controlling Metrics Config defined outside component to prevent re-allocation on render
-const CONTROLLING_METRICS_CONFIG = [
-  { key: 'water_temp', label: 'Water Temperature', unit: '°C', icon: Thermometer, type: 'temperature' },
-  { key: 'moisture', label: 'Moisture / Humidity', unit: '%', icon: Droplets, type: 'moisture' },
-  { key: 'ph', label: 'pH Level', unit: 'pH', icon: FlaskConical, type: 'ph' },
-  { key: 'room_temp', label: 'Room Temperature', unit: '°C', icon: Thermometer, type: 'temperature' },
-  { key: 'room_humi', label: 'Room Humidity', unit: '%', icon: Droplets, type: 'moisture' },
-  { key: 'orp', label: 'ORP Level', unit: 'mV', icon: Activity, type: 'default' },
-  { key: 'co2', label: 'CO2 Level', unit: 'ppm', icon: Activity, type: 'co2' },
-  { key: 'vpd', label: 'VPD', unit: 'kPa', icon: Activity, type: 'default' },
-  { key: 'dli', label: 'DLI', unit: 'mol/m²/d', icon: Activity, type: 'default' },
-  { key: 'wind_speed', label: 'Wind Speed', unit: 'm/s', icon: Activity, type: 'default' },
-  { key: 'wind_dir', label: 'Wind Direction', unit: '°', icon: Activity, type: 'default' },
-  { key: 'do', label: 'Dissolved Oxygen (DO)', unit: 'mg/L', icon: Activity, type: 'default' },
-  { key: 'ppfd', label: 'PPFD', unit: 'µmol/m²/s', icon: Activity, type: 'default' },
-  { key: 'n', label: 'Nitrogen (N)', unit: 'mg/kg', icon: Activity, type: 'default' },
-  { key: 'p', label: 'Phosphorus (P)', unit: 'mg/kg', icon: Activity, type: 'default' },
-  { key: 'k', label: 'Potassium (K)', unit: 'mg/kg', icon: Activity, type: 'default' }
-];
-
-// Memoized BigMetric Component
-const BigMetric = memo(({ label, value, unit, icon: Icon, type }) => {
-  const safeValue = Number.isFinite(value) ? value : (value != null && !isNaN(parseFloat(value)) ? parseFloat(value) : 0);
+const BigMetric = ({ label, value, unit, icon: Icon, type }) => {
+  const safeValue = Number.isFinite(value) ? value : 0;
   const status = getMetricStatus(type, safeValue);
   const color = getMetricColor(status);
 
@@ -40,11 +19,11 @@ const BigMetric = memo(({ label, value, unit, icon: Icon, type }) => {
     'text-slate-500': 'bg-slate-500/10 border-slate-500/20',
   };
 
-  const displayVal = safeValue === 0 && value !== 0 ? '--' : safeValue.toFixed(1);
-
   return (
-    <div
-      className={`rounded-2xl border p-4 ${bgColorMap[color] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm transition-colors`}
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      className={`rounded-2xl border p-4 ${bgColorMap[color] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm`}
     >
       <div className="flex items-center gap-2.5">
         <div className={`rounded-lg p-1.5 ${color} bg-white/5`}>
@@ -54,7 +33,7 @@ const BigMetric = memo(({ label, value, unit, icon: Icon, type }) => {
       </div>
       <div className="mt-3 flex items-baseline gap-1.5">
         <span className={`text-2xl font-bold tabular-nums ${color}`}>
-          {displayVal}
+          {safeValue === 0 ? '--' : (type === 'ec' ? safeValue : safeValue.toFixed(1))}
         </span>
         <span className="text-sm text-slate-500">{unit}</span>
       </div>
@@ -62,77 +41,12 @@ const BigMetric = memo(({ label, value, unit, icon: Icon, type }) => {
         <div className={`h-1.5 w-1.5 rounded-full ${status === 'normal' ? 'bg-emerald-400' : status === 'warning' ? 'bg-yellow-400' : status === 'critical' ? 'bg-red-400' : 'bg-slate-500'}`} />
         <span className="text-xs text-slate-500 capitalize">{status}</span>
       </div>
-    </div>
-  );
-}, (prevProps, nextProps) => (
-  prevProps.label === nextProps.label &&
-  prevProps.value === nextProps.value &&
-  prevProps.unit === nextProps.unit &&
-  prevProps.type === nextProps.type
-));
-
-BigMetric.displayName = 'BigMetric';
-
-// Memoized Multi-Sensor Card
-const MultiSensorCard = memo(({ sensorId, data, historyData, sortBy, onSelect }) => {
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.95 }}
-      whileHover={{ y: -5 }}
-      animate={{ opacity: 1, scale: 1 }}
-      onClick={() => onSelect(sensorId)}
-      className="rounded-2xl border border-slate-700 bg-slate-800/40 p-4 backdrop-blur-md cursor-pointer hover:border-blue-500/50 transition-all hover:bg-slate-800/60"
-    >
-      <div className="mb-3 flex items-center justify-between">
-        <span className="rounded-lg bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-400">
-          {`Cold Room ${sensorId.toUpperCase().replace('S', '')}`}
-        </span>
-        <span className={`h-1.5 w-1.5 rounded-full ${data.status === 'OK' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex justify-between items-end">
-          <div className="space-y-1">
-            <p className="text-[10px] text-slate-500 flex items-center gap-1"><Thermometer className="h-3 w-3 " /> Temperature</p>
-            <p className="text-xl font-bold text-white tabular-nums">{data.t?.toFixed(1) || '--'}<span className="text-xs font-normal text-slate-500 ml-0.5">°C</span></p>
-          </div>
-          <div className="space-y-1 text-right">
-            <p className="text-[10px] text-slate-500 flex items-center gap-1 justify-end"><Droplets className="h-3 w-3 " /> Humidity</p>
-            <p className="text-xl font-bold text-blue-400 tabular-nums">{data.h?.toFixed(1) || '--'}<span className="text-xs font-normal text-slate-500 ml-0.5">%</span></p>
-          </div>
-        </div>
-
-        {/* Real-time Sparkline of Temperature */}
-        <div className="h-12 w-full bg-slate-900/40 rounded-lg flex items-end gap-1 px-2 py-1.5 border border-slate-700/30">
-          {(historyData?.t || [0]).map((val, i) => {
-            const min = 10, max = 45;
-            const h = Math.min(100, Math.max(10, ((val - min) / (max - min)) * 100));
-            return (
-              <div
-                key={i}
-                className={`w-full rounded-t transition-all duration-500 ${val > 30 ? 'bg-red-400' : 'bg-blue-400'}`}
-                style={{ height: `${h}%` }}
-              />
-            );
-          })}
-        </div>
-      </div>
     </motion.div>
   );
-}, (prev, next) => (
-  prev.sensorId === next.sensorId &&
-  prev.sortBy === next.sortBy &&
-  prev.data?.t === next.data?.t &&
-  prev.data?.h === next.data?.h &&
-  prev.data?.status === next.data?.status &&
-  prev.historyData?.t === next.historyData?.t
-));
-
-MultiSensorCard.displayName = 'MultiSensorCard';
+};
 
 const LiveMonitoring = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [, startTransition] = useTransition();
   const [loading, setLoading] = useState(true);
   const [initLoading, setInitLoading] = useState(true);
 
@@ -147,18 +61,22 @@ const LiveMonitoring = () => {
   const [chartData, setChartData] = useState({});
   const [hasNewData, setHasNewData] = useState(true);
   const previousMetricsRef = useRef(null);
-  const lastTelemetryTimeRef = useRef(0);
-  const pendingTelemetryRef = useRef([]);
-  const throttleTimerRef = useRef(null);
-  const hasNewDataTimerRef = useRef(null);
-  const lastUpdatedRef = useRef(0);
-  const processTelemetryBatchRef = useRef(null);
+  const newDataTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (newDataTimeoutRef.current) {
+        clearTimeout(newDataTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // ── Multi-Sensor Live States ────────────────────────────────────────────────
   const [multiSensorData, setMultiSensorData] = useState({});
   const [sensorHistory, setSensorHistory] = useState({}); // { S1: [t1, t2...], S2: [...] }
   const [sortBy, setSortBy] = useState('id'); // 'id', 'temp', 'humi'
   const [selectedSensor, setSelectedSensor] = useState(null); // The sensor currently "clicked" for detail
+  const mqttClientRef = useRef(null);
 
   // ── Office Control Dual Room Live States ────────────────────────────────────
   const [officeControlData, setOfficeControlData] = useState({ 1: null, 2: null, 3: null });
@@ -175,10 +93,10 @@ const LiveMonitoring = () => {
     water_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [],
     vpd: [], dli: [], wind_speed: [], wind_dir: [], do: [], ppfd: [], n: [], p: [], k: []
   });
-  const [controllingChartTab, setControllingChartTab] = useState('primary'); // 'primary', 'climate', 'nutrients', 'all'
 
   const token = localStorage.getItem('token');
   const API_BASE = import.meta.env.VITE_API_URL || '';
+
 
   // ── Step 1: Fetch all devices from backend ─────────────────────────────────
   useEffect(() => {
@@ -190,6 +108,16 @@ const LiveMonitoring = () => {
         const data = await res.json();
         if (data.success) {
           setAllDevices(data.data);
+          // Auto-select the first device with ThingSpeak config if none is selected
+          if (!selectedDeviceId && data.data.length > 0) {
+            const firstConfigured = data.data.find(
+              (d) => (d.thingspeak?.channelId || d.tempChannelId)
+            ) || data.data[0];
+            if (firstConfigured) {
+              setSelectedDeviceId(firstConfigured._id);
+              setSearchParams({ device: firstConfigured._id });
+            }
+          }
         }
       } catch (err) {
         console.error('Failed to fetch devices', err);
@@ -198,53 +126,37 @@ const LiveMonitoring = () => {
       }
     };
     fetchDevices();
-  }, [token, API_BASE]);
+  }, [token]);
+
 
   // ── Get current selected device meta ───────────────────────────────────────
-  const deviceMeta = useMemo(() => {
-    return allDevices.find(
-      (d) => d._id === selectedDeviceId || d.id === selectedDeviceId
-    );
-  }, [allDevices, selectedDeviceId]);
-
-  const deviceType = deviceMeta?.deviceType;
-  const deviceMqttId = useMemo(() => {
-    return deviceMeta?.mqttId || deviceMeta?.id || deviceMeta?._id || (deviceType === 'office_control' ? 'system2' : selectedDeviceId);
-  }, [deviceMeta, deviceType, selectedDeviceId]);
-
-  // Live status is ONLINE if telemetry came within last 30 seconds, otherwise OFFLINE
-  const isDeviceOffline = liveDevice ? liveDevice.status === 'offline' : true;
-
+  const deviceMeta = allDevices.find(
+    (d) => d._id === selectedDeviceId || d.id === selectedDeviceId
+  );
   // ── Handle device change from dropdown ─────────────────────────────────────
   const handleDeviceChange = (newId) => {
     setSelectedDeviceId(newId);
+    setSearchParams({ device: newId });
+    // Reset live state
+    setLiveDevice(null);
+    setLoading(true);
+    setHasNewData(true);
+    previousMetricsRef.current = null;
+    setChartData({});
+    setActiveMetrics({});
+    setActiveFields([]);
+    // Clear dual-room MQTT states
+    setOfficeControlData({ 1: null, 2: null, 3: null });
+    setOfficeControlHistory({
+      1: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
+      2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
+      3: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
+    });
 
-    startTransition(() => {
-      setSearchParams({ device: newId }, { replace: true });
-      setLiveDevice({
-        id: newId,
-        name: deviceMeta?.name || 'Device',
-        location: deviceMeta?.location || '',
-        status: 'offline',
-        lastUpdated: null,
-      });
-      setLoading(true);
-      setHasNewData(true);
-      previousMetricsRef.current = null;
-      lastTelemetryTimeRef.current = 0;
-      setChartData({});
-      setActiveMetrics({});
-      setActiveFields([]);
-      setOfficeControlData({ 1: null, 2: null, 3: null });
-      setOfficeControlHistory({
-        1: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
-        2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
-        3: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
-      });
-      setControllingData(null);
-      setControllingHistory({
-        water_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: []
-      });
+    // Clear controlling MQTT states
+    setControllingData(null);
+    setControllingHistory({
+      water_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: []
     });
   };
 
@@ -259,9 +171,8 @@ const LiveMonitoring = () => {
     return { icon: Radio, unit: '', type: 'default' };
   }, []);
 
-  // ── Step 2: Fetch initial analytics / historical data from backend ──────────
+  // ── Step 2: Fetch live analytics data from Private Broker backend ─────────────────
   const fetchLiveData = useCallback(() => {
-    if (!selectedDeviceId) return;
     const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics`;
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
@@ -272,8 +183,9 @@ const LiveMonitoring = () => {
         const feeds = result?.feeds || [];
         const latestFeed = feeds[feeds.length - 1];
 
+        // Parse dynamic fields configuration from channel
         let fields = Object.keys(channel)
-          .filter((k) => k.startsWith('field') && channel[k])
+          .filter((k) => k.startsWith('field') && channel[k] && !channel[k].startsWith('Field '))
           .map((k) => ({
             key: k,
             label: channel[k],
@@ -281,7 +193,7 @@ const LiveMonitoring = () => {
           }));
 
         if (fields.length === 0) {
-          const isMonitType = deviceType === 'monit' || deviceType === 'dosing';
+          const isMonitType = deviceMeta?.deviceType === 'monit' || deviceMeta?.deviceType === 'monnet' || deviceMeta?.deviceType === 'dosing';
           fields = isMonitType ? [
             { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
             { key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
@@ -297,20 +209,13 @@ const LiveMonitoring = () => {
 
         setActiveFields(fields);
 
-        const now = Date.now();
-        const lastTime = lastTelemetryTimeRef.current;
-        const recentlyStreamed = lastTime > 0 && (now - lastTime < 30000);
-
         if (!latestFeed) {
-          setLiveDevice(prev => prev ? {
-            ...prev,
-            status: recentlyStreamed ? 'online' : 'offline',
-          } : {
+          setLiveDevice({
             id: selectedDeviceId,
             name: deviceMeta?.name || 'Live Sensor Data',
             location: deviceMeta?.location || 'Private Broker Feed',
-            status: recentlyStreamed ? 'online' : 'offline',
-            lastUpdated: deviceMeta?.lastUpdated || null,
+            status: deviceMeta?.status || 'online',
+            lastUpdated: deviceMeta?.lastUpdated || new Date().toISOString(),
           });
           setHasNewData(false);
           setLoading(false);
@@ -318,9 +223,9 @@ const LiveMonitoring = () => {
         }
 
         const lastUpdatedTime = new Date(latestFeed.created_at || Date.now());
-        const diffMs = now - lastUpdatedTime.getTime();
-
-        const isOnline = recentlyStreamed || (diffMs < 3 * 60 * 1000);
+        const diffMs = Date.now() - lastUpdatedTime.getTime();
+        // 5 minutes threshold
+        const isOnline = diffMs < 5 * 60 * 1000;
 
         const device = {
           id: selectedDeviceId,
@@ -352,271 +257,198 @@ const LiveMonitoring = () => {
         if (changed) {
           previousMetricsRef.current = currentMetrics;
           setLiveDevice(device);
-          setActiveMetrics(prev => ({ ...prev, ...currentMetrics }));
+          setActiveMetrics(currentMetrics);
           setChartData(newChartData);
         }
 
         setLoading(false);
       })
       .catch((error) => {
-        console.error('Analytics Fetch Error:', error);
+        console.error('API Error:', error);
+        setLiveDevice(null);
+        setHasNewData(false);
         setLoading(false);
       });
-  }, [deviceMeta, selectedDeviceId, deviceType, getFieldDisplayInfo, API_BASE, token]);
+  }, [deviceMeta, selectedDeviceId, getFieldDisplayInfo, API_BASE, token]);
 
   useEffect(() => {
-    const isSpecialType = deviceType === 'office_control' || deviceType === 'controlling' || deviceType === 'multi_sensor';
+    const isOfficeControl = deviceMeta?.deviceType === 'office_control';
+    const isControlling = deviceMeta?.deviceType === 'controlling';
+    const isMultiSensor = deviceMeta?.deviceType === 'multi_sensor';
+
+    if (isOfficeControl || isControlling || isMultiSensor) {
+      return;
+    }
+
     if (selectedDeviceId) {
       setLoading(true);
       fetchLiveData();
-      if (!isSpecialType) {
-        const interval = setInterval(fetchLiveData, 20000);
-        return () => clearInterval(interval);
-      }
+      const interval = setInterval(fetchLiveData, 15000);
+      return () => clearInterval(interval);
     }
-  }, [fetchLiveData, selectedDeviceId, deviceType]);
+  }, [fetchLiveData, deviceMeta, selectedDeviceId]);
 
-  // ── Watchdog: Automatically flip status between ONLINE / OFFLINE based on live stream ──
+  // ── Step 3: Private Broker SSE Real-Time Stream for All Devices ─────────────────
   useEffect(() => {
-    if (!selectedDeviceId) return;
+    const isMultiSensor = deviceMeta?.deviceType === 'multi_sensor';
+    const isOfficeControl = deviceMeta?.deviceType === 'office_control';
+    const isControlling = deviceMeta?.deviceType === 'controlling';
 
-    const watchdog = setInterval(() => {
-      const now = Date.now();
-      const lastTime = lastTelemetryTimeRef.current;
-      // Strict rule: Online ONLY if telemetry received within last 30 seconds
-      const isOnline = lastTime > 0 && (now - lastTime < 30000);
+    let mqttId = deviceMeta?.mqttId;
+    if (!mqttId && isOfficeControl) {
+      mqttId = 'system2'; // Default fallback for control.py scripts
+    }
+    if (!mqttId) {
+      mqttId = deviceMeta?.id || deviceMeta?._id || selectedDeviceId;
+    }
 
-      setLiveDevice(prev => {
-        const targetStatus = isOnline ? 'online' : 'offline';
-        if (prev && prev.status === targetStatus) return prev;
-        return {
-          id: selectedDeviceId,
-          name: deviceMeta?.name || prev?.name || 'Live Sensor Data',
-          location: deviceMeta?.location || prev?.location || 'Private Broker Stream',
-          status: targetStatus,
-          lastUpdated: lastTime > 0 ? new Date(lastTime).toISOString() : (prev?.lastUpdated || null),
+    if (!mqttId) {
+      return;
+    }
+
+    setLoading(true);
+
+    const activeTimeouts = {};
+    const throttles = {};
+
+    const throttle = (key, func, limit) => {
+      if (!throttles[key]) {
+        let lastRan = 0;
+        let lastArgs = null;
+
+        const execute = (args) => {
+          func(...args);
+          lastRan = Date.now();
+          if (activeTimeouts[key]) {
+            clearTimeout(activeTimeouts[key]);
+            delete activeTimeouts[key];
+          }
+          lastArgs = null;
         };
-      });
-    }, 2000);
 
-    return () => clearInterval(watchdog);
-  }, [selectedDeviceId, deviceMeta?.name, deviceMeta?.location]);
+        throttles[key] = function(...args) {
+          const now = Date.now();
+          const timeSinceLastRan = now - lastRan;
 
-  // ── Batch Telemetry Packet Processor (300ms Throttled Batching + Equality Bailout) ─────────
-  const processTelemetryBatch = useCallback((packets) => {
-    if (!packets || packets.length === 0) return;
+          if (timeSinceLastRan >= limit) {
+            if (activeTimeouts[key]) {
+              clearTimeout(activeTimeouts[key]);
+              delete activeTimeouts[key];
+            }
+            execute(args);
+          } else {
+            lastArgs = args;
+            if (!activeTimeouts[key]) {
+              activeTimeouts[key] = setTimeout(() => {
+                if (lastArgs) {
+                  execute(lastArgs);
+                }
+              }, limit - timeSinceLastRan);
+            }
+          }
+        };
+      }
+      return throttles[key];
+    };
 
-    const isMultiSensor = deviceType === 'multi_sensor';
-    const isOfficeControl = deviceType === 'office_control';
-    const isControlling = deviceType === 'controlling';
-    const isMonitType = deviceType === 'monit' || deviceType === 'dosing';
+    const getThrottleKey = (topic) => {
+      if (isOfficeControl) {
+        const parts = topic.split('/');
+        const roomPart = parts.find(p => p.startsWith('room'));
+        return roomPart || 'room1';
+      }
+      if (isMultiSensor) return 'multisensor';
+      if (isControlling) return 'controlling';
+      return 'standard';
+    };
 
-    const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-    if (isMultiSensor) {
-      let mergedPayload = {};
-      packets.forEach(p => {
-        if (p.payload) mergedPayload = { ...mergedPayload, ...p.payload };
-      });
-
-      setMultiSensorData(prev => {
-        const next = { ...prev, ...mergedPayload };
-        if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
-        return next;
-      });
-
-      setSensorHistory(prev => {
-        let changed = false;
-        const newHist = { ...prev };
-        Object.keys(mergedPayload).forEach(sId => {
-          const prevState = newHist[sId] && !Array.isArray(newHist[sId]) ? newHist[sId] : { t: [], h: [] };
-          const lastT = prevState.t && prevState.t.length > 0 ? prevState.t[prevState.t.length - 1] : null;
-          const lastH = prevState.h && prevState.h.length > 0 ? prevState.h[prevState.h.length - 1] : null;
-
-          if (lastT !== mergedPayload[sId].t || lastH !== mergedPayload[sId].h) {
-            changed = true;
+    // ── Helper to process incoming packet payload ────────────────────────────────
+    const processTelemetryPacket = (topic, payload) => {
+      if (isMultiSensor) {
+        setMultiSensorData(payload);
+        setSensorHistory(prev => {
+          const newHist = { ...prev };
+          Object.keys(payload).forEach(sId => {
+            const prevState = newHist[sId] && !Array.isArray(newHist[sId]) ? newHist[sId] : { t: [], h: [] };
             newHist[sId] = {
-              t: [...(prevState.t || []), mergedPayload[sId].t].slice(-20),
-              h: [...(prevState.h || []), mergedPayload[sId].h].slice(-20)
+              t: [...(prevState.t || []), payload[sId].t].slice(-20),
+              h: [...(prevState.h || []), payload[sId].h].slice(-20)
+            };
+          });
+          return newHist;
+        });
+      } else if (isOfficeControl) {
+        const parts = topic.split('/');
+        const roomPart = parts.find(p => p.startsWith('room'));
+        const room = roomPart ? parseInt(roomPart.replace('room', '')) : 1;
+
+        setOfficeControlData(prev => ({ ...prev, [room]: payload }));
+
+        const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setOfficeControlHistory(prev => {
+          const roomHist = { ...(prev[room] || {}) };
+          let metrics = {};
+          if (room === 3) {
+            metrics = {
+              md02_1_temp: payload.md02_1?.room_temp,
+              md02_1_humi: payload.md02_1?.room_humi,
+              md02_2_temp: payload.md02_2?.room_temp,
+              md02_2_humi: payload.md02_2?.room_humi,
+              co2: payload.co2
+            };
+          } else {
+            metrics = {
+              soil_temp: payload.soil?.soil_temp,
+              moisture: payload.soil?.moisture,
+              ec: payload.soil?.ec,
+              ph: payload.soil?.ph,
+              room_temp: payload.room?.room_temp,
+              room_humi: payload.room?.room_humi,
+              orp: payload.orp,
+              co2: payload.co2
             };
           }
-        });
-        return changed ? newHist : prev;
-      });
-    } else if (isOfficeControl) {
-      let roomDataUpdates = {};
-      let roomHistUpdates = {};
-
-      packets.forEach(({ topic, payload }) => {
-        if (!payload) return;
-
-        if (payload.room1 || payload.room2 || payload.room3) {
-          [1, 2, 3].forEach(r => {
-            if (payload[`room${r}`]) {
-              const pRoom = payload[`room${r}`];
-              roomDataUpdates[r] = {
-                ...(roomDataUpdates[r] || {}),
-                ...pRoom,
-                soil: { ...(roomDataUpdates[r]?.soil || {}), ...(pRoom.soil || {}) },
-                room: { ...(roomDataUpdates[r]?.room || {}), ...(pRoom.room || {}) },
-                md02_1: { ...(roomDataUpdates[r]?.md02_1 || {}), ...(pRoom.md02_1 || {}) },
-                md02_2: { ...(roomDataUpdates[r]?.md02_2 || {}), ...(pRoom.md02_2 || {}) },
-              };
-              roomHistUpdates[r] = roomHistUpdates[r] || [];
-              roomHistUpdates[r].push(pRoom);
-            }
+          Object.keys(metrics).forEach(key => {
+            const val = metrics[key] !== undefined && metrics[key] !== null ? parseFloat(metrics[key]) : 0;
+            roomHist[key] = [...(roomHist[key] || []), { time: timeStr, value: val }].slice(-24);
           });
-        } else {
-          const parts = String(topic || '').split('/');
-          const roomPart = parts.find(p => p.startsWith('room'));
-          const room = roomPart ? parseInt(roomPart.replace('room', '')) : 1;
-          roomDataUpdates[room] = {
-            ...(roomDataUpdates[room] || {}),
-            ...payload,
-            soil: { ...(roomDataUpdates[room]?.soil || {}), ...(payload.soil || {}) },
-            room: { ...(roomDataUpdates[room]?.room || {}), ...(payload.room || {}) },
-            md02_1: { ...(roomDataUpdates[room]?.md02_1 || {}), ...(payload.md02_1 || {}) },
-            md02_2: { ...(roomDataUpdates[room]?.md02_2 || {}), ...(payload.md02_2 || {}) },
-          };
-          roomHistUpdates[room] = roomHistUpdates[room] || [];
-          roomHistUpdates[room].push(payload);
-        }
-      });
-
-      setOfficeControlData(prev => {
-        let changed = false;
-        const nextState = { ...prev };
-        Object.keys(roomDataUpdates).forEach(r => {
-          const prevRoom = prev[r] || {};
-          const uRoom = roomDataUpdates[r];
-          const merged = {
-            ...prevRoom,
-            ...uRoom,
-            soil: { ...(prevRoom.soil || {}), ...(uRoom.soil || {}) },
-            room: { ...(prevRoom.room || {}), ...(uRoom.room || {}) },
-            md02_1: { ...(prevRoom.md02_1 || {}), ...(uRoom.md02_1 || {}) },
-            md02_2: { ...(prevRoom.md02_2 || {}), ...(uRoom.md02_2 || {}) },
-          };
-          if (JSON.stringify(prevRoom) !== JSON.stringify(merged)) {
-            changed = true;
-            nextState[r] = merged;
-          }
+          return { ...prev, [room]: roomHist };
         });
-        return changed ? nextState : prev;
-      });
+      } else if (isControlling) {
+        const tel = payload.telemetry || payload || {};
+        setControllingData(tel);
 
-      setOfficeControlHistory(prev => {
-        let changed = false;
-        const nextHist = { ...prev };
-        Object.keys(roomHistUpdates).forEach(rStr => {
-          const room = parseInt(rStr);
-          const roomHist = { ...(nextHist[room] || {}) };
-          let roomHistChanged = false;
-
-          roomHistUpdates[room].forEach((pRoom) => {
-            let metrics = {};
-            if (room === 3) {
-              metrics = {
-                md02_1_temp: pRoom.md02_1?.room_temp,
-                md02_1_humi: pRoom.md02_1?.room_humi,
-                md02_2_temp: pRoom.md02_2?.room_temp,
-                md02_2_humi: pRoom.md02_2?.room_humi,
-                co2: pRoom.co2
-              };
-            } else {
-              metrics = {
-                soil_temp: pRoom.soil?.soil_temp ?? pRoom.soil_temp,
-                moisture: pRoom.soil?.moisture ?? pRoom.moisture,
-                ec: pRoom.soil?.ec ?? pRoom.ec,
-                ph: pRoom.soil?.ph ?? pRoom.ph,
-                room_temp: pRoom.room?.room_temp ?? pRoom.room_temp,
-                room_humi: pRoom.room?.room_humi ?? pRoom.room_humi,
-                orp: pRoom.orp,
-                co2: pRoom.co2
-              };
-            }
-
-            Object.keys(metrics).forEach(key => {
-              const rawVal = metrics[key];
-              if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
-                const val = parseFloat(rawVal);
-                if (!isNaN(val)) {
-                  const currArr = roomHist[key] || [];
-                  const lastPoint = currArr[currArr.length - 1];
-
-                  // Only push new history point if value changed OR time stamp moved to a new second
-                  if (!lastPoint || lastPoint.value !== val || lastPoint.time !== timeStr) {
-                    roomHist[key] = [...currArr, { time: timeStr, value: val }].slice(-24);
-                    roomHistChanged = true;
-                  }
-                }
-              }
-            });
+        const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setControllingHistory(prev => {
+          const nextHist = { ...prev };
+          const metrics = {
+            water_temp: tel.water_temp,
+            moisture: tel.moisture,
+            ec: tel.ec,
+            ph: tel.ph,
+            room_temp: tel.room_temp,
+            room_humi: tel.room_humi,
+            orp: tel.orp,
+            co2: tel.co2,
+            vpd: tel.vpd,
+            dli: tel.dli,
+            wind_speed: tel.wind_speed,
+            wind_dir: tel.wind_dir,
+            do: tel.do,
+            ppfd: tel.ppfd,
+            n: tel.n,
+            p: tel.p,
+            k: tel.k
+          };
+          Object.keys(metrics).forEach(key => {
+            const val = metrics[key] !== undefined && metrics[key] !== null ? parseFloat(metrics[key]) : 0;
+            nextHist[key] = [...(nextHist[key] || []), { time: timeStr, value: val }].slice(-24);
           });
-
-          if (roomHistChanged) {
-            changed = true;
-            nextHist[room] = roomHist;
-          }
+          return nextHist;
         });
-
-        return changed ? nextHist : prev;
-      });
-    } else if (isControlling) {
-      let mergedTel = {};
-      packets.forEach(p => {
-        const tel = p.payload?.telemetry || p.payload || {};
-        mergedTel = { ...mergedTel, ...tel };
-      });
-
-      setControllingData(prev => {
-        const next = { ...(prev || {}), ...mergedTel };
-        if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
-        return next;
-      });
-
-      setControllingHistory(prev => {
-        let changed = false;
-        const nextHist = { ...prev };
-        const metrics = {
-          water_temp: mergedTel.water_temp,
-          moisture: mergedTel.moisture,
-          ec: mergedTel.ec,
-          ph: mergedTel.ph,
-          room_temp: mergedTel.room_temp,
-          room_humi: mergedTel.room_humi,
-          orp: mergedTel.orp,
-          co2: mergedTel.co2,
-          vpd: mergedTel.vpd,
-          dli: mergedTel.dli,
-          wind_speed: mergedTel.wind_speed,
-          wind_dir: mergedTel.wind_dir,
-          do: mergedTel.do,
-          ppfd: mergedTel.ppfd,
-          n: mergedTel.n,
-          p: mergedTel.p,
-          k: mergedTel.k
-        };
-        Object.keys(metrics).forEach(key => {
-          const rawVal = metrics[key];
-          if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
-            const val = parseFloat(rawVal);
-            if (!isNaN(val)) {
-              const currArr = nextHist[key] || [];
-              const lastPoint = currArr[currArr.length - 1];
-              if (!lastPoint || lastPoint.value !== val || lastPoint.time !== timeStr) {
-                nextHist[key] = [...currArr, { time: timeStr, value: val }].slice(-24);
-                changed = true;
-              }
-            }
-          }
-        });
-        return changed ? nextHist : prev;
-      });
-    } else {
-      let currentMetrics = {};
-      packets.forEach(p => {
-        const tel = p.payload?.telemetry || p.payload?.data || p.payload || {};
+      } else {
+        // Standard / General Private Broker Device
+        const tel = payload.telemetry || payload.data || payload || {};
         const tempVal = tel.field1 !== undefined ? parseFloat(tel.field1) : (tel.temp !== undefined ? parseFloat(tel.temp) : (tel.water_temp !== undefined ? parseFloat(tel.water_temp) : (tel.room_temp !== undefined ? parseFloat(tel.room_temp) : 0)));
         const moistVal = tel.field2 !== undefined ? parseFloat(tel.field2) : (tel.moist !== undefined ? parseFloat(tel.moist) : (tel.moisture !== undefined ? parseFloat(tel.moisture) : (tel.humidity !== undefined ? parseFloat(tel.humidity) : (tel.room_humi !== undefined ? parseFloat(tel.room_humi) : 0))));
         const phVal = tel.field3 !== undefined ? parseFloat(tel.field3) : (tel.ph !== undefined ? parseFloat(tel.ph) : 0);
@@ -624,129 +456,85 @@ const LiveMonitoring = () => {
         const roomTempVal = tel.field5 !== undefined ? parseFloat(tel.field5) : (tel.room_temp !== undefined ? parseFloat(tel.room_temp) : 0);
         const roomHumiVal = tel.field6 !== undefined ? parseFloat(tel.field6) : (tel.room_humi !== undefined ? parseFloat(tel.room_humi) : 0);
 
-        if (isMonitType) {
-          if (tel.field3 !== undefined || tel.ec !== undefined) currentMetrics.field3 = ecVal;
-          if (tel.field4 !== undefined || tel.ph !== undefined) currentMetrics.field4 = phVal;
-          if (tel.field5 !== undefined || tel.room_temp !== undefined) currentMetrics.field5 = roomTempVal;
-          if (tel.field6 !== undefined || tel.room_humi !== undefined) currentMetrics.field6 = roomHumiVal;
-        } else {
-          if (tel.field1 !== undefined || tel.temp !== undefined || tel.water_temp !== undefined) currentMetrics.field1 = tempVal;
-          if (tel.field2 !== undefined || tel.moist !== undefined || tel.moisture !== undefined) currentMetrics.field2 = moistVal;
-          if (tel.field3 !== undefined || tel.ph !== undefined) currentMetrics.field3 = phVal;
-          if (tel.field4 !== undefined || tel.ec !== undefined) currentMetrics.field4 = ecVal;
-        }
-      });
+        const isMonitType = deviceMeta?.deviceType === 'monit' || deviceMeta?.deviceType === 'monnet' || deviceMeta?.deviceType === 'dosing';
 
-      const fields = isMonitType ? [
-        { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
-        { key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
-        { key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
-        { key: 'field6', label: 'Room Humidity', icon: Droplets, unit: '%', type: 'moisture' },
-      ] : [
-        { key: 'field1', label: 'Temperature', icon: Thermometer, unit: '°C', type: 'temperature' },
-        { key: 'field2', label: 'Moisture / Humidity', icon: Droplets, unit: '%', type: 'moisture' },
-        { key: 'field3', label: 'pH Level', icon: FlaskConical, unit: 'pH', type: 'ph' },
-        { key: 'field4', label: 'EC Level', icon: Zap, unit: 'mS/cm', type: 'ec' },
-      ];
+        const currentMetrics = isMonitType ? {
+          field3: ecVal,
+          field4: phVal,
+          field5: roomTempVal,
+          field6: roomHumiVal,
+        } : {
+          field1: tempVal,
+          field2: moistVal,
+          field3: phVal,
+          field4: ecVal,
+        };
 
-      setActiveFields(fields);
-      setActiveMetrics(prev => {
-        const next = { ...prev, ...currentMetrics };
-        if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
-        return next;
-      });
+        const fields = isMonitType ? [
+          { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
+          { key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
+          { key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
+          { key: 'field6', label: 'Room Humidity', icon: Droplets, unit: '%', type: 'moisture' },
+        ] : [
+          { key: 'field1', label: 'Temperature', icon: Thermometer, unit: '°C', type: 'temperature' },
+          { key: 'field2', label: 'Moisture / Humidity', icon: Droplets, unit: '%', type: 'moisture' },
+          { key: 'field3', label: 'pH Level', icon: FlaskConical, unit: 'pH', type: 'ph' },
+          { key: 'field4', label: 'EC Level', icon: Zap, unit: 'mS/cm', type: 'ec' },
+        ];
 
-      setChartData(prev => {
-        let changed = false;
-        const newChart = { ...prev };
-        fields.forEach(f => {
-          if (currentMetrics[f.key] !== undefined) {
-            const currArr = newChart[f.key] || [];
-            const lastPoint = currArr[currArr.length - 1];
-            if (!lastPoint || lastPoint.value !== currentMetrics[f.key] || lastPoint.time !== timeStr) {
-              newChart[f.key] = [...currArr, { time: timeStr, value: currentMetrics[f.key] }].slice(-24);
-              changed = true;
-            }
-          }
+        setActiveFields(fields);
+        setActiveMetrics(currentMetrics);
+
+        const timeStr = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setChartData(prev => {
+          const newChart = { ...prev };
+          fields.forEach(f => {
+            newChart[f.key] = [...(newChart[f.key] || []), { time: timeStr, value: currentMetrics[f.key] }].slice(-24);
+          });
+          return newChart;
         });
-        return changed ? newChart : prev;
-      });
-    }
+      }
 
-    const now = Date.now();
-    lastTelemetryTimeRef.current = now;
-    setLiveDevice(prev => {
-      if (prev && prev.status === 'online' && now - (lastUpdatedRef.current || 0) < 5000) return prev;
-      lastUpdatedRef.current = now;
-      return {
+      setLiveDevice({
         id: selectedDeviceId,
         name: deviceMeta?.name || 'Live Sensor Data',
         location: deviceMeta?.location || 'Private Broker Stream',
         status: 'online',
-        lastUpdated: new Date(now).toISOString(),
-      };
-    });
+        lastUpdated: new Date().toISOString(),
+      });
 
-    setLoading(false);
+      setLoading(false);
 
-    if (hasNewDataTimerRef.current) clearTimeout(hasNewDataTimerRef.current);
-    setHasNewData(true);
-    hasNewDataTimerRef.current = setTimeout(() => setHasNewData(false), 2000);
-  }, [deviceType, selectedDeviceId, deviceMeta?.name, deviceMeta?.location]);
-
-  // Keep latest processTelemetryBatch in a ref for the scheduleFlush timer
-  useEffect(() => {
-    processTelemetryBatchRef.current = processTelemetryBatch;
-  }, [processTelemetryBatch]);
-
-  // ── Throttled Batch Packet Processor ──────────────────────────────────────
-  const scheduleFlush = useCallback(() => {
-    if (throttleTimerRef.current) return;
-    throttleTimerRef.current = setTimeout(() => {
-      throttleTimerRef.current = null;
-      const packets = pendingTelemetryRef.current;
-      if (!packets || packets.length === 0) return;
-
-      pendingTelemetryRef.current = [];
-      if (processTelemetryBatchRef.current) {
-        processTelemetryBatchRef.current(packets);
+      if (newDataTimeoutRef.current) {
+        clearTimeout(newDataTimeoutRef.current);
       }
-    }, 300);
-  }, []);
+      setHasNewData(true);
+      newDataTimeoutRef.current = setTimeout(() => {
+        setHasNewData(false);
+        newDataTimeoutRef.current = null;
+      }, 2000);
+    };
 
-  // ── Step 3: Private Broker SSE Real-Time Stream Hook ────────────────────────
-  useEffect(() => {
-    if (!selectedDeviceId) return;
-
-    setLoading(true);
-
+    // ── 1. Connect to Backend Real-Time SSE Stream (Private Broker Stream) ──
     const sseUrl = `${API_BASE}/api/devices/stream`;
     const eventSource = new EventSource(sseUrl);
 
     eventSource.onmessage = (event) => {
       try {
         const packet = JSON.parse(event.data);
-        const mId = (deviceMqttId || '').toLowerCase();
-        const devMqttId = (deviceMeta?.mqttId || '').toLowerCase();
+        const mId = (mqttId || '').toLowerCase();
         const dId = String(selectedDeviceId || '').toLowerCase();
         const pMqttId = String(packet.mqttId || '').toLowerCase();
         const pDevId = String(packet.deviceId || '').toLowerCase();
         const pTopic = String(packet.topic || '').toLowerCase();
 
-        const isMatch =
+        if (
           (mId && pMqttId === mId) ||
-          (devMqttId && pMqttId === devMqttId) ||
           (dId && pDevId === dId) ||
-          (mId && pTopic.includes(mId)) ||
-          (devMqttId && pTopic.includes(devMqttId)) ||
-          (dId && pTopic.includes(dId));
-
-        if (isMatch) {
-          pendingTelemetryRef.current.push({ topic: packet.topic, payload: packet.data });
-          if (pendingTelemetryRef.current.length > 30) {
-            pendingTelemetryRef.current = pendingTelemetryRef.current.slice(-30);
-          }
-          scheduleFlush();
+          (mId && pTopic.includes(mId))
+        ) {
+          const key = getThrottleKey(packet.topic);
+          throttle(key, processTelemetryPacket, 1500)(packet.topic, packet.data);
         }
       } catch (e) {
         console.error('SSE packet parse error:', e);
@@ -755,31 +543,16 @@ const LiveMonitoring = () => {
 
     return () => {
       eventSource.close();
-      if (throttleTimerRef.current) {
-        clearTimeout(throttleTimerRef.current);
-        throttleTimerRef.current = null;
-      }
+      Object.values(activeTimeouts).forEach(clearTimeout);
     };
-  }, [deviceType, deviceMqttId, deviceMeta?.mqttId, selectedDeviceId, API_BASE, scheduleFlush]);
+  }, [deviceMeta, selectedDeviceId, API_BASE]);
 
   const handleRefresh = () => {
     setLoading(true);
     fetchLiveData();
   };
 
-  // ── Filtered Controlling Metrics Config for Charts ─────────────────────────
-  const filteredControllingCharts = useMemo(() => {
-    if (controllingChartTab === 'primary') {
-      return CONTROLLING_METRICS_CONFIG.filter(m => ['water_temp', 'moisture', 'ph', 'room_temp', 'room_humi', 'co2'].includes(m.key));
-    }
-    if (controllingChartTab === 'climate') {
-      return CONTROLLING_METRICS_CONFIG.filter(m => ['room_temp', 'room_humi', 'co2', 'vpd', 'dli', 'wind_speed', 'wind_dir'].includes(m.key));
-    }
-    if (controllingChartTab === 'nutrients') {
-      return CONTROLLING_METRICS_CONFIG.filter(m => ['ph', 'do', 'n', 'p', 'k'].includes(m.key));
-    }
-    return CONTROLLING_METRICS_CONFIG;
-  }, [controllingChartTab]);
+
 
   // ── Loading State ──────────────────────────────────────────────────────────
   if (initLoading) {
@@ -866,21 +639,10 @@ const LiveMonitoring = () => {
         </div>
       </div>
 
-      {/* ── No device selected prompt ───────────────────────────────────── */}
-      {!selectedDeviceId && (
-        <div className="flex flex-col items-center justify-center py-20">
-          <div className="rounded-2xl border border-slate-700/50 bg-slate-800/30 p-8 text-center max-w-md backdrop-blur-sm">
-            <Cpu className="h-12 w-12 text-blue-400 mx-auto mb-4 animate-pulse" />
-            <h3 className="text-lg font-semibold text-white mb-2">Select a Device</h3>
-            <p className="text-sm text-slate-400">
-              Please select a device from the dropdown above to start live real-time monitoring.
-            </p>
-          </div>
-        </div>
-      )}
+
 
       {/* ── Office Control Dual-Room Live View ───────────────────────────── */}
-      {deviceType === 'office_control' && (
+      {deviceMeta?.deviceType === 'office_control' && (
         <div className="space-y-6">
           {/* Room Selection Tabs */}
           <div className="flex border-b border-slate-700/60 pb-px">
@@ -888,11 +650,14 @@ const LiveMonitoring = () => {
               <button
                 key={room}
                 onClick={() => setActiveRoomTab(room)}
-                className={`relative px-6 py-3.5 text-sm font-semibold transition-all hover:text-white ${activeRoomTab === room ? 'text-green-400' : 'text-slate-400'}`}
+                className={`relative px-6 py-3.5 text-sm font-semibold transition-all hover:text-white ${activeRoomTab === room ? 'text-green-400' : 'text-slate-400'                 }`}
               >
                 Room {room} Control
                 {activeRoomTab === room && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-green-500 rounded-full" />
+                  <motion.div
+                    layoutId="activeRoomTabIndicator"
+                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-green-500"
+                  />
                 )}
               </button>
             ))}
@@ -903,21 +668,15 @@ const LiveMonitoring = () => {
             {/* Left: 8 Sensor Grid Boxes */}
             <div className="space-y-4 xl:col-span-1">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Live Readings (Room {activeRoomTab})</h3>
-              {!officeControlData[activeRoomTab] && isDeviceOffline ? (
-                <div className="rounded-2xl border border-dashed border-rose-500/30 bg-rose-500/5 p-6 text-center">
-                  <AlertTriangle className="h-8 w-8 text-rose-400 mx-auto mb-2" />
-                  <div className="text-sm font-semibold text-white mb-1">Office Control Device Offline</div>
-                  <div className="text-xs text-slate-400">Device is currently offline or not broadcasting telemetry.</div>
-                </div>
-              ) : !officeControlData[activeRoomTab] && loading ? (
+              {!officeControlData[activeRoomTab] && loading ? (
                 <div className="space-y-4">
-                  {[...Array(4)].map((_, i) => (
+                  {[...Array(8)].map((_, i) => (
                     <SkeletonCard key={i} />
                   ))}
                 </div>
               ) : !officeControlData[activeRoomTab] ? (
                 <div className="rounded-2xl border border-dashed border-slate-700/50 p-6 text-sm text-slate-400 text-center">
-                  <div className="text-green-500 font-medium mb-1">Waiting for Live Device Stream...</div>
+                  <div className="animate-pulse mb-2 text-green-500 font-medium">Waiting for Live Device Stream...</div>
                   <div className="text-xs text-slate-500">Please start control.py on your device to stream real-time data.</div>
                 </div>
               ) : (
@@ -964,21 +723,21 @@ const LiveMonitoring = () => {
                     <>
                       <BigMetric
                         label=" Temp"
-                        value={officeControlData[activeRoomTab].soil?.soil_temp ?? officeControlData[activeRoomTab].soil_temp}
+                        value={officeControlData[activeRoomTab].soil?.soil_temp}
                         unit="°C"
                         icon={Thermometer}
                         type="temperature"
                       />
                       <BigMetric
-                        label="Moisture"
-                        value={officeControlData[activeRoomTab].soil?.moisture ?? officeControlData[activeRoomTab].moisture}
+                        label=" Moisture"
+                        value={officeControlData[activeRoomTab].soil?.moisture}
                         unit="%"
                         icon={Droplets}
                         type="moisture"
                       />
-                      {/* EC card */}
+                      {/* EC card — shows mS/cm + TDS in one line */}
                       {(() => {
-                        const ecVal = officeControlData[activeRoomTab].soil?.ec ?? officeControlData[activeRoomTab].ec;
+                        const ecVal = officeControlData[activeRoomTab].soil?.ec;
                         const tdsVal = ecVal != null ? Math.round(ecVal * 500) : null;
                         const ecStatus = getMetricStatus('ec', ecVal ?? 0);
                         const ecColor = getMetricColor(ecStatus);
@@ -989,7 +748,9 @@ const LiveMonitoring = () => {
                           'text-slate-500': 'bg-slate-500/10 border-slate-500/20',
                         };
                         return (
-                          <div
+                          <motion.div
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
                             className={`rounded-2xl border p-4 ${bgMap[ecColor] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm`}
                           >
                             <div className="flex items-center gap-2.5">
@@ -1000,7 +761,7 @@ const LiveMonitoring = () => {
                             </div>
                             <div className="mt-3 flex items-baseline gap-1.5 flex-wrap">
                               <span className={`text-2xl font-bold tabular-nums ${ecColor}`}>
-                                {ecVal != null ? parseFloat(ecVal).toFixed(2) : '--'}
+                                {ecVal != null ? ecVal : '--'}
                               </span>
                               <span className="text-sm text-slate-500">mS/cm</span>
                               {tdsVal != null && (
@@ -1013,26 +774,26 @@ const LiveMonitoring = () => {
                               <div className={`h-1.5 w-1.5 rounded-full ${ecStatus === 'normal' ? 'bg-emerald-400' : ecStatus === 'warning' ? 'bg-yellow-400' : ecStatus === 'critical' ? 'bg-red-400' : 'bg-slate-500'}`} />
                               <span className="text-xs text-slate-500 capitalize">{ecStatus}</span>
                             </div>
-                          </div>
+                          </motion.div>
                         );
                       })()}
                       <BigMetric
-                        label="pH"
-                        value={officeControlData[activeRoomTab].soil?.ph ?? officeControlData[activeRoomTab].ph}
+                        label=" pH"
+                        value={officeControlData[activeRoomTab].soil?.ph}
                         unit="pH"
                         icon={FlaskConical}
                         type="ph"
                       />
                       <BigMetric
                         label="Room Temp"
-                        value={officeControlData[activeRoomTab].room?.room_temp ?? officeControlData[activeRoomTab].room_temp}
+                        value={officeControlData[activeRoomTab].room?.room_temp}
                         unit="°C"
                         icon={Thermometer}
                         type="temperature"
                       />
                       <BigMetric
                         label="Room Humidity"
-                        value={officeControlData[activeRoomTab].room?.room_humi ?? officeControlData[activeRoomTab].room_humi}
+                        value={officeControlData[activeRoomTab].room?.room_humi}
                         unit="%"
                         icon={Droplets}
                         type="moisture"
@@ -1060,13 +821,9 @@ const LiveMonitoring = () => {
             {/* Right: Real-time Charts */}
             <div className="space-y-4 xl:col-span-2">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Trend Charts</h3>
-              {isDeviceOffline ? (
-                <div className="rounded-2xl border border-dashed border-slate-700/50 bg-slate-800/20 p-8 text-center text-slate-400 text-sm">
-                  Trend charts unavailable while device is offline.
-                </div>
-              ) : !officeControlData[activeRoomTab] && loading ? (
+              {!officeControlData[activeRoomTab] && loading ? (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {[...Array(4)].map((_, i) => (
+                  {[...Array(8)].map((_, i) => (
                     <div key={i} className="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-4">
                       <div className="skeleton mb-4 h-4 w-32 rounded" />
                       <div className="skeleton h-48 w-full rounded-xl" />
@@ -1113,7 +870,7 @@ const LiveMonitoring = () => {
                       <LiveChart
                         data={officeControlHistory[activeRoomTab].soil_temp}
                         type="temperature"
-                        title="Temperature Trend"
+                        title=" Temperature Trend"
                         unit="°C"
                       />
                       <LiveChart
@@ -1168,153 +925,141 @@ const LiveMonitoring = () => {
       )}
 
       {/* ── InHydro Controller (controlling.py) Live View ───────────────────────────── */}
-      {deviceType === 'controlling' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-            {/* Left: Sensor Grid Boxes */}
-            <div className="space-y-4 xl:col-span-1">
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Live Readings</h3>
+      {deviceMeta?.deviceType === 'controlling' && (() => {
+        const controllingMetricsConfig = [
+          { key: 'water_temp', label: 'Water Temperature', unit: '°C', icon: Thermometer, type: 'temperature' },
+          { key: 'moisture', label: 'Moisture / Humidity', unit: '%', icon: Droplets, type: 'moisture' },
+          { key: 'ph', label: 'pH Level', unit: 'pH', icon: FlaskConical, type: 'ph' },
+          { key: 'room_temp', label: 'Room Temperature', unit: '°C', icon: Thermometer, type: 'temperature' },
+          { key: 'room_humi', label: 'Room Humidity', unit: '%', icon: Droplets, type: 'moisture' },
+          { key: 'orp', label: 'ORP Level', unit: 'mV', icon: Activity, type: 'default' },
+          { key: 'co2', label: 'CO2 Level', unit: 'ppm', icon: Activity, type: 'co2' },
+          { key: 'vpd', label: 'VPD', unit: 'kPa', icon: Activity, type: 'default' },
+          { key: 'dli', label: 'DLI', unit: 'mol/m²/d', icon: Activity, type: 'default' },
+          { key: 'wind_speed', label: 'Wind Speed', unit: 'm/s', icon: Activity, type: 'default' },
+          { key: 'wind_dir', label: 'Wind Direction', unit: '°', icon: Activity, type: 'default' },
+          { key: 'do', label: 'Dissolved Oxygen (DO)', unit: 'mg/L', icon: Activity, type: 'default' },
+          { key: 'ppfd', label: 'PPFD', unit: 'µmol/m²/s', icon: Activity, type: 'default' },
+          { key: 'n', label: 'Nitrogen (N)', unit: 'mg/kg', icon: Activity, type: 'default' },
+          { key: 'p', label: 'Phosphorus (P)', unit: 'mg/kg', icon: Activity, type: 'default' },
+          { key: 'k', label: 'Potassium (K)', unit: 'mg/kg', icon: Activity, type: 'default' }
+        ];
 
-              {!controllingData && isDeviceOffline ? (
-                <div className="rounded-2xl border border-dashed border-rose-500/30 bg-rose-500/5 p-6 text-center">
-                  <AlertTriangle className="h-8 w-8 text-rose-400 mx-auto mb-2" />
-                  <div className="text-sm font-semibold text-white mb-1">Controller Device Offline</div>
-                  <div className="text-xs text-slate-400">Device is currently offline. Start controlling.py to stream telemetry.</div>
-                </div>
-              ) : !controllingData && loading ? (
-                <div className="space-y-4">
-                  {[...Array(4)].map((_, i) => (
-                    <SkeletonCard key={i} />
-                  ))}
-                </div>
-              ) : !controllingData ? (
-                <div className="rounded-2xl border border-dashed border-slate-700/50 p-6 text-sm text-slate-400 text-center">
-                  <div className="text-green-500 font-medium mb-1">Waiting for Live Device Stream...</div>
-                  <div className="text-xs text-slate-500">Please start controlling.py on your device to stream real-time data.</div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 xl:grid-cols-1">
-                  {/* EC card */}
-                  {(() => {
-                    const ecVal = controllingData.ec;
-                    const tdsVal = ecVal != null ? Math.round(ecVal * 500) : null;
-                    const ecStatus = getMetricStatus('ec', ecVal ?? 0);
-                    const ecColor = getMetricColor(ecStatus);
-                    const bgMap = {
-                      'text-emerald-400': 'bg-emerald-500/10 border-emerald-500/20',
-                      'text-yellow-400': 'bg-yellow-500/10 border-yellow-500/20',
-                      'text-red-400': 'bg-red-500/10 border-red-500/20',
-                      'text-slate-500': 'bg-slate-500/10 border-slate-500/20',
-                    };
-                    return (
-                      <div
-                        className={`rounded-2xl border p-4 ${bgMap[ecColor] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <div className={`rounded-lg p-1.5 ${ecColor} bg-white/5`}>
-                            <Zap className="h-4 w-4" />
+        return (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+              {/* Left: Sensor Grid Boxes */}
+              <div className="space-y-4 xl:col-span-1">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Live Readings</h3>
+
+                {!controllingData && loading ? (
+                  <div className="space-y-4">
+                    {[...Array(17)].map((_, i) => (
+                      <SkeletonCard key={i} />
+                    ))}
+                  </div>
+                ) : !controllingData ? (
+                  <div className="rounded-2xl border border-dashed border-slate-700/50 p-6 text-sm text-slate-400 text-center">
+                    <div className="animate-pulse mb-2 text-green-500 font-medium">Waiting for Live Device Stream...</div>
+                    <div className="text-xs text-slate-500">Please start controlling.py on your device to stream real-time data.</div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 xl:grid-cols-1">
+                    {/* EC card — shows mS/cm + TDS in one line */}
+                    {(() => {
+                      const ecVal = controllingData.ec;
+                      const tdsVal = ecVal != null ? Math.round(ecVal * 500) : null;
+                      const ecStatus = getMetricStatus('ec', ecVal ?? 0);
+                      const ecColor = getMetricColor(ecStatus);
+                      const bgMap = {
+                        'text-emerald-400': 'bg-emerald-500/10 border-emerald-500/20',
+                        'text-yellow-400': 'bg-yellow-500/10 border-yellow-500/20',
+                        'text-red-400': 'bg-red-500/10 border-red-500/20',
+                        'text-slate-500': 'bg-slate-500/10 border-slate-500/20',
+                      };
+                      return (
+                        <motion.div
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className={`rounded-2xl border p-4 ${bgMap[ecColor] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className={`rounded-lg p-1.5 ${ecColor} bg-white/5`}>
+                              <Zap className="h-4 w-4" />
+                            </div>
+                            <span className="text-sm font-medium text-slate-400">Electrical Conductivity (EC)</span>
                           </div>
-                          <span className="text-sm font-medium text-slate-400">Electrical Conductivity (EC)</span>
-                        </div>
-                        <div className="mt-3 flex items-baseline gap-1.5 flex-wrap">
-                          <span className={`text-2xl font-bold tabular-nums ${ecColor}`}>
-                            {ecVal != null ? parseFloat(ecVal).toFixed(2) : '--'}
-                          </span>
-                          <span className="text-sm text-slate-500">mS/cm</span>
-                          {tdsVal != null && (
-                            <span className="text-sm text-slate-400 font-semibold font-mono">
-                              ({tdsVal} ppm)
+                          <div className="mt-3 flex items-baseline gap-1.5 flex-wrap">
+                            <span className={`text-2xl font-bold tabular-nums ${ecColor}`}>
+                              {ecVal != null ? ecVal : '--'}
                             </span>
-                          )}
-                        </div>
-                        <div className="mt-1.5 flex items-center gap-1.5">
-                          <div className={`h-1.5 w-1.5 rounded-full ${ecStatus === 'normal' ? 'bg-emerald-400' : ecStatus === 'warning' ? 'bg-yellow-400' : ecStatus === 'critical' ? 'bg-red-400' : 'bg-slate-500'}`} />
-                          <span className="text-xs text-slate-500 capitalize">{ecStatus}</span>
-                        </div>
-                      </div>
-                    );
-                  })()}
+                            <span className="text-sm text-slate-500">mS/cm</span>
+                            {tdsVal != null && (
+                              <span className="text-sm text-slate-400 font-semibold font-mono">
+                                ({tdsVal} ppm)
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-1.5 flex items-center gap-1.5">
+                            <div className={`h-1.5 w-1.5 rounded-full ${ecStatus === 'normal' ? 'bg-emerald-400' : ecStatus === 'warning' ? 'bg-yellow-400' : ecStatus === 'critical' ? 'bg-red-400' : 'bg-slate-500'}`} />
+                            <span className="text-xs text-slate-500 capitalize">{ecStatus}</span>
+                          </div>
+                        </motion.div>
+                      );
+                    })()}
 
-                  {CONTROLLING_METRICS_CONFIG.map(m => (
-                    <BigMetric
-                      key={m.key}
-                      label={m.label}
-                      value={controllingData[m.key]}
-                      unit={m.unit}
-                      icon={m.icon}
-                      type={m.type}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Right: Real-time Charts with Category Selector */}
-            <div className="space-y-4 xl:col-span-2">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Trend Charts</h3>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { id: 'primary', label: 'Primary Trends' },
-                    { id: 'climate', label: 'Climate & Env' },
-                    { id: 'nutrients', label: 'Nutrients & O₂' },
-                    { id: 'all', label: 'All Charts' },
-                  ].map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setControllingChartTab(tab.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${controllingChartTab === tab.id
-                          ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                          : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white'
-                        }`}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
+                    {controllingMetricsConfig.map(m => (
+                      <BigMetric
+                        key={m.key}
+                        label={m.label}
+                        value={controllingData[m.key]}
+                        unit={m.unit}
+                        icon={m.icon}
+                        type={m.type}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {isDeviceOffline ? (
-                <div className="rounded-2xl border border-dashed border-slate-700/50 bg-slate-800/20 p-8 text-center text-slate-400 text-sm">
-                  Trend charts unavailable while device is offline.
-                </div>
-              ) : !controllingData && loading ? (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {[...Array(4)].map((_, i) => (
-                    <div key={i} className="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-4">
-                      <div className="skeleton mb-4 h-4 w-32 rounded" />
-                      <div className="skeleton h-48 w-full rounded-xl" />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {(controllingChartTab === 'primary' || controllingChartTab === 'nutrients' || controllingChartTab === 'all') && (
+              {/* Right: Real-time Charts */}
+              <div className="space-y-4 xl:col-span-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Trend Charts</h3>
+                {!controllingData && loading ? (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {[...Array(17)].map((_, i) => (
+                      <div key={i} className="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-4">
+                        <div className="skeleton mb-4 h-4 w-32 rounded" />
+                        <div className="skeleton h-48 w-full rounded-xl" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <LiveChart
                       data={controllingHistory.ec}
                       type="ec"
                       title="EC Trend"
                       unit="mS/cm"
                     />
-                  )}
-                  {filteredControllingCharts.map(m => (
-                    <LiveChart
-                      key={m.key}
-                      data={controllingHistory[m.key]}
-                      type={m.type}
-                      title={`${m.label} Trend`}
-                      unit={m.unit}
-                    />
-                  ))}
-                </div>
-              )}
+                    {controllingMetricsConfig.map(m => (
+                      <LiveChart
+                        key={m.key}
+                        data={controllingHistory[m.key]}
+                        type={m.type}
+                        title={`${m.label} Trend`}
+                        unit={m.unit}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
-      {/* ── Multi-Sensor View ────────────────────────────────────────────── */}
-      {deviceType === 'multi_sensor' && (
+      {deviceMeta?.deviceType === 'multi_sensor' && (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">7-Sensor Matrix</h3>
@@ -1340,26 +1085,54 @@ const LiveMonitoring = () => {
                 return idA.localeCompare(idB);
               })
               .map(([sensorId, data]) => (
-                <MultiSensorCard
+                <motion.div
                   key={sensorId}
-                  sensorId={sensorId}
-                  data={data}
-                  historyData={sensorHistory[sensorId]}
-                  sortBy={sortBy}
-                  onSelect={setSelectedSensor}
-                />
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  whileHover={{ y: -5 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  onClick={() => setSelectedSensor(sensorId)}
+                  className="rounded-2xl border border-slate-700 bg-slate-800/40 p-4 backdrop-blur-md cursor-pointer hover:border-blue-500/50 transition-all hover:bg-slate-800/60"
+                >
+                  <div className="mb-3 flex items-center justify-between">
+                    <span className="rounded-lg bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-400">
+                      {`Cold Room ${sensorId.toUpperCase().replace('S', '')}`}
+                    </span>
+                    <span className={`h-1.5 w-1.5 rounded-full ${data.status === 'OK' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-end">
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-slate-500 flex items-center gap-1"><Thermometer className="h-3 w-3 " /> Temperature</p>
+                        <p className="text-xl font-bold text-white tabular-nums">{data.t?.toFixed(1) || '--'}<span className="text-xs font-normal text-slate-500 ml-0.5">°C</span></p>
+                      </div>
+                      <div className="space-y-1 text-right">
+                        <p className="text-[10px] text-slate-500 flex items-center gap-1 justify-end"><Droplets className="h-3 w-3 " /> Humidity</p>
+                        <p className="text-xl font-bold text-blue-400 tabular-nums">{data.h?.toFixed(1) || '--'}<span className="text-xs font-normal text-slate-500 ml-0.5">%</span></p>
+                      </div>
+                    </div>
+
+                    {/* Real-time Sparkline of Temperature */}
+                    <div className="h-12 w-full bg-slate-900/40 rounded-lg flex items-end gap-1 px-2 py-1.5 border border-slate-700/30">
+                      {(sensorHistory[sensorId]?.t || [0]).map((val, i) => {
+                        // Scale value between 10% and 100% based on range (e.g. 10-40 degrees)
+                        const min = 10, max = 45;
+                        const h = Math.min(100, Math.max(10, ((val - min) / (max - min)) * 100));
+                        return (
+                          <div
+                            key={i}
+                            className={`w-full rounded-t transition-all duration-500 ${val > 30 ? 'bg-red-400' : 'bg-blue-400'}`}
+                            style={{ height: `${h}%` }}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                </motion.div>
               ))}
           </div>
 
-          {isDeviceOffline && Object.keys(multiSensorData).length === 0 && (
-            <div className="rounded-2xl border border-dashed border-rose-500/30 bg-rose-500/5 p-8 text-center my-4">
-              <AlertTriangle className="h-8 w-8 text-rose-400 mx-auto mb-2" />
-              <div className="text-sm font-semibold text-white mb-1">Cold Storage Sensors Offline</div>
-              <div className="text-xs text-slate-400">Sensors are currently offline or disconnected.</div>
-            </div>
-          )}
-
-          {Object.keys(multiSensorData).length === 0 && !isDeviceOffline && !loading && (
+          {Object.keys(multiSensorData).length === 0 && !loading && (
             <div className="py-12 text-center text-slate-500 text-sm italic">
               Waiting for the sensor to be online...
             </div>
@@ -1367,7 +1140,7 @@ const LiveMonitoring = () => {
         </div>
       )}
 
-      {/* ── Multi-Sensor Detail Modal ────────────────────────────────────── */}
+      {/* ── Multi-Sensor Sensor Detail Modal ─────────────────────────────── */}
       {selectedSensor && multiSensorData[selectedSensor] && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <motion.div
@@ -1403,6 +1176,7 @@ const LiveMonitoring = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
               <LiveChart
                 data={(sensorHistory[selectedSensor]?.t || []).map((v, i) => ({ time: i, value: v }))}
                 type="temperature"
@@ -1415,24 +1189,19 @@ const LiveMonitoring = () => {
                 title="Humidity History"
                 unit="%"
               />
+
             </div>
           </motion.div>
         </div>
       )}
 
       {/* ── Standard Single-Device Content Grid ───────────────────────────────── */}
-      {Boolean(selectedDeviceId) && deviceType !== 'multi_sensor' && deviceType !== 'office_control' && deviceType !== 'controlling' && (
+      {deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && deviceMeta?.deviceType !== 'controlling' && (
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
           {/* Left: Big Metrics */}
           <div className="space-y-4 xl:col-span-1">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Live Readings</h3>
-            {isDeviceOffline ? (
-              <div className="rounded-2xl border border-dashed border-rose-500/30 bg-rose-500/5 p-6 text-center">
-                <AlertTriangle className="h-8 w-8 text-rose-400 mx-auto mb-2" />
-                <div className="text-sm font-semibold text-white mb-1">Device Offline</div>
-                <div className="text-xs text-slate-400">Selected device is currently offline or not broadcasting telemetry.</div>
-              </div>
-            ) : loading ? (
+            {loading ? (
               <div className="space-y-4">
                 {[...Array(activeFields.length || 4)].map((_, i) => (
                   <SkeletonCard key={i} />
@@ -1461,11 +1230,7 @@ const LiveMonitoring = () => {
           {/* Right: Charts */}
           <div className="space-y-4 xl:col-span-2">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Trend Charts</h3>
-            {isDeviceOffline ? (
-              <div className="rounded-2xl border border-dashed border-slate-700/50 bg-slate-800/20 p-8 text-center text-slate-400 text-sm">
-                Trend charts unavailable while device is offline.
-              </div>
-            ) : loading ? (
+            {loading ? (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {[...Array(activeFields.length || 4)].map((_, i) => (
                   <div key={i} className="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-4">
