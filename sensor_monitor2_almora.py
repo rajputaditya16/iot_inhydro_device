@@ -41,7 +41,7 @@ DELAY_BETWEEN_PORTS = 0.2
 
 # Hardware Dictionary: Maps Web MQTT IDs directly to physical USB paths for Temp/Humi
 SENSOR_MAP = {
-    "S1": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0",
+    "S1": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1.7:1.0-port0",
     "S2": "/dev/serial/by-path/usb_PLACEHOLDER_S2",
     "S3": "/dev/serial/by-path/usb_PLACEHOLDER_S3",
     "S4": "/dev/serial/by-path/usb_PLACEHOLDER_S4",
@@ -52,7 +52,7 @@ SENSOR_MAP = {
 
 # Dedicated CO2 Sensor Hardware Ports per Room (S1 to S7)
 CO2_SENSOR_MAP = {
-    "S1": "/dev/serial/by-path/usb_PLACEHOLDER_CO2_S1",
+    "S1": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1.5:1.0-port0",
     "S2": "/dev/serial/by-path/usb_PLACEHOLDER_CO2_S2",
     "S3": "/dev/serial/by-path/usb_PLACEHOLDER_CO2_S3",
     "S4": "/dev/serial/by-path/usb_PLACEHOLDER_CO2_S4",
@@ -364,13 +364,13 @@ def trigger_buzzer_30s():
 
     def _buzzer_worker():
         global buzzer_active
-        print("🔔 [BUZZER] 30-second warning alarm triggered!")
+        print("[BUZZER] 30-second warning alarm triggered!")
         set_relay(BUZZER_CHANNEL, True)
         time.sleep(30)
         set_relay(BUZZER_CHANNEL, False)
         with buzzer_lock:
             buzzer_active = False
-        print("🔕 [BUZZER] 30-second alarm ended.")
+        print("[BUZZER] 30-second alarm ended.")
 
     threading.Thread(target=_buzzer_worker, daemon=True).start()
 
@@ -614,11 +614,11 @@ def sensor_reader():
                 if temp > 150: temp /= 10.0
                 if humi > 150: humi /= 10.0
 
+                co2 = None
                 if len(values) >= 3 and values[2] > 0:
-                    co2 = float(values[2])
-                    if co2 > 5000: co2 /= 10.0
-                else:
-                    co2 = round(420.0 + (temp * 1.8), 1)
+                    co2_val = float(values[2])
+                    if co2_val > 5000: co2_val /= 10.0
+                    co2 = co2_val
 
                 # Dedicated Per-Room CO2 Sensor Port Reading
                 co2_port = CO2_SENSOR_MAP.get(skey, "")
@@ -643,7 +643,7 @@ def sensor_reader():
                 if skey == "S4": humi += 2.8
 
                 with sensor_data_lock:
-                    sensor_data[port] = {'id': sensor_id, 'temp': round(temp, 1), 'humi': round(humi, 1), 'co2': round(co2, 1), 'status': 'OK'}
+                    sensor_data[port] = {'id': sensor_id, 'temp': round(temp, 1), 'humi': round(humi, 1), 'co2': round(co2, 1) if co2 is not None else None, 'status': 'OK'}
             except Exception:
                 with sensor_data_lock: sensor_data[port] = {'id': sensor_id, 'status': 'ERROR'}
             finally:
@@ -770,7 +770,10 @@ def add_logo(parent):
             lbl = tk.Label(parent, image=photo, bg="white")
             lbl.image = photo 
             lbl.place(relx=1.0, rely=0.0, anchor="ne", x=-20, y=15)
+            lbl.lift()
+            return lbl
     except Exception as e: pass
+    return None
 
 def add_top_left_exit(parent):
     btn_exit = tk.Button(
@@ -790,20 +793,22 @@ def add_top_left_exit(parent):
     )
     btn_exit.place(relx=0.0, rely=0.0, anchor="nw", x=20, y=15)
     btn_exit.lift()
+    return btn_exit
 
 clock_labels = []
 
 def add_bottom_right_clock(parent, bg_color="white"):
     lbl = tk.Label(
         parent,
-        text="📅 Day, YYYY-MM-DD   ⏰ hh:mm:ss AM/PM (IST)",
-        font=("Helvetica", 11, "bold"),
+        text=" Day, YYYY-MM-DD\n hh:mm:ss AM/PM (IST)",
+        font=("Helvetica", 10, "bold"),
         fg="#00897b",
         bg=bg_color,
+        justify="right",
         padx=10,
-        pady=6
+        pady=4
     )
-    lbl.place(relx=1.0, rely=1.0, anchor="se", x=-20, y=-15)
+    lbl.place(relx=1.0, rely=1.0, anchor="se", x=-15, y=-10)
     lbl.lift()
     clock_labels.append(lbl)
     return lbl
@@ -834,7 +839,7 @@ lbl_warning_bar = tk.Label(frame_main, text="SYSTEM NORMAL", font=med, bg="#2e7d
 lbl_warning_bar.pack(fill="x", padx=15, pady=5)
 
 sensors_grid = tk.Frame(frame_main, bg="white")
-sensors_grid.pack(pady=15)
+sensors_grid.pack(pady=10)
 sensor_widgets = {}
 
 footer_main = tk.Frame(frame_main, bg="#eeeeee", height=80)
@@ -853,13 +858,13 @@ btn_sys_settings.pack(side="left", padx=10, pady=10)
 btn_restart_app = tk.Button(footer_main, text="RESTART", font=BTN_FONT_MAIN, width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, bg="#1565c0", fg="white", cursor="hand2", command=lambda: restart_program())
 btn_restart_app.pack(side="left", padx=10, pady=10)
 
-lbl_clock = tk.Label(footer_main, text="📅 Day, YYYY-MM-DD   ⏰ hh:mm:ss AM/PM (IST)", font=("Helvetica", 12, "bold"), fg="#00897b", bg="#eeeeee")
-lbl_clock.pack(side="right", padx=20, pady=10)
+lbl_clock = tk.Label(footer_main, text="Day, YYYY-MM-DD\n hh:mm:ss AM/PM (IST)", font=("Helvetica", 11, "bold"), fg="#00897b", bg="#eeeeee", justify="right")
+lbl_clock.pack(side="right", padx=15, pady=5)
 
 def update_clock_display():
     ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
     now = datetime.datetime.now(ist_tz)
-    now_str = now.strftime("📅 %A, %Y-%m-%d   ⏰ %I:%M:%S %p (IST)")
+    now_str = now.strftime(" %A, %Y-%m-%d\n %I:%M:%S %p (IST)")
     if 'lbl_clock' in globals() and lbl_clock.winfo_exists():
         lbl_clock.config(text=now_str)
     for lbl in list(clock_labels):
@@ -903,7 +908,7 @@ def save_local_telemetry(data):
     if connected: return
 
     current_time = time.time()
-    if current_time - last_local_save_time < 45: return
+    if current_time - last_local_save_time < 1: return
 
     ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
     ts_str = datetime.datetime.now(ist_tz).isoformat()
@@ -930,9 +935,9 @@ def update_ui():
             if skey not in sensor_widgets:
                 disp_name = get_sensor_display_name(skey)
                 
-                b_room = tk.Button(sensors_grid, bg="#1565c0", bd=4, relief="raised",
-                                   text=f"{disp_name}\n[INITIALIZING]", font=font.Font(size=11, weight="bold"), 
-                                   fg="white", width=24, height=6,
+                b_room = tk.Button(sensors_grid, bg="#1565c0", bd=3, relief="raised",
+                                   text=f"{disp_name}\n[INITIALIZING]", font=font.Font(size=10, weight="bold"), 
+                                   fg="white", width=20, height=8,
                                    command=lambda p=port: open_sensor_detail(p))
 
                 sensor_widgets[skey] = b_room
@@ -959,14 +964,16 @@ def update_ui():
                 h_target = sp_eval['target_humi']
 
                 if d and d.get('status') == 'OK':
-                    t, h, c_val = d['temp'], d['humi'], d.get('co2', 450.0)
+                    t, h = d['temp'], d['humi']
+                    c_val = d.get('co2')
+                    co2_str = f"{c_val:.1f} ppm" if (c_val is not None and c_val > 0) else "N/A"
 
                     box_text = (
                         f"{disp_name}\n"
                         f"[{setting_nm} - Slot {slot_id}]\n"
                         f"Temp: {t:.1f}°C (Set: {t_target:.1f}°C)\n"
                         f"Humi: {h:.1f}%  (Set: {h_target:.1f}%)\n"
-                        f"CO2: {c_val:.1f} ppm"
+                        f"CO2: {co2_str}"
                     )
                     
                     is_t_ok = (t_min <= t <= t_max)
@@ -985,12 +992,12 @@ def update_ui():
         # Update Warning Bar
         if active_warnings:
             lbl_warning_bar.config(
-                text="⚠️ WARNING: " + " | ".join(active_warnings[:2]),
+                text=" WARNING: " + " | ".join(active_warnings[:2]),
                 bg="#c62828", fg="white"
             )
         else:
             lbl_warning_bar.config(
-                text="✅ SYSTEM NORMAL — ALL PARAMETERS WITHIN RTC SCHEDULED SETPOINTS",
+                text=" SYSTEM NORMAL — ALL PARAMETERS WITHIN RTC SCHEDULED SETPOINTS",
                 bg="#2e7d32", fg="white"
             )
 
@@ -1005,13 +1012,14 @@ def update_ui():
                 f_s = "[ON]" if relay_states.get(mapped_f) else "[OFF]"
                 h_s = "[ON]" if relay_states.get(mapped_h) else "[OFF]"
                 l_s = "[ON]" if relay_states.get(LIGHTING_CHANNEL) else "[OFF]"
-                c_val = d.get('co2', 450.0)
+                c_val = d.get('co2')
+                co2_str = f"{c_val:.1f} ppm" if (c_val is not None and c_val > 0) else "N/A"
                 txt = (
                     f"{get_sensor_display_name(skey)}\n"
                     f"Profile: {sp_eval['setting_name']} (Slot {sp_eval['slot_id']})\n\n"
                     f"LIVE TEMP: {d['temp']:.1f} °C  (Target: {sp_eval['target_temp']:.1f} °C)\n"
                     f"LIVE HUMI: {d['humi']:.1f} %   (Target: {sp_eval['target_humi']:.1f} %)\n"
-                    f"LIVE CO2:  {c_val:.1f} ppm\n\n"
+                    f"LIVE CO2:  {co2_str}\n\n"
                     f"{get_f_name(skey)}: {f_s}    Humidifier: {h_s}    Grow Lights: {l_s}"
                 )
                 lbl_detail_data.config(text=txt, fg="#1565c0")
@@ -1042,27 +1050,34 @@ tk.Button(btn_f_det, text="EDIT SCHEDULE SLOTS", font=BTN_FONT_MAIN, bg="#0284c7
 
 keypad_modal = None
 
+def make_modal_fullscreen(win):
+    win.configure(bg="white")
+    win.transient(root)
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    win.geometry(f"{sw}x{sh}+0+0")
+    try: win.overrideredirect(True)
+    except Exception: pass
+    try: win.attributes("-fullscreen", True)
+    except Exception: pass
+    win.update_idletasks()
+    win.grab_set()
+    win.focus_force()
+
 def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphanumeric=False):
     global keypad_modal
     if keypad_modal and keypad_modal.winfo_exists():
         keypad_modal.destroy()
 
     keypad_modal = tk.Toplevel(root)
-    keypad_modal.configure(bg="white")
-
-    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    keypad_modal.geometry(f"{sw}x{sh}+0+0")
-    try: keypad_modal.attributes("-fullscreen", True)
-    except Exception: pass
-    keypad_modal.grab_set()
-    keypad_modal.focus_force()
-
-    add_logo(keypad_modal)
-    add_top_left_exit(keypad_modal)
-    add_bottom_right_clock(keypad_modal)
+    make_modal_fullscreen(keypad_modal)
 
     kp_main = tk.Frame(keypad_modal, bg="white")
-    kp_main.pack(expand=True)
+    kp_main.pack(fill="both", expand=True, pady=(60, 45))
+
+    # Add floating header exit button, logo, and bottom-right clock AFTER kp_main is packed so they float on top
+    logo_lbl = add_logo(keypad_modal)
+    exit_btn = add_top_left_exit(keypad_modal)
+    clk_lbl = add_bottom_right_clock(keypad_modal)
 
     entered_val = str(initial_value)
 
@@ -1129,23 +1144,16 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
 # SYSTEM SETTINGS MODAL (CONFIG FREQUENCY & ALARM DEVIATION OFFSETS)
 def open_system_settings_modal():
     sett_win = tk.Toplevel(root)
-    sett_win.configure(bg="white")
+    make_modal_fullscreen(sett_win)
 
-    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    sett_win.geometry(f"{sw}x{sh}+0+0")
-    try: sett_win.attributes("-fullscreen", True)
-    except Exception: pass
-    sett_win.grab_set()
-    sett_win.focus_force()
+    s_main = tk.Frame(sett_win, bg="white")
+    s_main.pack(fill="both", expand=True, pady=(60, 45))
 
     add_logo(sett_win)
     add_top_left_exit(sett_win)
     add_bottom_right_clock(sett_win)
 
-    s_main = tk.Frame(sett_win, bg="white")
-    s_main.pack(expand=True)
-
-    tk.Label(s_main, text="⚙️ SYSTEM CONFIGURATION & ALARM SETTINGS", font=big, fg="#1565c0", bg="white").pack(pady=(15, 20))
+    tk.Label(s_main, text="SYSTEM CONFIGURATION & ALARM SETTINGS", font=big, fg="#1565c0", bg="white").pack(pady=(15, 20))
 
     body = tk.Frame(s_main, bg="white")
     body.pack(pady=10)
@@ -1170,7 +1178,7 @@ def open_system_settings_modal():
 
     # 2. Temp Alarm Offset (+/- C)
     r2 = tk.Frame(body, bg="white"); r2.pack(fill="x", pady=10)
-    tk.Label(r2, text="Temp Alarm Limit (+/- °C):", font=("Helvetica", 12, "bold"), fg="#1e293b", bg="white", width=25, anchor="e").pack(side="left", padx=10)
+    tk.Label(r2, text="Temp Alarm Limit :", font=("Helvetica", 12, "bold"), fg="#1e293b", bg="white", width=25, anchor="e").pack(side="left", padx=10)
     
     t_off_val = system_config.get("temp_alarm_offset", 5.0)
     lbl_toff = tk.Label(r2, text=f"{t_off_val:.1f} °C", font=("Helvetica", 12, "bold"), bg="#f1f5f9", fg="#1565c0", width=14, relief="sunken", bd=1)
@@ -1248,7 +1256,7 @@ sched_canvas.bind_all("<MouseWheel>", _on_sched_mousewheel)
 sched_canvas.bind_all("<Button-4>", _on_sched_mousewheel)
 sched_canvas.bind_all("<Button-5>", _on_sched_mousewheel)
 
-lbl_sched_title = tk.Label(sched_scroll_inner, text="ALMORA CALENDAR & 10 CROP STAGES SCHEDULE EDITOR", font=big, fg="#1565c0", bg="white")
+lbl_sched_title = tk.Label(sched_scroll_inner, text="ALMORA CALENDAR & MULTI CROP STAGES SCHEDULE ", font=big, fg="#1565c0", bg="white")
 lbl_sched_title.pack(pady=(35, 2))
 
 sched_top_ctrl = tk.Frame(sched_scroll_inner, bg="white")
@@ -1280,8 +1288,14 @@ sensor_menu_frame = tk.Frame(sched_scroll_inner, bg="white", bd=1, relief="solid
 profile_menu_frame = tk.Frame(sched_scroll_inner, bg="white", bd=1, relief="solid", highlightbackground="#cbd5e1", highlightthickness=1)
 preset_menu_frame = tk.Frame(sched_scroll_inner, bg="white", bd=1, relief="solid", highlightbackground="#cbd5e1", highlightthickness=1)
 
+sched_row1 = tk.Frame(sched_top_ctrl, bg="white")
+sched_row1.pack(pady=(0, 4), anchor="center")
+
+sched_row2 = tk.Frame(sched_top_ctrl, bg="white")
+sched_row2.pack(pady=(4, 0), anchor="center")
+
 # --- 1. SENSOR DROPDOWN (MIND.PY STYLE) ---
-tk.Label(sched_top_ctrl, text="Sensor:", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack(side="left", padx=(5, 4))
+tk.Label(sched_row1, text="Sensor:", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack(side="left", padx=(5, 4))
 
 def toggle_sensor_dropdown():
     global sensor_dropdown_open, profile_dropdown_open, preset_dropdown_open
@@ -1308,17 +1322,17 @@ def toggle_sensor_dropdown():
 def select_sensor(skey, dname):
     global sensor_dropdown_open
     skey_combo.set(skey)
-    sensor_dropdown_btn.config(text=f"{skey} — {dname}  ▼")
+    sensor_dropdown_btn.config(text=f"{skey}-{dname}▼")
     sensor_menu_frame.place_forget()
     sensor_dropdown_open = False
     load_schedule_form()
 
-sensor_dropdown_btn = tk.Button(sched_top_ctrl, text="S1 — COLD ROOM 1  ▼", font=("Helvetica", 14, "bold"), bg="#cbd5e1", fg="#1e293b",
-                                activebackground="#94a3b8", activeforeground="#1e293b", relief="flat", bd=0, padx=16, pady=10, cursor="hand2", command=toggle_sensor_dropdown)
-sensor_dropdown_btn.pack(side="left", padx=(0, 10))
+sensor_dropdown_btn = tk.Button(sched_row1, text="S1-COLD ROOM 1 ▼", font=("Helvetica", 11, "bold"), bg="#cbd5e1", fg="#1e293b",
+                                activebackground="#94a3b8", activeforeground="#1e293b", relief="flat", bd=0, padx=12, pady=6, cursor="hand2", command=toggle_sensor_dropdown)
+sensor_dropdown_btn.pack(side="left", padx=(0, 15))
 
 # --- 2. CROP STAGE DROPDOWN (MIND.PY STYLE) ---
-tk.Label(sched_top_ctrl, text="Crop Stage:", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack(side="left", padx=(5, 4))
+tk.Label(sched_row1, text="Crop Stage:", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack(side="left", padx=(5, 4))
 
 ALL_SETTINGS = ["Setting A", "Setting B", "Setting C", "Setting D", "Setting E", 
                 "Setting F", "Setting G", "Setting H", "Setting I", "Setting J"]
@@ -1337,35 +1351,35 @@ def toggle_profile_dropdown():
         for idx, s_key in enumerate(ALL_SETTINGS):
             p_name = settings_dict.get(s_key, {}).get("name", s_key)
             btn_txt = f"{s_key} ({p_name})" if p_name != s_key else s_key
-            btn = tk.Button(profile_menu_frame, text=btn_txt, font=("Helvetica", 13, "bold"), bg="white", fg="#1e293b",
-                            activebackground="#0284c7", activeforeground="white", relief="flat", bd=0, anchor="w", padx=15, pady=12, cursor="hand2")
+            btn = tk.Button(profile_menu_frame, text=btn_txt, font=("Helvetica", 12, "bold"), bg="white", fg="#1e293b",
+                            activebackground="#0284c7", activeforeground="white", relief="flat", bd=0, anchor="w", padx=12, pady=10, cursor="hand2")
             btn.config(command=lambda s=s_key, t=btn_txt: select_profile(s, t))
             btn.pack(fill="x")
             if idx < len(ALL_SETTINGS) - 1:
                 tk.Frame(profile_menu_frame, bg="#cbd5e1", height=1).pack(fill="x")
-        profile_menu_frame.place(in_=profile_dropdown_btn, relx=0.0, rely=1.0, y=2, width=320)
+        profile_menu_frame.place(in_=profile_dropdown_btn, relx=0.0, rely=1.0, y=2, width=300)
         profile_menu_frame.lift()
         profile_dropdown_open = True
 
 def select_profile(s_name, btn_txt):
     global profile_dropdown_open
     setting_combo.set(s_name)
-    profile_dropdown_btn.config(text=f"{btn_txt}  ▼")
+    profile_dropdown_btn.config(text=f"{btn_txt}▼")
     profile_menu_frame.place_forget()
     profile_dropdown_open = False
     load_schedule_form()
 
-profile_dropdown_btn = tk.Button(sched_top_ctrl, text="Setting A (Crop Stage 1)  ▼", font=("Helvetica", 14, "bold"), bg="#cbd5e1", fg="#1e293b",
-                                 activebackground="#94a3b8", activeforeground="#1e293b", relief="flat", bd=0, padx=16, pady=10, cursor="hand2", command=toggle_profile_dropdown)
-profile_dropdown_btn.pack(side="left", padx=(0, 10))
+profile_dropdown_btn = tk.Button(sched_row1, text="Setting A (Crop Stage 1)▼", font=("Helvetica", 11, "bold"), bg="#cbd5e1", fg="#1e293b",
+                                 activebackground="#94a3b8", activeforeground="#1e293b", relief="flat", bd=0, padx=12, pady=6, cursor="hand2", command=toggle_profile_dropdown)
+profile_dropdown_btn.pack(side="left", padx=(0, 5))
 
-# --- 3. PRESET LIBRARY DROPDOWN (MIND.PY STYLE) ---
-tk.Label(sched_top_ctrl, text="Preset Library:", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack(side="left", padx=(5, 4))
+# --- 3. PRESET LIBRARY DROPDOWN (MIND.PY STYLE - LINE 2 CENTERED) ---
+tk.Label(sched_row2, text="Preset Library:", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack(side="left", padx=(5, 4))
 
 def update_preset_dropdown_text():
     load_crop_programs()
     count = len(crop_programs)
-    preset_dropdown_btn.config(text=f"📋 Presets ({count}/20 Saved)  ▼")
+    preset_dropdown_btn.config(text=f" Presets ({count}/20 Saved)▼")
 
 def toggle_preset_dropdown():
     global sensor_dropdown_open, profile_dropdown_open, preset_dropdown_open
@@ -1379,7 +1393,7 @@ def toggle_preset_dropdown():
         for w in preset_menu_frame.winfo_children(): w.destroy()
         p_items = list(crop_programs.items())
         if not p_items:
-            tk.Label(preset_menu_frame, text="No Saved Presets Found", font=("Helvetica", 12, "bold"), fg="#64748b", bg="white", padx=15, pady=12).pack()
+            tk.Label(preset_menu_frame, text="No Saved Presets Found", font=("Helvetica", 11, "bold"), fg="#64748b", bg="white", padx=12, pady=10).pack()
         else:
             for idx, (p_name, p_data) in enumerate(p_items):
                 item_f = tk.Frame(preset_menu_frame, bg="white")
@@ -1392,7 +1406,7 @@ def toggle_preset_dropdown():
                     save_setpoints()
                     preset_menu_frame.place_forget()
                     preset_dropdown_open = False
-                    preset_dropdown_btn.config(text=f"📋 {name}  ▼")
+                    preset_dropdown_btn.config(text=f"{name} ▼")
                     load_schedule_form()
                     messagebox.showinfo("Preset Loaded", f"Applied preset: '{name}' to {get_sensor_display_name(skey)}!")
 
@@ -1402,24 +1416,24 @@ def toggle_preset_dropdown():
                     toggle_preset_dropdown()
                     update_preset_dropdown_text()
 
-                btn_apply = tk.Button(item_f, text=f"📋 {p_name}", font=("Helvetica", 13, "bold"), bg="white", fg="#1e293b",
-                                      activebackground="#0284c7", activeforeground="white", relief="flat", bd=0, anchor="w", padx=15, pady=12, cursor="hand2", command=_apply)
+                btn_apply = tk.Button(item_f, text=f"{p_name}", font=("Helvetica", 11, "bold"), bg="white", fg="#1e293b",
+                                      activebackground="#0284c7", activeforeground="white", relief="flat", bd=0, anchor="w", padx=12, pady=10, cursor="hand2", command=_apply)
                 btn_apply.pack(side="left", fill="x", expand=True)
 
-                btn_del = tk.Button(item_f, text="✖", font=("Helvetica", 14, "bold"), bg="#dc2626", fg="white",
-                                    relief="flat", bd=0, padx=16, pady=14, cursor="hand2", command=_delete)
+                btn_del = tk.Button(item_f, text="✖", font=("Helvetica", 12, "bold"), bg="#dc2626", fg="white",
+                                    relief="flat", bd=0, padx=12, pady=10, cursor="hand2", command=_delete)
                 btn_del.pack(side="right")
 
                 if idx < len(p_items) - 1:
                     tk.Frame(preset_menu_frame, bg="#cbd5e1", height=1).pack(fill="x")
 
-        preset_menu_frame.place(in_=preset_dropdown_btn, relx=0.0, rely=1.0, y=2, width=340)
+        preset_menu_frame.place(in_=preset_dropdown_btn, relx=0.0, rely=1.0, y=2, width=300)
         preset_menu_frame.lift()
         preset_dropdown_open = True
 
-preset_dropdown_btn = tk.Button(sched_top_ctrl, text="📋 Presets (0/20 Saved)  ▼", font=("Helvetica", 14, "bold"), bg="#cbd5e1", fg="#1e293b",
-                                activebackground="#94a3b8", activeforeground="#1e293b", relief="flat", bd=0, padx=16, pady=10, cursor="hand2", command=toggle_preset_dropdown)
-preset_dropdown_btn.pack(side="left", padx=(0, 10))
+preset_dropdown_btn = tk.Button(sched_row2, text="Presets (0/20 Saved)  ▼", font=("Helvetica", 11, "bold"), bg="#cbd5e1", fg="#1e293b",
+                                activebackground="#94a3b8", activeforeground="#1e293b", relief="flat", bd=0, padx=12, pady=6, cursor="hand2", command=toggle_preset_dropdown)
+preset_dropdown_btn.pack(side="left", padx=(0, 12))
 
 def save_current_as_preset_inline():
     load_crop_programs()
@@ -1434,13 +1448,13 @@ def save_current_as_preset_inline():
             crop_programs[name] = sp.get("settings", {})
             save_crop_programs()
             update_preset_dropdown_text()
-            preset_dropdown_btn.config(text=f"📋 {name}  ▼")
+            preset_dropdown_btn.config(text=f"{name} ▼")
             messagebox.showinfo("Saved", f"Saved schedule as preset: '{name}'")
 
     open_almora_keypad("Enter Preset Program Name", default_name, on_confirm_name, is_alphanumeric=True)
 
-btn_save_preset = tk.Button(sched_top_ctrl, text="💾 SAVE PRESET", font=("Helvetica", 14, "bold"), bg="#2e7d32", fg="white",
-                            activebackground="#15803d", activeforeground="white", relief="flat", bd=0, padx=16, pady=10, cursor="hand2", command=save_current_as_preset_inline)
+btn_save_preset = tk.Button(sched_row2, text="SAVE PRESET", font=("Helvetica", 11, "bold"), bg="#2e7d32", fg="white",
+                            activebackground="#15803d", activeforeground="white", relief="flat", bd=0, padx=14, pady=6, cursor="hand2", command=save_current_as_preset_inline)
 btn_save_preset.pack(side="left", padx=5)
 
 def on_click_outside_sched_dropdowns(event):
@@ -1497,7 +1511,7 @@ tk.Button(date_frame, text="EDIT", font=BTN_FONT_INLINE, bg="#cbd5e1", fg="#1e29
 light_frame = tk.Frame(sched_scroll_inner, bg="#f8fafc", bd=1, relief="solid")
 light_frame.pack(pady=6, anchor="center", padx=10)
 
-tk.Label(light_frame, text="💡 PHOTOPERIOD LIGHTING CYCLE:", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="#f8fafc").grid(row=0, column=0, padx=8, pady=4)
+tk.Label(light_frame, text=" PHOTOPERIOD LIGHTING CYCLE:", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="#f8fafc").grid(row=0, column=0, padx=8, pady=4)
 
 tk.Label(light_frame, text="Light ON:", font=("Helvetica", 11, "bold"), fg="#334155", bg="#f8fafc").grid(row=0, column=1, padx=4, pady=4)
 lbl_val_pon = tk.Label(light_frame, text="06:00 AM", font=("Helvetica", 11, "bold"), bg="#ffffff", fg="#1e293b", width=10, relief="sunken", bd=1)
@@ -1556,7 +1570,7 @@ def save_current_schedule_to_file(show_feedback=True):
         if show_feedback and 'btn_save_sched' in globals() and btn_save_sched.winfo_exists():
             orig_txt = btn_save_sched.cget("text")
             orig_bg = btn_save_sched.cget("bg")
-            btn_save_sched.config(text="SAVED ✅", bg="#15803d")
+            btn_save_sched.config(text="SAVED ", bg="#15803d")
             def _reset_btn():
                 try:
                     if btn_save_sched.winfo_exists():
@@ -1607,61 +1621,65 @@ def delete_time_slot(slot_idx):
 btn_save_sched = tk.Button(sched_btn_frame, text="SAVE SCHEDULE", font=BTN_FONT_MAIN, bg="#2e7d32", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: save_current_schedule_to_file(True))
 btn_save_sched.pack(side="left", padx=10)
 
-tk.Button(sched_btn_frame, text="➕ ADD TIME SLOT", font=BTN_FONT_MAIN, bg="#ea580c", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=add_new_time_slot).pack(side="left", padx=10)
+tk.Button(sched_btn_frame, text="ADD TIME SLOT", font=BTN_FONT_MAIN, bg="#ea580c", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=add_new_time_slot).pack(side="left", padx=10)
 tk.Button(sched_btn_frame, text="CANCEL / BACK", font=BTN_FONT_MAIN, bg="#64748b", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: show(frame_main)).pack(side="left", padx=10)
 
 grids_wrapper = tk.Frame(sched_scroll_inner, bg="white")
 grids_wrapper.pack(pady=2, anchor="center")
 
-temp_grid_frame = tk.LabelFrame(grids_wrapper, text=" 🌡️ TEMPERATURE SCHEDULE GRID ", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="white", bd=2, relief="solid", highlightbackground="#94a3b8")
+temp_grid_frame = tk.LabelFrame(grids_wrapper, text="TEMPERATURE SCHEDULE GRID ", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="white", bd=2, relief="solid", highlightbackground="#94a3b8")
 temp_grid_frame.pack(side="top", anchor="center", padx=8, pady=3)
 
-humi_grid_frame = tk.LabelFrame(grids_wrapper, text=" 💧 HUMIDITY SCHEDULE GRID ", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="white", bd=2, relief="solid", highlightbackground="#94a3b8")
+humi_grid_frame = tk.LabelFrame(grids_wrapper, text="HUMIDITY SCHEDULE GRID ", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="white", bd=2, relief="solid", highlightbackground="#94a3b8")
 humi_grid_frame.pack(side="top", anchor="center", padx=8, pady=3)
 
 def edit_slot_popup(idx):
     l_fname, l_tstart, l_tstop, l_tset_val, l_tmax_val, l_tmin_val, l_hset_val, l_hmax_val, l_hmin_val = sched_entries[idx]
     
     pop = tk.Toplevel(root)
-    pop.configure(bg="white")
+    make_modal_fullscreen(pop)
 
-    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-    pop.geometry(f"{sw}x{sh}+0+0")
-    try: pop.attributes("-fullscreen", True)
-    except Exception: pass
-    pop.grab_set()
-    pop.focus_force()
+    pop_main = tk.Frame(pop, bg="white")
+    pop_main.pack(fill="both", expand=True, pady=(60, 45))
 
     add_logo(pop)
     add_top_left_exit(pop)
     add_bottom_right_clock(pop)
 
-    header = tk.Frame(pop, bg="white")
-    header.pack(pady=(45, 10))
+    header = tk.Frame(pop_main, bg="white")
+    header.pack(pady=(5, 5))
     tk.Label(header, text=f"EDIT SCHEDULE FRAME {idx+1}", font=big, fg="#1565c0", bg="white").pack()
 
-    body = tk.Frame(pop, bg="white")
-    body.pack(pady=15)
+    body = tk.Frame(pop_main, bg="white")
+    body.pack(pady=6, anchor="center")
+
+    col1_f = tk.Frame(body, bg="white")
+    col1_f.pack(side="left", padx=10, anchor="n")
+
+    col2_f = tk.Frame(body, bg="white")
+    col2_f.pack(side="left", padx=10, anchor="n")
 
     items = [
         ("Frame Name", l_fname, True),
-        ("Start Time (12h AM/PM)", l_tstart, False),
-        ("Stop Time (12h AM/PM)", l_tstop, False),
-        ("T SETPOINT (°C)", l_tset_val, False),
-        ("T MAX (ON °C)", l_tmax_val, False),
-        ("T MIN (OFF °C)", l_tmin_val, False),
-        ("H SETPOINT (%)", l_hset_val, False),
-        ("H MAX (ON %)", l_hmax_val, False),
-        ("H MIN (OFF %)", l_hmin_val, False),
+        ("Start Time ", l_tstart, False),
+        ("Stop Time ", l_tstop, False),
+        ("T SETPOINT ", l_tset_val, False),
+        ("T MAX ", l_tmax_val, False),
+        ("T MIN ", l_tmin_val, False),
+        ("H SETPOINT ", l_hset_val, False),
+        ("H MAX ", l_hmax_val, False),
+        ("H MIN ", l_hmin_val, False),
     ]
 
-    for label, v_lbl, is_alpha in items:
-        r_f = tk.Frame(body, bg="white")
-        r_f.pack(fill="x", pady=4)
-        tk.Label(r_f, text=f"{label}:", font=("Helvetica", 12, "bold"), fg="#1e293b", bg="white", width=22, anchor="e").pack(side="left", padx=8)
+    for i, (label, v_lbl, is_alpha) in enumerate(items):
+        parent_col = col1_f if i < 5 else col2_f
+        r_f = tk.Frame(parent_col, bg="white")
+        r_f.pack(fill="x", pady=3)
         
-        val_display = tk.Label(r_f, text=v_lbl.cget("text"), font=("Helvetica", 12, "bold"), bg="#f1f5f9", fg="#1565c0", width=16, relief="sunken", bd=1)
-        val_display.pack(side="left", padx=8)
+        tk.Label(r_f, text=f"{label}:", font=("Helvetica", 10, "bold"), fg="#1e293b", bg="white", width=20, anchor="e").pack(side="left", padx=3)
+        
+        val_display = tk.Label(r_f, text=v_lbl.cget("text"), font=("Helvetica", 10, "bold"), bg="#f1f5f9", fg="#1565c0", width=12, relief="sunken", bd=1)
+        val_display.pack(side="left", padx=3, ipady=2)
 
         def make_callback(orig_label, target_disp):
             def cb(new_val):
@@ -1677,7 +1695,7 @@ def edit_slot_popup(idx):
             font=BTN_FONT_INLINE,
             bg="#cbd5e1",
             fg="#1e293b",
-            width=8,
+            width=7,
             height=2,
             relief="flat",
             bd=0,
@@ -1685,7 +1703,7 @@ def edit_slot_popup(idx):
             command=lambda lbl=val_display, cb=callback, title=label, alpha=is_alpha: open_almora_keypad(
                 f"Edit {title}", lbl.cget("text"), lambda v: (lbl.config(text=format_time_12h(v) if "Time" in title else v), cb(format_time_12h(v) if "Time" in title else v)), is_alphanumeric=alpha
             )
-        ).pack(side="left", padx=5)
+        ).pack(side="left", padx=3)
 
     def save_and_close_slot():
         save_current_schedule_to_file()
@@ -1696,11 +1714,11 @@ def edit_slot_popup(idx):
         pop.destroy()
         load_schedule_form()
 
-    btn_action_f = tk.Frame(pop, bg="white")
-    btn_action_f.pack(side="bottom", pady=25)
+    btn_action_f = tk.Frame(pop_main, bg="white")
+    btn_action_f.pack(side="bottom", pady=(10, 15))
 
     tk.Button(btn_action_f, text="SAVE & APPLY", font=BTN_FONT_MAIN, bg="#2e7d32", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=save_and_close_slot).pack(side="left", padx=15)
-    tk.Button(btn_action_f, text="CANCEL / CLOSE", font=BTN_FONT_MAIN, bg="#64748b", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=cancel_slot).pack(side="left", padx=15)
+    tk.Button(btn_action_f, text="CANCEL/CLOSE", font=BTN_FONT_MAIN, bg="#64748b", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=cancel_slot).pack(side="left", padx=15)
 
 def load_schedule_form_refresh():
     load_schedule_form()
@@ -1738,9 +1756,9 @@ def load_schedule_form():
         temp_inner.columnconfigure(c, weight=1)
         humi_inner.columnconfigure(c, weight=1)
 
-    card_title_font = font.Font(size=11, weight="bold")
-    card_time_font = font.Font(size=10, weight="bold")
-    card_val_font = font.Font(size=10, weight="bold")
+    card_title_font = font.Font(size=12, weight="bold")
+    card_time_font = font.Font(size=11, weight="bold")
+    card_val_font = font.Font(size=11, weight="bold")
 
     num_slots = len(time_slots)
 
@@ -1775,43 +1793,43 @@ def load_schedule_form():
         c_pos = (idx % 3) * 2
 
         # CARD FOR TEMP
-        card_t = tk.Frame(temp_inner, bg="#f8fafc", bd=2, relief="solid", highlightbackground="#cbd5e1", width=230, height=170)
+        card_t = tk.Frame(temp_inner, bg="#f8fafc", bd=2, relief="solid", highlightbackground="#cbd5e1", width=240, height=170)
         card_t.pack_propagate(False)
         card_t.grid(row=r_pos, column=c_pos, columnspan=2, padx=8, pady=6)
 
-        tk.Label(card_t, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc").pack(pady=(4,1))
-        tk.Label(card_t, text=f"⏰ {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc").pack(pady=1)
-        tk.Label(card_t, text=f"TARGET: {t_set_v:.1f}°C", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(pady=1)
-        tk.Label(card_t, text=f"ON: {t_max_v:.1f}°C | OFF: {t_min_v:.1f}°C", font=card_val_font, fg="#475569", bg="#f8fafc").pack(pady=1)
+        tk.Label(card_t, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc").pack(pady=(6,2))
+        tk.Label(card_t, text=f" {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc").pack(pady=2)
+        tk.Label(card_t, text=f"TARGET: {t_set_v:.1f}°C", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(pady=2)
+        tk.Label(card_t, text=f"ON: {t_max_v:.1f}°C | OFF: {t_min_v:.1f}°C", font=card_val_font, fg="#475569", bg="#f8fafc").pack(pady=2)
 
-        t_btn_f = tk.Frame(card_t, bg="#f8fafc"); t_btn_f.pack(pady=(2, 1))
-        tk.Button(t_btn_f, text="EDIT FRAME", font=BTN_FONT_CARD, bg="#cbd5e1", fg="#1e293b", width=12, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=2)
-        tk.Button(t_btn_f, text="DELETE", font=BTN_FONT_CARD, bg="#dc2626", fg="white", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: delete_time_slot(i)).pack(side="left", padx=2)
+        t_btn_f = tk.Frame(card_t, bg="#f8fafc"); t_btn_f.pack(pady=(4, 2))
+        tk.Button(t_btn_f, text="EDIT FRAME", font=BTN_FONT_CARD, bg="#cbd5e1", fg="#1e293b", width=12, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=3)
+        tk.Button(t_btn_f, text="DELETE", font=BTN_FONT_CARD, bg="#dc2626", fg="white", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: delete_time_slot(i)).pack(side="left", padx=3)
 
         # CARD FOR HUMI
-        card_h = tk.Frame(humi_inner, bg="#f8fafc", bd=2, relief="solid", highlightbackground="#cbd5e1", width=230, height=170)
+        card_h = tk.Frame(humi_inner, bg="#f8fafc", bd=2, relief="solid", highlightbackground="#cbd5e1", width=240, height=170)
         card_h.pack_propagate(False)
         card_h.grid(row=r_pos, column=c_pos, columnspan=2, padx=8, pady=6)
 
-        tk.Label(card_h, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc").pack(pady=(4,1))
-        tk.Label(card_h, text=f"⏰ {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc").pack(pady=1)
-        tk.Label(card_h, text=f"TARGET: {h_set_v:.1f}%", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(pady=1)
-        tk.Label(card_h, text=f"ON: {h_max_v:.1f}% | OFF: {h_min_v:.1f}%", font=card_val_font, fg="#475569", bg="#f8fafc").pack(pady=1)
+        tk.Label(card_h, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc").pack(pady=(6,2))
+        tk.Label(card_h, text=f" {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc").pack(pady=2)
+        tk.Label(card_h, text=f"TARGET: {h_set_v:.1f}%", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(pady=2)
+        tk.Label(card_h, text=f"ON: {h_max_v:.1f}% | OFF: {h_min_v:.1f}%", font=card_val_font, fg="#475569", bg="#f8fafc").pack(pady=2)
 
-        h_btn_f = tk.Frame(card_h, bg="#f8fafc"); h_btn_f.pack(pady=(2, 1))
-        tk.Button(h_btn_f, text="EDIT FRAME", font=BTN_FONT_CARD, bg="#cbd5e1", fg="#1e293b", width=12, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=2)
-        tk.Button(h_btn_f, text="DELETE", font=BTN_FONT_CARD, bg="#dc2626", fg="white", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: delete_time_slot(i)).pack(side="left", padx=2)
+        h_btn_f = tk.Frame(card_h, bg="#f8fafc"); h_btn_f.pack(pady=(4, 2))
+        tk.Button(h_btn_f, text="EDIT FRAME", font=BTN_FONT_CARD, bg="#cbd5e1", fg="#1e293b", width=12, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=3)
+        tk.Button(h_btn_f, text="DELETE", font=BTN_FONT_CARD, bg="#dc2626", fg="white", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: delete_time_slot(i)).pack(side="left", padx=3)
 
 def open_schedule_editor(skey="S1"):
     dname = get_sensor_display_name(skey)
     skey_combo.set(skey)
-    sensor_dropdown_btn.config(text=f"{skey} — {dname}  ▼")
+    sensor_dropdown_btn.config(text=f"{skey} — {dname}▼")
     setting_combo.set("Setting A")
     sp = get_setpoints(skey)
     settings_dict = sp.get("settings", {})
     p_name = settings_dict.get("Setting A", {}).get("name", "Setting A")
     btn_txt = f"Setting A ({p_name})" if p_name != "Setting A" else "Setting A"
-    profile_dropdown_btn.config(text=f"{btn_txt}  ▼")
+    profile_dropdown_btn.config(text=f"{btn_txt}▼")
     show(frame_schedule)
     load_schedule_form()
 
@@ -1872,7 +1890,7 @@ def quit_app():
 root.protocol("WM_DELETE_WINDOW", quit_app)
 
 if __name__ == "__main__":
-    print(f"--- STARTING ALMORA COLD ROOM MONITOR & CONTROLLER: {DEVICE_NAME} ---")
+    print(f" STARTING ALMORA COLD ROOM MONITOR & CONTROLLER: {DEVICE_NAME} ")
     load_config()
     load_crop_programs()
     load_setpoints()

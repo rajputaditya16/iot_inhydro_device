@@ -35,11 +35,11 @@ if os.path.exists(OLD_FILE):
     except Exception: pass
 
 # Strict Fixed Persistent Serial By-Path Links (Zero /dev/ttyUSB* fallback)
-SERIAL_PORT_WATER = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0"  # Dedicated Combined EC & pH Port
+SERIAL_PORT_WATER = "/dev/serial/by-path/platform-xhci-hcd.3.auto-usb-0:1:1.0-port0"  # Dedicated Combined EC & pH Port
 SERIAL_PORT_EC    = SERIAL_PORT_WATER
 SERIAL_PORT_PH    = SERIAL_PORT_WATER
-SERIAL_PORT_MD02  = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0"
-SERIAL_PORT_RELAY = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
+SERIAL_PORT_MD02  = "/dev/serial/by-path/platform-xhci-hcd.4.auto-usb-0:1:1.0-port0"
+SERIAL_PORT_RELAY = "/dev/serial/by-path/platform-fe3a0000.usb-usb-0:1:1.0-port0"
 
 DEVICE_ID_EC   = 31
 DEVICE_ID_PH   = 32
@@ -95,27 +95,29 @@ class ModbusRelay:
         self.is_active = False
         send_modbus_relay_cmd(self.channel, False)
 
-# Modbus RTU Relays (Slave ID 1, Channels 0-12)
+# Modbus RTU Relays (Slave ID 1, Channels 0-13)
 relay_ec1        = ModbusRelay(0, "EC1 ")
 relay_ec2        = ModbusRelay(1, "EC2 ")
 relay_ph         = ModbusRelay(2, "pH ")
-relay_solenoid   = ModbusRelay(12, "S-Tank Solenoid")
-relay_fan1       = ModbusRelay(3, "1. Fan ")
-relay_fan2       = ModbusRelay(4, "2. Fan ")
-relay_pad        = ModbusRelay(5, "Cooling Pad ")
-relay_fogger     = ModbusRelay(6, "Fogger ")
-relay_acf        = ModbusRelay(7, "Air Circulation Fan")
-relay_sprinkler  = ModbusRelay(8, "Sprinkler")
-relay_irrigation = ModbusRelay(9, "Irrigation ")
-relay_timer1     = ModbusRelay(10, "Cyclic Timer 1")
-relay_timer2     = ModbusRelay(11, "Cyclic Timer 2")
+# Channel 3 (Physical Relay 4) left BLANK / UNUSED
+relay_blank      = ModbusRelay(3, "Blank ")
+relay_fan1       = ModbusRelay(4, "1. Fan ")
+relay_fan2       = ModbusRelay(5, "2. Fan ")
+relay_pad        = ModbusRelay(6, "Cooling Pad ")
+relay_fogger     = ModbusRelay(7, "Fogger ")
+relay_acf        = ModbusRelay(8, "Air Circulation Fan")
+relay_sprinkler  = ModbusRelay(9, "Sprinkler")
+relay_irrigation = ModbusRelay(10, "Irrigation ")
+relay_timer1     = ModbusRelay(11, "Cyclic Timer 1")
+relay_timer2     = ModbusRelay(12, "Cyclic Timer 2")
+relay_solenoid   = ModbusRelay(13, "S-Tank Solenoid")
 
 # Alias for backwards compatibility
 relay_temp = relay_fan1
 relay_humi = relay_fogger
 
 def all_relays_off():
-    for r in [relay_ec1, relay_ec2, relay_ph, relay_solenoid, relay_fan1, relay_fan2, relay_pad, relay_fogger, relay_acf, relay_sprinkler, relay_irrigation, relay_timer1, relay_timer2]:
+    for r in [relay_ec1, relay_ec2, relay_ph, relay_blank, relay_fan1, relay_fan2, relay_pad, relay_fogger, relay_acf, relay_sprinkler, relay_irrigation, relay_timer1, relay_timer2, relay_solenoid]:
         try: r.off()
         except: pass
 
