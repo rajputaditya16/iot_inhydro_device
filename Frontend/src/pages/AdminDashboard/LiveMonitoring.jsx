@@ -1,15 +1,14 @@
-import { useState, useEffect, useCallback, useRef, useMemo, memo, useTransition } from 'react';
+import { useState, useEffect, useCallback, useRef} from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Thermometer, Droplets, Zap, FlaskConical, RefreshCw, Clock, Radio, AlertTriangle, Cpu, ChevronDown, Activity, ArrowUpDown } from 'lucide-react';
+import { Thermometer, Droplets, Zap, FlaskConical, RefreshCw, Clock, Radio, Cpu, ChevronDown, Activity, ArrowUpDown } from 'lucide-react';
 import LiveChart from '../../components/LiveChart';
 import { SkeletonCard } from '../../components/Skeleton';
-import { useAnimatedCounter } from '../../hooks/useAnimatedCounter';
+
 import { getStatusBg, getStatusDot, getMetricStatus, getMetricColor, formatTimestamp } from '../../utils/helpers';
 
-const BigMetric = memo(({ label, value, unit, icon: Icon, type }) => {
+const BigMetric = ({ label, value, unit, icon: Icon, type }) => {
   const safeValue = Number.isFinite(value) ? value : 0;
-  const animated = useAnimatedCounter(safeValue);
   const status = getMetricStatus(type, safeValue);
   const color = getMetricColor(status);
 
@@ -21,8 +20,10 @@ const BigMetric = memo(({ label, value, unit, icon: Icon, type }) => {
   };
 
   return (
-    <div
-      className={`rounded-2xl border p-4 ${bgColorMap[color] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm transition-colors`}
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      className={`rounded-2xl border p-4 ${bgColorMap[color] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm`}
     >
       <div className="flex items-center gap-2.5">
         <div className={`rounded-lg p-1.5 ${color} bg-white/5`}>
@@ -32,7 +33,7 @@ const BigMetric = memo(({ label, value, unit, icon: Icon, type }) => {
       </div>
       <div className="mt-3 flex items-baseline gap-1.5">
         <span className={`text-2xl font-bold tabular-nums ${color}`}>
-          {safeValue === 0 ? '--' : animated.toFixed(1)}
+          {safeValue === 0 ? '--' : (type === 'ec' ? safeValue : safeValue.toFixed(1))}
         </span>
         <span className="text-sm text-slate-500">{unit}</span>
       </div>
@@ -40,20 +41,12 @@ const BigMetric = memo(({ label, value, unit, icon: Icon, type }) => {
         <div className={`h-1.5 w-1.5 rounded-full ${status === 'normal' ? 'bg-emerald-400' : status === 'warning' ? 'bg-yellow-400' : status === 'critical' ? 'bg-red-400' : 'bg-slate-500'}`} />
         <span className="text-xs text-slate-500 capitalize">{status}</span>
       </div>
-    </div>
+    </motion.div>
   );
-}, (prevProps, nextProps) => (
-  prevProps.label === nextProps.label &&
-  prevProps.value === nextProps.value &&
-  prevProps.unit === nextProps.unit &&
-  prevProps.type === nextProps.type
-));
-
-BigMetric.displayName = 'BigMetric';
+};
 
 const LiveMonitoring = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [, startTransition] = useTransition();
   const [loading, setLoading] = useState(true);
   const [initLoading, setInitLoading] = useState(true);
 
@@ -68,7 +61,15 @@ const LiveMonitoring = () => {
   const [chartData, setChartData] = useState({});
   const [hasNewData, setHasNewData] = useState(true);
   const previousMetricsRef = useRef(null);
-  const lastTelemetryTimeRef = useRef(0);
+  const newDataTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (newDataTimeoutRef.current) {
+        clearTimeout(newDataTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // ── Multi-Sensor Live States ────────────────────────────────────────────────
   const [multiSensorData, setMultiSensorData] = useState({});
@@ -107,6 +108,16 @@ const LiveMonitoring = () => {
         const data = await res.json();
         if (data.success) {
           setAllDevices(data.data);
+          // Auto-select the first device with ThingSpeak config if none is selected
+          if (!selectedDeviceId && data.data.length > 0) {
+            const firstConfigured = data.data.find(
+              (d) => (d.thingspeak?.channelId || d.tempChannelId)
+            ) || data.data[0];
+            if (firstConfigured) {
+              setSelectedDeviceId(firstConfigured._id);
+              setSearchParams({ device: firstConfigured._id });
+            }
+          }
         }
       } catch (err) {
         console.error('Failed to fetch devices', err);
@@ -122,34 +133,30 @@ const LiveMonitoring = () => {
   const deviceMeta = allDevices.find(
     (d) => d._id === selectedDeviceId || d.id === selectedDeviceId
   );
-
-  const isDeviceOffline = selectedDeviceId ? (liveDevice ? liveDevice.status === 'offline' : (deviceMeta?.status === 'offline')) : false;
   // ── Handle device change from dropdown ─────────────────────────────────────
   const handleDeviceChange = (newId) => {
-    // 1. Update selected device immediately for 0ms dropdown selection feedback
     setSelectedDeviceId(newId);
+    setSearchParams({ device: newId });
+    // Reset live state
+    setLiveDevice(null);
+    setLoading(true);
+    setHasNewData(true);
+    previousMetricsRef.current = null;
+    setChartData({});
+    setActiveMetrics({});
+    setActiveFields([]);
+    // Clear dual-room MQTT states
+    setOfficeControlData({ 1: null, 2: null, 3: null });
+    setOfficeControlHistory({
+      1: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
+      2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
+      3: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
+    });
 
-    // 2. Wrap heavy data resets & URL search param updates in non-blocking transition
-    startTransition(() => {
-      setSearchParams({ device: newId }, { replace: true });
-      setLiveDevice(null);
-      setLoading(true);
-      setHasNewData(true);
-      previousMetricsRef.current = null;
-      lastTelemetryTimeRef.current = 0;
-      setChartData({});
-      setActiveMetrics({});
-      setActiveFields([]);
-      setOfficeControlData({ 1: null, 2: null, 3: null });
-      setOfficeControlHistory({
-        1: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
-        2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
-        3: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] }
-      });
-      setControllingData(null);
-      setControllingHistory({
-        water_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: []
-      });
+    // Clear controlling MQTT states
+    setControllingData(null);
+    setControllingHistory({
+      water_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: []
     });
   };
 
@@ -178,7 +185,7 @@ const LiveMonitoring = () => {
 
         // Parse dynamic fields configuration from channel
         let fields = Object.keys(channel)
-          .filter((k) => k.startsWith('field') && channel[k])
+          .filter((k) => k.startsWith('field') && channel[k] && !channel[k].startsWith('Field '))
           .map((k) => ({
             key: k,
             label: channel[k],
@@ -186,7 +193,7 @@ const LiveMonitoring = () => {
           }));
 
         if (fields.length === 0) {
-          const isMonitType = deviceMeta?.deviceType === 'monit' || deviceMeta?.deviceType === 'dosing';
+          const isMonitType = deviceMeta?.deviceType === 'monit' || deviceMeta?.deviceType === 'monnet' || deviceMeta?.deviceType === 'dosing';
           fields = isMonitType ? [
             { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
             { key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
@@ -202,14 +209,12 @@ const LiveMonitoring = () => {
 
         setActiveFields(fields);
 
-        const recentlyStreamed = (Date.now() - lastTelemetryTimeRef.current) < 35000;
-
         if (!latestFeed) {
           setLiveDevice({
             id: selectedDeviceId,
             name: deviceMeta?.name || 'Live Sensor Data',
             location: deviceMeta?.location || 'Private Broker Feed',
-            status: recentlyStreamed ? 'online' : (deviceMeta?.status || 'offline'),
+            status: deviceMeta?.status || 'online',
             lastUpdated: deviceMeta?.lastUpdated || new Date().toISOString(),
           });
           setHasNewData(false);
@@ -219,8 +224,8 @@ const LiveMonitoring = () => {
 
         const lastUpdatedTime = new Date(latestFeed.created_at || Date.now());
         const diffMs = Date.now() - lastUpdatedTime.getTime();
-        // 5 minutes threshold or recent stream
-        const isOnline = recentlyStreamed || (diffMs < 5 * 60 * 1000);
+        // 5 minutes threshold
+        const isOnline = diffMs < 5 * 60 * 1000;
 
         const device = {
           id: selectedDeviceId,
@@ -283,26 +288,6 @@ const LiveMonitoring = () => {
     }
   }, [fetchLiveData, deviceMeta, selectedDeviceId]);
 
-  // ── Watchdog: Automatically mark device status offline if telemetry stops for >35 seconds ──
-  useEffect(() => {
-    if (!selectedDeviceId) return;
-
-    const watchdog = setInterval(() => {
-      const now = Date.now();
-      const lastTime = lastTelemetryTimeRef.current;
-      const isStale = lastTime > 0 ? (now - lastTime > 35000) : (deviceMeta?.status === 'offline');
-
-      if (isStale) {
-        setLiveDevice(prev => {
-          if (!prev || prev.status === 'offline') return prev;
-          return { ...prev, status: 'offline' };
-        });
-      }
-    }, 5000);
-
-    return () => clearInterval(watchdog);
-  }, [selectedDeviceId, deviceMeta]);
-
   // ── Step 3: Private Broker SSE Real-Time Stream for All Devices ─────────────────
   useEffect(() => {
     const isMultiSensor = deviceMeta?.deviceType === 'multi_sensor';
@@ -322,6 +307,60 @@ const LiveMonitoring = () => {
     }
 
     setLoading(true);
+
+    const activeTimeouts = {};
+    const throttles = {};
+
+    const throttle = (key, func, limit) => {
+      if (!throttles[key]) {
+        let lastRan = 0;
+        let lastArgs = null;
+
+        const execute = (args) => {
+          func(...args);
+          lastRan = Date.now();
+          if (activeTimeouts[key]) {
+            clearTimeout(activeTimeouts[key]);
+            delete activeTimeouts[key];
+          }
+          lastArgs = null;
+        };
+
+        throttles[key] = function(...args) {
+          const now = Date.now();
+          const timeSinceLastRan = now - lastRan;
+
+          if (timeSinceLastRan >= limit) {
+            if (activeTimeouts[key]) {
+              clearTimeout(activeTimeouts[key]);
+              delete activeTimeouts[key];
+            }
+            execute(args);
+          } else {
+            lastArgs = args;
+            if (!activeTimeouts[key]) {
+              activeTimeouts[key] = setTimeout(() => {
+                if (lastArgs) {
+                  execute(lastArgs);
+                }
+              }, limit - timeSinceLastRan);
+            }
+          }
+        };
+      }
+      return throttles[key];
+    };
+
+    const getThrottleKey = (topic) => {
+      if (isOfficeControl) {
+        const parts = topic.split('/');
+        const roomPart = parts.find(p => p.startsWith('room'));
+        return roomPart || 'room1';
+      }
+      if (isMultiSensor) return 'multisensor';
+      if (isControlling) return 'controlling';
+      return 'standard';
+    };
 
     // ── Helper to process incoming packet payload ────────────────────────────────
     const processTelemetryPacket = (topic, payload) => {
@@ -417,7 +456,7 @@ const LiveMonitoring = () => {
         const roomTempVal = tel.field5 !== undefined ? parseFloat(tel.field5) : (tel.room_temp !== undefined ? parseFloat(tel.room_temp) : 0);
         const roomHumiVal = tel.field6 !== undefined ? parseFloat(tel.field6) : (tel.room_humi !== undefined ? parseFloat(tel.room_humi) : 0);
 
-        const isMonitType = deviceMeta?.deviceType === 'monit' || deviceMeta?.deviceType === 'dosing';
+        const isMonitType = deviceMeta?.deviceType === 'monit' || deviceMeta?.deviceType === 'monnet' || deviceMeta?.deviceType === 'dosing';
 
         const currentMetrics = isMonitType ? {
           field3: ecVal,
@@ -456,7 +495,6 @@ const LiveMonitoring = () => {
         });
       }
 
-      lastTelemetryTimeRef.current = Date.now();
       setLiveDevice({
         id: selectedDeviceId,
         name: deviceMeta?.name || 'Live Sensor Data',
@@ -466,8 +504,15 @@ const LiveMonitoring = () => {
       });
 
       setLoading(false);
+
+      if (newDataTimeoutRef.current) {
+        clearTimeout(newDataTimeoutRef.current);
+      }
       setHasNewData(true);
-      setTimeout(() => setHasNewData(false), 2000);
+      newDataTimeoutRef.current = setTimeout(() => {
+        setHasNewData(false);
+        newDataTimeoutRef.current = null;
+      }, 2000);
     };
 
     // ── 1. Connect to Backend Real-Time SSE Stream (Private Broker Stream) ──
@@ -488,7 +533,8 @@ const LiveMonitoring = () => {
           (dId && pDevId === dId) ||
           (mId && pTopic.includes(mId))
         ) {
-          processTelemetryPacket(packet.topic, packet.data);
+          const key = getThrottleKey(packet.topic);
+          throttle(key, processTelemetryPacket, 1500)(packet.topic, packet.data);
         }
       } catch (e) {
         console.error('SSE packet parse error:', e);
@@ -497,6 +543,7 @@ const LiveMonitoring = () => {
 
     return () => {
       eventSource.close();
+      Object.values(activeTimeouts).forEach(clearTimeout);
     };
   }, [deviceMeta, selectedDeviceId, API_BASE]);
 
@@ -594,19 +641,6 @@ const LiveMonitoring = () => {
 
 
 
-      {/* ── No device selected prompt ───────────────────────────────────── */}
-      {!selectedDeviceId && (
-        <div className="flex flex-col items-center justify-center py-20">
-          <div className="rounded-2xl border border-slate-700/50 bg-slate-800/30 p-8 text-center max-w-md backdrop-blur-sm">
-            <Cpu className="h-12 w-12 text-blue-400 mx-auto mb-4 animate-pulse" />
-            <h3 className="text-lg font-semibold text-white mb-2">Select a Device</h3>
-            <p className="text-sm text-slate-400">
-              Please select a device from the dropdown above to start live real-time monitoring.
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* ── Office Control Dual-Room Live View ───────────────────────────── */}
       {deviceMeta?.deviceType === 'office_control' && (
         <div className="space-y-6">
@@ -634,21 +668,15 @@ const LiveMonitoring = () => {
             {/* Left: 8 Sensor Grid Boxes */}
             <div className="space-y-4 xl:col-span-1">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Live Readings (Room {activeRoomTab})</h3>
-              {!officeControlData[activeRoomTab] && isDeviceOffline ? (
-                <div className="rounded-2xl border border-dashed border-rose-500/30 bg-rose-500/5 p-6 text-center">
-                  <AlertTriangle className="h-8 w-8 text-rose-400 mx-auto mb-2" />
-                  <div className="text-sm font-semibold text-white mb-1">Office Control Device Offline</div>
-                  <div className="text-xs text-slate-400">Device is currently offline or disconnected.</div>
-                </div>
-              ) : !officeControlData[activeRoomTab] && loading ? (
+              {!officeControlData[activeRoomTab] && loading ? (
                 <div className="space-y-4">
-                  {[...Array(4)].map((_, i) => (
+                  {[...Array(8)].map((_, i) => (
                     <SkeletonCard key={i} />
                   ))}
                 </div>
               ) : !officeControlData[activeRoomTab] ? (
                 <div className="rounded-2xl border border-dashed border-slate-700/50 p-6 text-sm text-slate-400 text-center">
-                  <div className="text-green-500 font-medium mb-1">Waiting for Live Device Stream...</div>
+                  <div className="animate-pulse mb-2 text-green-500 font-medium">Waiting for Live Device Stream...</div>
                   <div className="text-xs text-slate-500">Please start control.py on your device to stream real-time data.</div>
                 </div>
               ) : (
@@ -694,14 +722,14 @@ const LiveMonitoring = () => {
                   ) : (
                     <>
                       <BigMetric
-                        label="Soil Temp"
+                        label=" Temp"
                         value={officeControlData[activeRoomTab].soil?.soil_temp}
                         unit="°C"
                         icon={Thermometer}
                         type="temperature"
                       />
                       <BigMetric
-                        label="Soil Moisture"
+                        label=" Moisture"
                         value={officeControlData[activeRoomTab].soil?.moisture}
                         unit="%"
                         icon={Droplets}
@@ -729,11 +757,11 @@ const LiveMonitoring = () => {
                               <div className={`rounded-lg p-1.5 ${ecColor} bg-white/5`}>
                                 <Zap className="h-4 w-4" />
                               </div>
-                              <span className="text-sm font-medium text-slate-400">Soil EC</span>
+                              <span className="text-sm font-medium text-slate-400"> EC</span>
                             </div>
                             <div className="mt-3 flex items-baseline gap-1.5 flex-wrap">
                               <span className={`text-2xl font-bold tabular-nums ${ecColor}`}>
-                                {ecVal != null ? ecVal.toFixed(2) : '--'}
+                                {ecVal != null ? ecVal : '--'}
                               </span>
                               <span className="text-sm text-slate-500">mS/cm</span>
                               {tdsVal != null && (
@@ -750,7 +778,7 @@ const LiveMonitoring = () => {
                         );
                       })()}
                       <BigMetric
-                        label="Soil pH"
+                        label=" pH"
                         value={officeControlData[activeRoomTab].soil?.ph}
                         unit="pH"
                         icon={FlaskConical}
@@ -793,13 +821,9 @@ const LiveMonitoring = () => {
             {/* Right: Real-time Charts */}
             <div className="space-y-4 xl:col-span-2">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Trend Charts</h3>
-              {isDeviceOffline ? (
-                <div className="rounded-2xl border border-dashed border-slate-700/50 bg-slate-800/20 p-8 text-center text-slate-400 text-sm">
-                  Trend charts unavailable while device is offline.
-                </div>
-              ) : !officeControlData[activeRoomTab] && loading ? (
+              {!officeControlData[activeRoomTab] && loading ? (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {[...Array(4)].map((_, i) => (
+                  {[...Array(8)].map((_, i) => (
                     <div key={i} className="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-4">
                       <div className="skeleton mb-4 h-4 w-32 rounded" />
                       <div className="skeleton h-48 w-full rounded-xl" />
@@ -846,25 +870,25 @@ const LiveMonitoring = () => {
                       <LiveChart
                         data={officeControlHistory[activeRoomTab].soil_temp}
                         type="temperature"
-                        title="Soil Temperature Trend"
+                        title=" Temperature Trend"
                         unit="°C"
                       />
                       <LiveChart
                         data={officeControlHistory[activeRoomTab].moisture}
                         type="moisture"
-                        title="Soil Moisture Trend"
+                        title="Moisture Trend"
                         unit="%"
                       />
                       <LiveChart
                         data={officeControlHistory[activeRoomTab].ec}
                         type="ec"
-                        title="Soil EC Trend"
+                        title=" EC Trend"
                         unit="mS/cm"
                       />
                       <LiveChart
                         data={officeControlHistory[activeRoomTab].ph}
                         type="ph"
-                        title="Soil pH Trend"
+                        title=" pH Trend"
                         unit="pH"
                       />
                       <LiveChart
@@ -928,21 +952,15 @@ const LiveMonitoring = () => {
               <div className="space-y-4 xl:col-span-1">
                 <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Live Readings</h3>
 
-                {!controllingData && isDeviceOffline ? (
-                  <div className="rounded-2xl border border-dashed border-rose-500/30 bg-rose-500/5 p-6 text-center">
-                    <AlertTriangle className="h-8 w-8 text-rose-400 mx-auto mb-2" />
-                    <div className="text-sm font-semibold text-white mb-1">Controller Device Offline</div>
-                    <div className="text-xs text-slate-400">Device is currently offline. Start controlling.py to stream telemetry.</div>
-                  </div>
-                ) : !controllingData && loading ? (
+                {!controllingData && loading ? (
                   <div className="space-y-4">
-                    {[...Array(4)].map((_, i) => (
+                    {[...Array(17)].map((_, i) => (
                       <SkeletonCard key={i} />
                     ))}
                   </div>
                 ) : !controllingData ? (
                   <div className="rounded-2xl border border-dashed border-slate-700/50 p-6 text-sm text-slate-400 text-center">
-                    <div className="text-green-500 font-medium mb-1">Waiting for Live Device Stream...</div>
+                    <div className="animate-pulse mb-2 text-green-500 font-medium">Waiting for Live Device Stream...</div>
                     <div className="text-xs text-slate-500">Please start controlling.py on your device to stream real-time data.</div>
                   </div>
                 ) : (
@@ -973,7 +991,7 @@ const LiveMonitoring = () => {
                           </div>
                           <div className="mt-3 flex items-baseline gap-1.5 flex-wrap">
                             <span className={`text-2xl font-bold tabular-nums ${ecColor}`}>
-                              {ecVal != null ? ecVal.toFixed(2) : '--'}
+                              {ecVal != null ? ecVal : '--'}
                             </span>
                             <span className="text-sm text-slate-500">mS/cm</span>
                             {tdsVal != null && (
@@ -1007,13 +1025,9 @@ const LiveMonitoring = () => {
               {/* Right: Real-time Charts */}
               <div className="space-y-4 xl:col-span-2">
                 <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Trend Charts</h3>
-                {isDeviceOffline ? (
-                  <div className="rounded-2xl border border-dashed border-slate-700/50 bg-slate-800/20 p-8 text-center text-slate-400 text-sm">
-                    Trend charts unavailable while device is offline.
-                  </div>
-                ) : !controllingData && loading ? (
+                {!controllingData && loading ? (
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    {[...Array(4)].map((_, i) => (
+                    {[...Array(17)].map((_, i) => (
                       <div key={i} className="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-4">
                         <div className="skeleton mb-4 h-4 w-32 rounded" />
                         <div className="skeleton h-48 w-full rounded-xl" />
@@ -1118,15 +1132,7 @@ const LiveMonitoring = () => {
               ))}
           </div>
 
-          {isDeviceOffline && Object.keys(multiSensorData).length === 0 && (
-            <div className="rounded-2xl border border-dashed border-rose-500/30 bg-rose-500/5 p-8 text-center my-4">
-              <AlertTriangle className="h-8 w-8 text-rose-400 mx-auto mb-2" />
-              <div className="text-sm font-semibold text-white mb-1">Cold Storage Sensors Offline</div>
-              <div className="text-xs text-slate-400">Sensors are currently offline or disconnected.</div>
-            </div>
-          )}
-
-          {Object.keys(multiSensorData).length === 0 && !isDeviceOffline && !loading && (
+          {Object.keys(multiSensorData).length === 0 && !loading && (
             <div className="py-12 text-center text-slate-500 text-sm italic">
               Waiting for the sensor to be online...
             </div>
@@ -1190,18 +1196,12 @@ const LiveMonitoring = () => {
       )}
 
       {/* ── Standard Single-Device Content Grid ───────────────────────────────── */}
-      {Boolean(selectedDeviceId) && deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && deviceMeta?.deviceType !== 'controlling' && (
+      {deviceMeta?.deviceType !== 'multi_sensor' && deviceMeta?.deviceType !== 'office_control' && deviceMeta?.deviceType !== 'controlling' && (
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
           {/* Left: Big Metrics */}
           <div className="space-y-4 xl:col-span-1">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Live Readings</h3>
-            {isDeviceOffline ? (
-              <div className="rounded-2xl border border-dashed border-rose-500/30 bg-rose-500/5 p-6 text-center">
-                <AlertTriangle className="h-8 w-8 text-rose-400 mx-auto mb-2" />
-                <div className="text-sm font-semibold text-white mb-1">Device Offline</div>
-                <div className="text-xs text-slate-400">Selected device is currently offline or not broadcasting telemetry.</div>
-              </div>
-            ) : loading ? (
+            {loading ? (
               <div className="space-y-4">
                 {[...Array(activeFields.length || 4)].map((_, i) => (
                   <SkeletonCard key={i} />
@@ -1230,11 +1230,7 @@ const LiveMonitoring = () => {
           {/* Right: Charts */}
           <div className="space-y-4 xl:col-span-2">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Trend Charts</h3>
-            {isDeviceOffline ? (
-              <div className="rounded-2xl border border-dashed border-slate-700/50 bg-slate-800/20 p-8 text-center text-slate-400 text-sm">
-                Trend charts unavailable while device is offline.
-              </div>
-            ) : loading ? (
+            {loading ? (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {[...Array(activeFields.length || 4)].map((_, i) => (
                   <div key={i} className="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-4">

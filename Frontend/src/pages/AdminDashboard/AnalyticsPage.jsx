@@ -326,14 +326,19 @@ const AnalyticsPage = () => {
 
       // Backend already returns correct date-filtered feeds
       const exactFeeds = result.feeds || [];
-
       const cFields = [];
+      const isMonitDevice = selectedDevice?.deviceType === 'monit' || selectedDevice?.deviceType === 'monnet' || selectedDevice?.name?.toLowerCase().includes('monit') || selectedDevice?.name?.toLowerCase().includes('monnet');
+
       for (let i = 1; i <= 17; i++) {
         const key = `field${i}`;
         const fieldName = result.channel?.[key] || `Field ${i}`;
-        const normalizedName = fieldName.toLowerCase().replace(/[\s_]+/g, ' ');
-        if (normalizedName.includes('water temp') || normalizedName.includes('water moisture')) {
-          continue; // User requested to remove Water Temp and Water Moisture
+
+        // Exclude Water Temp and Water Moisture for Monit devices
+        if (isMonitDevice) {
+          const lower = fieldName.toLowerCase();
+          if (lower.includes('water temp') || lower.includes('water moisture') || fieldName === 'Water Temp' || fieldName === 'Water Moisture') {
+            continue;
+          }
         }
 
         const hasData = exactFeeds.some(f => f[key] != null && f[key] !== '' && f[key] !== 'null');

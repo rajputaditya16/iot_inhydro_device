@@ -19,7 +19,7 @@ const deviceSchema = new mongoose.Schema(
     },
     deviceType: {
       type: String,
-      enum: ['system2', 'controlling', 'almora', 'almora2', 'multi_sensor', 'light_motor_pump', 'office_control', 'monit'],
+      enum: ['system2', 'controlling', 'almora', 'almora2', 'multi_sensor', 'light_motor_pump', 'office_control', 'monit', 'monnet'],
       default: 'system2',
     },
     mqttId: {

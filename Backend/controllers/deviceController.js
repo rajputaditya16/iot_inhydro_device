@@ -29,19 +29,6 @@ exports.getDevices = async (req, res) => {
 
     const updatedDevices = await Promise.all(
       devices.map(async (device) => {
-        let status = device.status;
-
-        // If device is online but hasn't sent telemetry in 2 minutes, mark as offline
-        if (
-          status === 'online' &&
-          device.lastUpdated &&
-          now - new Date(device.lastUpdated) > 120000
-        ) {
-          status = 'offline';
-          device.status = 'offline';
-          await device.save();
-        }
-
         // Fetch latest telemetry packet from the dynamic collection
         const mqttId = device.mqttId || device._id.toString();
         let latestPacket = null;
@@ -50,6 +37,29 @@ exports.getDevices = async (req, res) => {
           latestPacket = await TelemetryModel.findOne({ deviceId: device._id }).sort({ timestamp: -1 });
         } catch (e) {
           console.warn(`[DeviceController] Could not fetch latest packet for ${mqttId}: ${e.message}`);
+        }
+
+        const lastSeenTime = latestPacket?.timestamp || device.lastUpdated;
+        const diffMs = lastSeenTime ? (now - new Date(lastSeenTime)) : Infinity;
+        // 5 minutes threshold for considering device online
+        const isOnline = diffMs < 5 * 60 * 1000;
+
+        let status = device.status;
+        if (device.status !== 'blocked') {
+          if (isOnline) {
+            status = 'online';
+            if (device.status !== 'online' || !device.lastUpdated || (latestPacket && new Date(device.lastUpdated) < new Date(latestPacket.timestamp))) {
+              device.status = 'online';
+              if (latestPacket) device.lastUpdated = latestPacket.timestamp;
+              await device.save();
+            }
+          } else {
+            status = 'offline';
+            if (device.status === 'online') {
+              device.status = 'offline';
+              await device.save();
+            }
+          }
         }
 
         let latestData = {};
@@ -77,7 +87,7 @@ exports.getDevices = async (req, res) => {
           liveStats.moisture = parseFloat(latestData.s2?.t || 0);
           liveStats.ph = parseFloat(latestData.s3?.t || 0);
           liveStats.ec = parseFloat(latestData.s4?.t || 0);
-        } else if (device.deviceType === 'monit' || device.deviceType === 'dosing') {
+        } else if (device.deviceType === 'monit' || device.deviceType === 'monnet') {
           liveStats.temp = parseFloat(latestData.room_temp ?? 0);
           liveStats.moisture = parseFloat(latestData.room_humi ?? 0);
           liveStats.ph = parseFloat(latestData.ph ?? 0);
@@ -428,12 +438,12 @@ exports.getDeviceAnalytics = async (req, res) => {
             field16: tel.p !== undefined && tel.p !== null ? String(tel.p) : null,
             field17: tel.k !== undefined && tel.k !== null ? String(tel.k) : null,
           });
-        } else if (device.deviceType === 'monit' || device.deviceType === 'dosing') {
+        } else if (device.deviceType === 'monit' || device.deviceType === 'monnet' || device.deviceType === 'dosing') {
           mappedFeeds.push({
             created_at: p.timestamp.toISOString(),
             entry_id: mappedFeeds.length + 1,
-            field1: d.temp !== undefined && d.temp !== null ? String(d.temp) : (d.water_temp !== undefined ? String(d.water_temp) : null),
-            field2: d.moist !== undefined && d.moist !== null ? String(d.moist) : (d.moisture !== undefined ? String(d.moisture) : null),
+            field1: null,
+            field2: null,
             field3: d.ec !== undefined && d.ec !== null ? String(d.ec) : null,
             field4: d.ph !== undefined && d.ph !== null ? String(d.ph) : null,
             field5: d.room_temp !== undefined && d.room_temp !== null ? String(d.room_temp) : null,
@@ -522,9 +532,9 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field6 = 'Cold Room 6 Temp';
       channelData.field7 = 'Cold Room 7 Temp';
       channelData.field8 = 'Field 8';
-    } else if (device.deviceType === 'monit') {
-      channelData.field1 = 'Water Temp';
-      channelData.field2 = 'Water Moisture';
+    } else if (device.deviceType === 'monit' || device.deviceType === 'monnet') {
+      channelData.field1 = 'Field 1';
+      channelData.field2 = 'Field 2';
       channelData.field3 = 'Water EC';
       channelData.field4 = 'Water pH';
       channelData.field5 = 'Room Temp';
@@ -538,24 +548,6 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field6 = 'Room Humidity';
       channelData.field7 = 'ORP';
       channelData.field8 = 'CO2';
-    }
-
-    if (channelId && readApiKey) {
-      try {
-        const metadataUrl = `https://api.thingspeak.com/channels/${channelId}/feeds.json?api_key=${readApiKey}&results=0`;
-        const metaRes = await fetch(metadataUrl);
-        if (metaRes.ok) {
-          const metaResult = await metaRes.json();
-          if (metaResult && metaResult.channel) {
-            channelData = {
-              ...channelData,
-              ...metaResult.channel,
-            };
-          }
-        }
-      } catch (metaErr) {
-        console.warn(`[Analytics API] Failed to fetch channel metadata from ThingSpeak: ${metaErr.message}. Falling back to default field names.`);
-      }
     }
 
     res.status(200).json({
@@ -592,35 +584,47 @@ exports.streamTelemetry = (req, res) => {
     res.flush();
   }
 
+  let isClosed = false;
+
+  const cleanup = () => {
+    if (isClosed) return;
+    isClosed = true;
+    clearInterval(pingInterval);
+    telemetryEmitter.off('telemetry', onTelemetry);
+  };
+
   // Periodic heartbeat ping to prevent cloud load balancers/proxies (Render, Cloudflare, Nginx) from dropping connection
   const pingInterval = setInterval(() => {
+    if (isClosed) return;
     try {
       res.write(': ping\n\n');
       if (typeof res.flush === 'function') {
         res.flush();
       }
     } catch (e) {
-      clearInterval(pingInterval);
+      cleanup();
     }
   }, 15000);
 
   const onTelemetry = (payload) => {
+    if (isClosed) return;
     try {
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
       if (typeof res.flush === 'function') {
         res.flush();
       }
     } catch (e) {
-      // client disconnected
+      cleanup();
     }
   };
 
   telemetryEmitter.on('telemetry', onTelemetry);
 
-  req.on('close', () => {
-    clearInterval(pingInterval);
-    telemetryEmitter.off('telemetry', onTelemetry);
-  });
+  req.on('close', cleanup);
+  req.on('end', cleanup);
+  res.on('close', cleanup);
+  res.on('finish', cleanup);
+  res.on('error', cleanup);
 };
 
 

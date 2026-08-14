@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useId } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts';
 
 const colorSchemes = {
@@ -32,15 +32,16 @@ const areEqual = (prevProps, nextProps) => {
   if (!prevProps.data || !nextProps.data) return false;
   if (prevProps.data.length !== nextProps.data.length) return false;
   if (prevProps.data.length === 0) return true;
-  
+
   const prevLast = prevProps.data[prevProps.data.length - 1];
   const nextLast = nextProps.data[nextProps.data.length - 1];
   return prevLast?.time === nextLast?.time && prevLast?.value === nextLast?.value && prevLast?.room1Value === nextLast?.room1Value;
 };
 
 const LiveChart = memo(({ data, type = 'temperature', title, unit, subtitle = 'Last 24 hours' }) => {
+  const uniqueId = useId();
   const colors = colorSchemes[type] || colorSchemes.temperature;
-  const gradientId = `gradient-${type}`;
+  const gradientId = `gradient-${type}-${uniqueId.replace(/:/g, '')}`;
   const isBoth = data && data[0]?.isBoth;
 
   return (
@@ -53,7 +54,7 @@ const LiveChart = memo(({ data, type = 'temperature', title, unit, subtitle = 'L
         <span className="text-xs text-slate-400">{unit}</span>
       </div>
       <div className="h-48">
-        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={100}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={100} debounce={100}>
           {isBoth ? (
             <LineChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />

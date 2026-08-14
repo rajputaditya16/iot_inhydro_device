@@ -12,7 +12,8 @@ export const useAnimatedCounter = (targetValue, duration = 400) => {
     const end = targetValue;
     const diff = end - start;
 
-    if (Math.abs(diff) < 0.01 || duration === 0 || (typeof document !== 'undefined' && document.hidden)) {
+    // For minor sensor pings (< 0.1 difference) or hidden tab, jump directly to end value to save CPU cycles
+    if (Math.abs(diff) < 0.1 || duration === 0 || (typeof document !== 'undefined' && document.hidden)) {
       setDisplayValue(end);
       prevValue.current = end;
       return;
@@ -20,16 +21,23 @@ export const useAnimatedCounter = (targetValue, duration = 400) => {
 
     let startTime = null;
     let animationFrameId = null;
+    let lastRenderTime = 0;
 
     const step = (timestamp) => {
       if (!startTime) startTime = timestamp;
-      const progress = Math.min((timestamp - startTime) / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
-      setDisplayValue(start + diff * eased);
+      
+      // Throttle animation state updates to ~30 FPS (every 33ms) max to halve React renders
+      if (timestamp - lastRenderTime >= 33 || timestamp - startTime >= duration) {
+        lastRenderTime = timestamp;
+        const progress = Math.min((timestamp - startTime) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+        setDisplayValue(start + diff * eased);
+      }
 
-      if (progress < 1) {
+      if (timestamp - startTime < duration) {
         animationFrameId = requestAnimationFrame(step);
       } else {
+        setDisplayValue(end);
         prevValue.current = end;
       }
     };
