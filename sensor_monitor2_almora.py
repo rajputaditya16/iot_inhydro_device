@@ -70,7 +70,7 @@ working_relay_id = None
 # SYSTEM STATE
 system_config = {
     'relay_port': RELAY_PORT_FIXED,
-    'upload_frequency_min': 5,
+    'upload_frequency_min': 0,
     'temp_alarm_offset': 5.0,
     'humi_alarm_offset': 5.0
 }
@@ -207,7 +207,7 @@ def load_config():
                 system_config = json.load(f)
         except Exception: pass
     if 'upload_frequency_min' not in system_config:
-        system_config['upload_frequency_min'] = 5
+        system_config['upload_frequency_min'] = 0
     if 'temp_alarm_offset' not in system_config:
         system_config['temp_alarm_offset'] = 5.0
     if 'humi_alarm_offset' not in system_config:
@@ -249,15 +249,20 @@ def save_setpoints():
 
 def broadcast_current_state():
     if 'control_client' in globals() and control_client and control_client.is_connected():
+        with sensor_data_lock:
+            snap_sensor_data = dict(sensor_data)
         payload = {
+            "device_id": DEVICE_NAME,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "system_config": system_config,
             "sensor_setpoints": sensor_setpoints,
+            "sensor_data": snap_sensor_data,
             "active_warnings": active_warnings,
             "relay_states": relay_states
         }
         try:
             control_client.publish(CURRENT_SETP_TOPIC, json.dumps(payload), retain=True)
-            print(f"[SYNC→WEB] Sent setpoints update to {CURRENT_SETP_TOPIC[-20:]}")
+            print(f"[SYNC→WEB] Sent setpoints & telemetry update to {CURRENT_SETP_TOPIC[-20:]}")
         except Exception as e: print(f"Broadcast err: {e}")
 
 def get_setpoints(skey):
@@ -439,40 +444,7 @@ def start_bluetooth_server():
                 if 'client' in locals(): client.close()
     except Exception as e: print("BT Error:", e)
 
-mqtt_ts_client = None
-TS_MQTT_TOPIC = ""
 
-def _make_ts_client(client_id, username, password, channel_id, port):
-    if not (client_id and username and password and channel_id):
-        return None, ""
-    topic = f"channels/{channel_id}/publish"
-    try:
-        c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id)
-    except AttributeError:
-        c = mqtt.Client(client_id)
-    c.username_pw_set(username, password)
-    try:
-        c.connect("mqtt3.thingspeak.com", int(port), 60)
-        c.loop_start()
-    except Exception as e:
-        print(f"[MQTT] connect error: {e}")
-        return None, ""
-    return c, topic
-
-def init_mqtt_client():
-    global mqtt_ts_client, TS_MQTT_TOPIC
-    if mqtt_ts_client:
-        try: mqtt_ts_client.disconnect(); mqtt_ts_client.loop_stop()
-        except: pass
-
-    port = system_config.get("PORT", 1883)
-    mqtt_ts_client, TS_MQTT_TOPIC = _make_ts_client(
-        client_id = str(system_config.get("TS CLIENT ID", "")),
-        username  = str(system_config.get("TS USERNAME", "")),
-        password  = str(system_config.get("TS PASSWORD", "")),
-        channel_id= str(system_config.get("TS CHANNEL ID", "")),
-        port      = port
-    )
 
 CONTROL_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/update"
 CURRENT_SETP_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/current"
@@ -531,15 +503,16 @@ CONTROL_PASS = "MGPL@5598"
 
 is_mqtt_connected = False
 
-def on_control_connect(client, userdata, flags, rc, properties=None):
+def on_control_connect(client, userdata, flags, rc=0, properties=None, *args, **kwargs):
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
         client.subscribe(CONTROL_TOPIC)
         client.subscribe(CONTROL_SYNC_TOPIC)
+        broadcast_current_state()
     else: is_mqtt_connected = False
 
-def on_control_disconnect(client, userdata, rc, properties=None):
+def on_control_disconnect(client, userdata, *args, **kwargs):
     global is_mqtt_connected
     is_mqtt_connected = False
 
@@ -729,8 +702,18 @@ def sensor_reader():
 
         active_warnings = current_warnings
         
-        # User Configurable Cloud Upload Frequency (5m, 10m, 30m, 1h)
-        upload_freq_sec = int(system_config.get('upload_frequency_min', 5)) * 60
+        # User Configurable Cloud Upload Frequency (0 = 1 sec per-second upload, 1m, 5m, 10m, 30m, 1h, etc.)
+        freq_min = system_config.get('upload_frequency_min', 0)
+        try:
+            freq_val = float(freq_min)
+        except Exception:
+            freq_val = 0.0
+
+        if freq_val <= 0:
+            upload_freq_sec = 1.0  # Per-second real-time streaming
+        else:
+            upload_freq_sec = freq_val * 60.0
+
         curr_time = time.time()
         if curr_time - last_upload_time >= upload_freq_sec:
             broadcast_current_state()
@@ -823,6 +806,9 @@ def show(frame):
         add_bottom_right_clock(frame)
 
 def get_sensor_display_name(skey):
+    custom_names = system_config.get("sensor_names", {})
+    if skey in custom_names and custom_names[skey].strip():
+        return custom_names[skey].strip()
     if skey == "S7": return "GREEN HOUSE"
     return f"COLD ROOM {skey.replace('S', '')}"
 
@@ -1141,6 +1127,28 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
     tk.Button(kp_actions_frame, text="CONFIRM", font=BTN_FONT_MAIN, bg="#0284c7", fg="white", width=12, height=2, cursor="hand2", command=kp_confirm).pack(side="left", padx=6)
     tk.Button(kp_actions_frame, text="CANCEL", font=BTN_FONT_MAIN, bg="#64748b", fg="white", width=10, height=2, cursor="hand2", command=kp_cancel).pack(side="left", padx=6)
 
+def format_freq_display(minutes):
+    try:
+        m = float(minutes)
+        if m <= 0:
+            return "1 Sec (Realtime)"
+        elif m < 1:
+            sec = int(m * 60)
+            return f"{sec} Sec"
+        elif m < 60:
+            return f"{int(m)} Min"
+        elif m < 1440:
+            hours = m / 60.0
+            return f"{hours:.1f} Hours" if hours % 1 != 0 else f"{int(hours)} Hour{'s' if hours > 1 else ''}"
+        elif m < 10080:
+            days = m / 1440.0
+            return f"{days:.1f} Days" if days % 1 != 0 else f"{int(days)} Day{'s' if days > 1 else ''}"
+        else:
+            weeks = m / 10080.0
+            return f"{weeks:.1f} Weeks" if weeks % 1 != 0 else f"{int(weeks)} Week{'s' if weeks > 1 else ''}"
+    except Exception:
+        return "1 Sec (Realtime)"
+
 # SYSTEM SETTINGS MODAL (CONFIG FREQUENCY & ALARM DEVIATION OFFSETS)
 def open_system_settings_modal():
     sett_win = tk.Toplevel(root)
@@ -1162,19 +1170,32 @@ def open_system_settings_modal():
     r1 = tk.Frame(body, bg="white"); r1.pack(fill="x", pady=10)
     tk.Label(r1, text="Cloud Upload Frequency:", font=("Helvetica", 12, "bold"), fg="#1e293b", bg="white", width=25, anchor="e").pack(side="left", padx=10)
     
-    freq_val = system_config.get("upload_frequency_min", 5)
-    lbl_freq = tk.Label(r1, text=f"{freq_val} Min", font=("Helvetica", 12, "bold"), bg="#f1f5f9", fg="#1565c0", width=14, relief="sunken", bd=1)
+    freq_val = system_config.get("upload_frequency_min", 0)
+    lbl_freq = tk.Label(r1, text=format_freq_display(freq_val), font=("Helvetica", 12, "bold"), bg="#f1f5f9", fg="#1565c0", width=14, relief="sunken", bd=1)
     lbl_freq.pack(side="left", padx=10)
 
     def cycle_freq():
-        curr = system_config.get("upload_frequency_min", 5)
-        options = [5, 10, 30, 60]
+        curr = system_config.get("upload_frequency_min", 0)
+        options = [0, 1, 2, 5, 10, 15, 30, 60, 120, 360, 720, 1440, 4320, 10080]
         idx = options.index(curr) if curr in options else 0
         nxt = options[(idx + 1) % len(options)]
         system_config["upload_frequency_min"] = nxt
-        lbl_freq.config(text=f"{nxt} Min")
+        save_config()
+        lbl_freq.config(text=format_freq_display(nxt))
 
-    tk.Button(r1, text="CHANGE", font=BTN_FONT_INLINE, bg="#cbd5e1", fg="#1e293b", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=cycle_freq).pack(side="left", padx=5)
+    def edit_freq_custom():
+        curr = str(system_config.get("upload_frequency_min", 0))
+        def on_confirm(val):
+            try:
+                m = max(0, min(10080, float(val)))
+                system_config["upload_frequency_min"] = m
+                save_config()
+                lbl_freq.config(text=format_freq_display(m))
+            except Exception: pass
+        open_almora_keypad("Edit Upload Frequency (Min: 0 for 1-Sec, 1 to 10080)", curr, on_confirm, is_alphanumeric=False)
+
+    tk.Button(r1, text="CHANGE", font=BTN_FONT_INLINE, bg="#cbd5e1", fg="#1e293b", width=7, height=2, relief="flat", bd=0, cursor="hand2", command=cycle_freq).pack(side="left", padx=3)
+    tk.Button(r1, text="EDIT", font=BTN_FONT_INLINE, bg="#0284c7", fg="white", width=6, height=2, relief="flat", bd=0, cursor="hand2", command=edit_freq_custom).pack(side="left", padx=3)
 
     # 2. Temp Alarm Offset (+/- C)
     r2 = tk.Frame(body, bg="white"); r2.pack(fill="x", pady=10)
@@ -1192,7 +1213,7 @@ def open_system_settings_modal():
 
     # 3. Humi Alarm Offset (+/- %)
     r3 = tk.Frame(body, bg="white"); r3.pack(fill="x", pady=10)
-    tk.Label(r3, text="Humi Alarm Limit (+/- %):", font=("Helvetica", 12, "bold"), fg="#1e293b", bg="white", width=25, anchor="e").pack(side="left", padx=10)
+    tk.Label(r3, text="Humi Alarm Limit :", font=("Helvetica", 12, "bold"), fg="#1e293b", bg="white", width=25, anchor="e").pack(side="left", padx=10)
     
     h_off_val = system_config.get("humi_alarm_offset", 5.0)
     lbl_hoff = tk.Label(r3, text=f"{h_off_val:.1f} %", font=("Helvetica", 12, "bold"), bg="#f1f5f9", fg="#1565c0", width=14, relief="sunken", bd=1)
@@ -1350,7 +1371,7 @@ def toggle_profile_dropdown():
         settings_dict = sp.get("settings", {})
         for idx, s_key in enumerate(ALL_SETTINGS):
             p_name = settings_dict.get(s_key, {}).get("name", s_key)
-            btn_txt = f"{s_key} ({p_name})" if p_name != s_key else s_key
+            btn_txt = p_name
             btn = tk.Button(profile_menu_frame, text=btn_txt, font=("Helvetica", 12, "bold"), bg="white", fg="#1e293b",
                             activebackground="#0284c7", activeforeground="white", relief="flat", bd=0, anchor="w", padx=12, pady=10, cursor="hand2")
             btn.config(command=lambda s=s_key, t=btn_txt: select_profile(s, t))
@@ -1369,9 +1390,9 @@ def select_profile(s_name, btn_txt):
     profile_dropdown_open = False
     load_schedule_form()
 
-profile_dropdown_btn = tk.Button(sched_row1, text="Setting A (Crop Stage 1)▼", font=("Helvetica", 11, "bold"), bg="#cbd5e1", fg="#1e293b",
+profile_dropdown_btn = tk.Button(sched_row1, text="Crop Stage 1▼", font=("Helvetica", 11, "bold"), bg="#cbd5e1", fg="#1e293b",
                                  activebackground="#94a3b8", activeforeground="#1e293b", relief="flat", bd=0, padx=12, pady=6, cursor="hand2", command=toggle_profile_dropdown)
-profile_dropdown_btn.pack(side="left", padx=(0, 5))
+profile_dropdown_btn.pack(side="left", padx=(0, 4))
 
 # --- 3. PRESET LIBRARY DROPDOWN (MIND.PY STYLE - LINE 2 CENTERED) ---
 tk.Label(sched_row2, text="Preset Library:", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack(side="left", padx=(5, 4))
@@ -1734,6 +1755,7 @@ def load_schedule_form():
 
     update_preset_dropdown_text()
 
+    profile_dropdown_btn.config(text=f"{profile_disp_name}▼")
     lbl_val_stagename.config(text=profile_disp_name)
     lbl_val_sdate.config(text=st.get("start_date", "2026-07-01"))
     lbl_val_edate.config(text=st.get("end_date", "2026-08-31"))
@@ -1827,9 +1849,8 @@ def open_schedule_editor(skey="S1"):
     setting_combo.set("Setting A")
     sp = get_setpoints(skey)
     settings_dict = sp.get("settings", {})
-    p_name = settings_dict.get("Setting A", {}).get("name", "Setting A")
-    btn_txt = f"Setting A ({p_name})" if p_name != "Setting A" else "Setting A"
-    profile_dropdown_btn.config(text=f"{btn_txt}▼")
+    p_name = settings_dict.get("Setting A", {}).get("name", "Crop Stage 1")
+    profile_dropdown_btn.config(text=f"{p_name}▼")
     show(frame_schedule)
     load_schedule_form()
 
@@ -1894,7 +1915,6 @@ if __name__ == "__main__":
     load_config()
     load_crop_programs()
     load_setpoints()
-    init_mqtt_client()
     threading.Thread(target=auto_trust_devices, daemon=True).start()
     threading.Thread(target=start_bluetooth_server, daemon=True).start()
     threading.Thread(target=sensor_reader, daemon=True).start()

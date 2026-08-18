@@ -35,11 +35,11 @@ if os.path.exists(OLD_FILE):
     except Exception: pass
 
 # Strict Fixed Persistent Serial By-Path Links (Zero /dev/ttyUSB* fallback)
-SERIAL_PORT_WATER = "/dev/serial/by-path/platform-xhci-hcd.3.auto-usb-0:1:1.0-port0"  # Dedicated Combined EC & pH Port
+SERIAL_PORT_WATER = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.50-port0"  # Dedicated Combined EC & pH Port
 SERIAL_PORT_EC    = SERIAL_PORT_WATER
 SERIAL_PORT_PH    = SERIAL_PORT_WATER
-SERIAL_PORT_MD02  = "/dev/serial/by-path/platform-xhci-hcd.4.auto-usb-0:1:1.0-port0"
-SERIAL_PORT_RELAY = "/dev/serial/by-path/platform-fe3a0000.usb-usb-0:1:1.0-port0"
+SERIAL_PORT_MD02  = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
+SERIAL_PORT_RELAY = "/dev/serial/by-path/"
 
 DEVICE_ID_EC   = 31
 DEVICE_ID_PH   = 32
@@ -59,12 +59,13 @@ def relay_worker_loop():
 
             inst = None
             try:
-                inst = minimalmodbus.Instrument(SERIAL_PORT_RELAY, RELAY_SLAVE_ID)
-                inst.serial.baudrate = 9600
-                inst.serial.timeout = 0.2
-                inst.mode = minimalmodbus.MODE_RTU
-                inst.clear_buffers_before_each_transaction = True
-                inst.write_bit(channel, 1 if state else 0, functioncode=5)
+                if os.path.exists(SERIAL_PORT_RELAY) and not os.path.isdir(SERIAL_PORT_RELAY):
+                    inst = minimalmodbus.Instrument(SERIAL_PORT_RELAY, RELAY_SLAVE_ID)
+                    inst.serial.baudrate = 9600
+                    inst.serial.timeout = 0.2
+                    inst.mode = minimalmodbus.MODE_RTU
+                    inst.clear_buffers_before_each_transaction = True
+                    inst.write_bit(channel, 1 if state else 0, functioncode=5)
             except Exception as e:
                 print(f"⚠️ Relay Write Error on {SERIAL_PORT_RELAY}: {e}")
             finally:
@@ -284,56 +285,82 @@ ec_instrument   = open_modbus_instrument(SERIAL_PORT_EC, DEVICE_ID_EC)
 ph_instrument   = open_modbus_instrument(SERIAL_PORT_PH, DEVICE_ID_PH)
 md02_instrument = open_modbus_instrument(SERIAL_PORT_MD02, DEVICE_ID_MD02)
 
-# Read Dedicated EC Meter (Slave ID 31 -> Reg 3) STRICTLY via SERIAL_PORT_WATER
-def read_ec_meter():
-    inst = None
-    try:
-        inst = minimalmodbus.Instrument(SERIAL_PORT_WATER, DEVICE_ID_EC)
-        inst.serial.baudrate = 9600
-        inst.serial.timeout = 0.3
-        inst.mode = minimalmodbus.MODE_RTU
-        inst.clear_buffers_before_each_transaction = True
-
-        for fc in [3, 4]:
-            try:
-                data = inst.read_registers(1, 3, functioncode=fc) # [55 (SP), 0 (HYSt), 643 (Live EC)]
-                raw_ec = data[2] if len(data) >= 3 else inst.read_register(3, 0, functioncode=fc)
-                ec_val = round(raw_ec / 1000.0, 3)
-                return {"ec": ec_val, "raw_ec": raw_ec, "ph": None}
-            except Exception:
-                pass
-    except Exception:
-        pass
-    finally:
-        if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
-            try: inst.serial.close()
-            except Exception: pass
+def get_water_port():
+    if os.path.exists(SERIAL_PORT_WATER) and not os.path.isdir(SERIAL_PORT_WATER):
+        return SERIAL_PORT_WATER
     return None
 
-# Read Dedicated pH Meter (Slave ID 32 -> Reg 2) STRICTLY via SERIAL_PORT_WATER
-def read_ph_meter():
-    inst = None
-    try:
-        inst = minimalmodbus.Instrument(SERIAL_PORT_WATER, DEVICE_ID_PH)
-        inst.serial.baudrate = 9600
-        inst.serial.timeout = 0.3
-        inst.mode = minimalmodbus.MODE_RTU
-        inst.clear_buffers_before_each_transaction = True
+# Read Dedicated EC Meter STRICTLY via SERIAL_PORT_WATER
+def read_ec_meter():
+    port = get_water_port()
+    if not port:
+        return None
 
-        for fc in [3, 4]:
-            try:
-                data = inst.read_registers(0, 3, functioncode=fc) # [580, 604, 790 (Live pH)]
-                ph_raw = data[2]
-                ph_val = round(ph_raw / 100.0, 2)
-                return {"ph": ph_val}
-            except Exception:
-                pass
-    except Exception:
-        pass
-    finally:
-        if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
-            try: inst.serial.close()
-            except Exception: pass
+    for slave in [DEVICE_ID_EC, 3, 31, 1]:
+        inst = None
+        try:
+            inst = minimalmodbus.Instrument(port, slave)
+            inst.serial.baudrate = 9600
+            inst.serial.timeout = 0.3
+            inst.mode = minimalmodbus.MODE_RTU
+            inst.clear_buffers_before_each_transaction = True
+
+            for fc in [3, 4]:
+                try:
+                    if hasattr(inst.serial, 'reset_input_buffer'):
+                        try: inst.serial.reset_input_buffer()
+                        except Exception: pass
+                    data = inst.read_registers(1, 3, functioncode=fc)
+                    if data and len(data) >= 3:
+                        raw_ec = data[2]
+                        if raw_ec > 0:
+                            ec_val = round(raw_ec / 1000.0, 3)
+                            return {"ec": ec_val, "raw_ec": raw_ec, "ph": None}
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        finally:
+            if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
+                try: inst.serial.close()
+                except Exception: pass
+    return None
+
+# Read Dedicated pH Meter STRICTLY via SERIAL_PORT_WATER
+def read_ph_meter():
+    port = get_water_port()
+    if not port:
+        return None
+
+    for slave in [DEVICE_ID_PH, 1, 32, 2]:
+        inst = None
+        try:
+            inst = minimalmodbus.Instrument(port, slave)
+            inst.serial.baudrate = 9600
+            inst.serial.timeout = 0.3
+            inst.mode = minimalmodbus.MODE_RTU
+            inst.clear_buffers_before_each_transaction = True
+
+            for fc in [3, 4]:
+                try:
+                    if hasattr(inst.serial, 'reset_input_buffer'):
+                        try: inst.serial.reset_input_buffer()
+                        except Exception: pass
+                    data = inst.read_registers(0, 3, functioncode=fc)
+                    if data and len(data) >= 3:
+                        ph_raw = data[2]
+                        if ph_raw > 0:
+                            ph_val = round(ph_raw / 100.0, 2)
+                            if 0 <= ph_val <= 14:
+                                return {"ph": ph_val}
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        finally:
+            if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
+                try: inst.serial.close()
+                except Exception: pass
     return None
 
 # Combined Water Sensor Reader combining EC and pH meter readings
@@ -356,33 +383,76 @@ def read_water_sensor():
     return None
 
 # Read MD02 Temperature & Humidity Transmitter (Slave ID 1) STRICTLY via SERIAL_PORT_MD02
-def read_md02_sensor():
-    inst = None
-    try:
-        inst = minimalmodbus.Instrument(SERIAL_PORT_MD02, DEVICE_ID_MD02)
-        inst.serial.baudrate = 9600
-        inst.serial.timeout = 0.2
-        inst.mode = minimalmodbus.MODE_RTU
-        inst.clear_buffers_before_each_transaction = True
+_md02_inst_cache = None
 
-        for reg in [1, 0]:
-            for fc in [4, 3]:
+def get_md02_instrument(force_reopen=False):
+    global _md02_inst_cache
+    if force_reopen and _md02_inst_cache:
+        try: _md02_inst_cache.serial.close()
+        except Exception: pass
+        _md02_inst_cache = None
+
+    if _md02_inst_cache is not None:
+        try:
+            if _md02_inst_cache.serial and getattr(_md02_inst_cache.serial, 'is_open', False):
+                return _md02_inst_cache
+        except Exception:
+            _md02_inst_cache = None
+
+    try:
+        if os.path.exists(SERIAL_PORT_MD02) and not os.path.isdir(SERIAL_PORT_MD02):
+            inst = minimalmodbus.Instrument(SERIAL_PORT_MD02, DEVICE_ID_MD02)
+            inst.serial.baudrate = 4800
+            inst.serial.timeout = 0.5
+            inst.mode = minimalmodbus.MODE_RTU
+            inst.clear_buffers_before_each_transaction = True
+            _md02_inst_cache = inst
+            return _md02_inst_cache
+    except Exception:
+        _md02_inst_cache = None
+    return None
+
+def read_md02_sensor():
+    global _md02_inst_cache
+
+    for attempt in range(3):
+        inst = get_md02_instrument(force_reopen=(attempt > 0))
+        if inst is None:
+            time.sleep(0.1)
+            continue
+
+        try:
+            if hasattr(inst.serial, 'reset_input_buffer'):
+                try: inst.serial.reset_input_buffer()
+                except Exception: pass
+
+            for fc in [3, 4]:
                 try:
-                    rt_raw = inst.read_register(reg, 0, signed=True, functioncode=fc)
-                    rh_raw = inst.read_register(reg + 1, 0, functioncode=fc)
-                    if rt_raw is not None and rh_raw is not None:
-                        rt = round(rt_raw / 10.0, 1) if rt_raw > 100 else round(float(rt_raw), 1)
-                        rh = round(rh_raw / 10.0, 1) if rh_raw > 100 else round(float(rh_raw), 1)
-                        if -10 <= rt <= 75 and 0 <= rh <= 100:
-                            return {"room_temp": rt, "room_humi": rh}
+                    vals = inst.read_registers(0, 2, functioncode=fc)
+                    if vals and len(vals) >= 2:
+                        v0, v1 = vals[0], vals[1]
+                        d0 = round(v0 / 10.0, 1) if v0 > 100 else round(float(v0), 1)
+                        d1 = round(v1 / 10.0, 1) if v1 > 100 else round(float(v1), 1)
+
+                        # Check if Reg 0 is Humidity (%RH) and Reg 1 is Temp (°C)
+                        if 0 <= d0 <= 100 and -10 <= d1 <= 75:
+                            return {"room_temp": d1, "room_humi": d0}
+                        # Check if Reg 0 is Temp (°C) and Reg 1 is Humidity (%RH)
+                        elif -10 <= d0 <= 75 and 0 <= d1 <= 100:
+                            return {"room_temp": d0, "room_humi": d1}
                 except Exception:
                     pass
-    except Exception:
-        pass
-    finally:
-        if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
-            try: inst.serial.close()
+        except Exception:
+            pass
+
+        # Close stale connection handle on failed attempt so next attempt/loop opens fresh port
+        if _md02_inst_cache:
+            try: _md02_inst_cache.serial.close()
             except Exception: pass
+            _md02_inst_cache = None
+
+        time.sleep(0.1)
+
     return None
 
 cached_water_data = None
@@ -461,7 +531,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
     else:
         is_mqtt_connected = False
 
-def on_control_disconnect(client, userdata, rc, properties=None):
+def on_control_disconnect(client, userdata, *args, **kwargs):
     global is_mqtt_connected
     is_mqtt_connected = False
 

@@ -305,7 +305,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
     else:
         is_mqtt_connected = False
 
-def on_control_disconnect(client, userdata, rc, properties=None):
+def on_control_disconnect(client, userdata, *args, **kwargs):
     global is_mqtt_connected
     is_mqtt_connected = False
 

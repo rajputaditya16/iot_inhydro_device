@@ -1,0 +1,15 @@
+{
+    "FOGGER_ENABLE": true,
+    "FOGGER_ON_SEC": 30,
+    "FOGGER_OFF_MIN": 5,
+    "SPRINKLER_ENABLE": true,
+    "SPRINKLER_ON_MIN": 2,
+    "SPRINKLER_OFF_MIN": 20,
+    "EC_ENABLE": true,
+    "EC_MIN": 1.5,
+    "EC_MAX": 2.0,
+    "EC_CAPACITY": 10.0,
+    "EC_ON_SEC": 30,
+    "EC_OFF_MIN": 5,
+    "VALVE4_RESERVED": "Disabled"
+}
