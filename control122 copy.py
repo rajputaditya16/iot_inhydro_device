@@ -13,17 +13,17 @@ import paho.mqtt.client as mqtt
 R1_PORT_SOIL = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.2:1.0-port0"
 R1_PORT_MD02 = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.1:1.0-port0"
 R1_PORT_ORP  = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.3:1.0-port0"
-R1_PORT_CO2  = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
-# Room 2 sensor ports
-R2_PORT_SOIL = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
-R2_PORT_MD02 = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.5:1.0-port0"
+R1_PORT_CO2  = "/dev/serial/by-path/"
+
+R2_PORT_SOIL = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0"
+R2_PORT_MD02 = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
 R2_PORT_ORP  = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.4:1.0-port0"
-R2_PORT_CO2  = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0"
+R2_PORT_CO2  = "/dev/serial/by-path/p"
 
 # Room 3 sensor ports
 R3_PORT_MD02_1 = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.8:1.0-port0"
-R3_PORT_MD02_2 = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
-R3_PORT_CO2    = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0"
+R3_PORT_MD02_2 = "/dev/serial/by-path/"
+R3_PORT_CO2    = "/dev/serial/by-path/"
 
 # MODBUS SETTINGS
 RELAY_BAUD = 9600
@@ -81,7 +81,7 @@ def get_device_id():
     return " "
 
 DEVICE_NAME = get_device_id()
-print(f"🚀 Device: {DEVICE_NAME}")
+print(f" Device: {DEVICE_NAME}")
 
 # Per-room setpoint files
 SP_FILE = {
@@ -129,7 +129,7 @@ def relay_writer_worker():
             channel, state = relay_write_queue.get()
             success = set_relay(channel, state)
             if not success:
-                print(f"⚠️ Failed to write relay channel {channel} to {state}")
+                print(f" Failed to write relay channel {channel} to {state}")
             relay_write_queue.task_done()
         except Exception as e:
             print(f"Error in relay_writer_worker: {e}")
@@ -167,10 +167,10 @@ def _open_sensor(port, label, slave_id=1, baudrate=9600):
         inst.serial.timeout  = 1.0
         inst.mode            = minimalmodbus.MODE_RTU
         inst.clear_buffers_before_each_transaction = True
-        print(f"✅ [{label}] initialized on {port} at {baudrate} baud (Slave ID: {slave_id})")
+        print(f" [{label}] initialized on {port} at {baudrate} baud (Slave ID: {slave_id})")
         return inst
     except Exception as e:
-        print(f"⚠️ [{label}] initialization error on {port} at {baudrate} baud: {e}")
+        print(f" [{label}] initialization error on {port} at {baudrate} baud: {e}")
         return None
 
 R1_soil = _open_sensor(R1_PORT_SOIL, "R1 Soil", slave_id=1, baudrate=9600)
@@ -197,7 +197,7 @@ def read_soil(inst, label):
         ph    = inst.read_register(0x0006, 2)
         return {"soil_temp": temp, "moisture": moist, "ec": ec, "ph": ph}
     except Exception as e:
-        print(f"⚠️ [{label}] Soil read failed: {e}")
+        print(f" [{label}] Soil read failed: {e}")
         return None
 
 def default_setpoints(room=1):
@@ -287,7 +287,7 @@ def load_setpoints(room):
     if os.path.exists(f):
         try:
             with open(f) as fp: setpoints[room].update(json.load(fp))
-            print(f"✅ Room {room} setpoints loaded")
+            print(f" Room {room} setpoints loaded")
         except: pass
 
 load_setpoints(1)
@@ -300,7 +300,7 @@ def save_setpoints(room):
     try:
         topic = f"inhydro/{DEVICE_NAME}/room{room}/setpoints/current"
         control_client.publish(topic, json.dumps(setpoints[room]), retain=True)
-        print(f"✅ Room {room} setpoints saved + pushed")
+        print(f" Room {room} setpoints saved + pushed")
     except: pass
 
 
@@ -319,7 +319,7 @@ def log_auth_event(room, user_idx, user_name, status):
         }
         with open(os.path.join(log_dir, "auth_events.jsonl"), "a") as f:
             f.write(json.dumps(event) + "\n")
-        print(f"🔒 Auth event logged: {event}")
+        print(f" Auth event logged: {event}")
     except Exception as e:
         print(f"Error logging auth event: {e}")
 
@@ -342,7 +342,7 @@ def on_control_message(client, userdata, msg):
         if "request_sync" in msg.topic:
             topic = f"inhydro/{DEVICE_NAME}/room{room}/setpoints/current"
             control_client.publish(topic, json.dumps(setpoints[room]), retain=True)
-            print(f"✅ Synced setpoints for Room {room} (requested)")
+            print(f" Synced setpoints for Room {room} (requested)")
             return
 
         new_sp = json.loads(msg.payload.decode())
@@ -367,7 +367,7 @@ def on_control_message(client, userdata, msg):
                 try:
                     datetime.datetime.strptime(str(new_sp[k]), "%H:%M")
                 except:
-                    print(f"⚠️ Remote setpoint reject: invalid time format for {k}")
+                    print(f" Remote setpoint reject: invalid time format for {k}")
                     return
 
         # Validate day/night timer bounds to avoid conflicts
@@ -384,14 +384,14 @@ def on_control_message(client, userdata, msg):
                 t_n_start = datetime.datetime.strptime(str(n_start), "%H:%M").time()
                 t_n_stop  = datetime.datetime.strptime(str(n_stop),  "%H:%M").time()
             except Exception as e:
-                print(f"⚠️ Remote setpoint reject: invalid time format: {e}")
+                print(f" Remote setpoint reject: invalid time format: {e}")
                 return
 
             if (t_d_start >= t_d_stop or
                 t_n_start < t_d_stop or
                 t_d_start < t_n_stop or
                 t_n_start == t_n_stop):
-                print(f"⚠️ Remote setpoint reject: Day/Night timer conflict for {prefix}")
+                print(f" Remote setpoint reject: Day/Night timer conflict for {prefix}")
                 return
 
         setpoints[room].update(new_sp)
@@ -400,7 +400,7 @@ def on_control_message(client, userdata, msg):
         if "root" in globals():
             try: root.after(0, lambda r=room, ns=new_sp: refresh_labels(r, ns))
             except: pass
-        print(f"✅ Room {room} setpoints updated remotely")
+        print(f" Room {room} setpoints updated remotely")
     except Exception as e:
         print(f"Control MQTT error: {e}")
 
@@ -410,7 +410,7 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
-        print("✅ Control MQTT (Mosquitto VPS) connected/reconnected")
+        print(" Control MQTT (Mosquitto VPS) connected/reconnected")
         for room in [1, 2, 3]:
             client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/update")
             client.subscribe(f"inhydro/{DEVICE_NAME}/room{room}/setpoints/request_sync")
@@ -422,12 +422,12 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
                 pass
     else:
         is_mqtt_connected = False
-        print(f"⚠️ Control MQTT connection failed with code {rc}")
+        print(f" Control MQTT connection failed with code {rc}")
 
 def on_control_disconnect(client, userdata, flags, rc, properties=None, *args, **kwargs):
     global is_mqtt_connected
     is_mqtt_connected = False
-    print("⚠️ Control MQTT (Mosquitto VPS) disconnected")
+    print(" Control MQTT (Mosquitto VPS) disconnected")
 
 import uuid
 client_id = f"Inhydro_Dual_{DEVICE_NAME.strip()}_{uuid.uuid4().hex[:6]}"
@@ -441,9 +441,9 @@ try:
         control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
     control_client.loop_start()
     control_client.connect_async(CONTROL_BROKER, CONTROL_PORT, 10)
-    print("✅ Control MQTT (Mosquitto VPS) loop started (connecting...)")
+    print(" Control MQTT (Mosquitto VPS) loop started (connecting...)")
 except Exception as e:
-    print(f"⚠️  Control MQTT startup failed: {e}")
+    print(f" Control MQTT startup failed: {e}")
 
 
 
@@ -458,7 +458,7 @@ def read_soil_integrated(inst, label):
         ph_val = data[3] / 100.0
         return {"soil_temp": temp, "moisture": moist, "ec": ec_val, "ph": ph_val}
     except Exception as e:
-        print(f"⚠️ [{label}] Integrated Soil read failed: {e}")
+        print(f" [{label}] Integrated Soil read failed: {e}")
         return None
 
 def read_soil_split(inst_ec, inst_ph, label):
@@ -473,7 +473,7 @@ def read_soil_split(inst_ec, inst_ph, label):
             raw_ec = inst_ec.read_register(21, 0)
             ec_val = round(raw_ec / 100.0, 2)
         except Exception as e:
-            print(f"⚠️ [{label} EC] read failed: {e}")
+            print(f" [{label} EC] read failed: {e}")
             
     if inst_ph:
         try:
@@ -481,7 +481,7 @@ def read_soil_split(inst_ec, inst_ph, label):
             data = inst_ph.read_registers(registeraddress=18, number_of_registers=4, functioncode=3)
             ph_val = data[3] / 100.0
         except Exception as e:
-            print(f"⚠️ [{label} pH] read failed: {e}")
+            print(f" [{label} pH] read failed: {e}")
             
     # No temp/moisture sensors for separate setup
     temp = None
@@ -492,24 +492,103 @@ def read_soil_split(inst_ec, inst_ph, label):
         
     return {"soil_temp": temp, "moisture": moist, "ec": ec_val, "ph": ph_val}
 
-def read_md02(inst, label):
-    if not inst: return None
-    try:
-        inst.serial.reset_input_buffer()
-        try:
-            rt = inst.read_register(1, 1, signed=True, functioncode=4)
-            rh = inst.read_register(2, 1, functioncode=4)
-        except Exception:
-            rt = inst.read_register(1, 1, signed=True, functioncode=3)
-            rh = inst.read_register(2, 1, functioncode=3)
-        if rt is not None:
-            rt = round(rt - 5.0, 1)
-        if rh is not None:
-            rh = round(rh - 3.0, 1)
-        return {"room_temp": rt, "room_humi": rh}
-    except Exception as e:
-        print(f"⚠️ [{label} MD02] Read failed: {e}")
+def read_md02(target, label):
+    """
+    Reads MD02 Temperature and Humidity sensor ONLY on its designated target (Instrument or Port path).
+    Supports baudrates 4800 & 9600, checking Reg 0&1 and Reg 1&2.
+    Does NOT cross-read other rooms' serial ports.
+    """
+    if not target:
         return None
+
+    port_path = None
+    if isinstance(target, str):
+        port_path = target
+    elif hasattr(target, 'port') and target.port:
+        port_path = target.port
+
+    # 1. If target is an active Instrument object, try reading directly (auto-switching baudrate if needed):
+    if target and not isinstance(target, str):
+        try:
+            curr_baud = getattr(target.serial, 'baudrate', 9600)
+            bauds_to_try = [curr_baud] + [b for b in [9600, 4800] if b != curr_baud]
+
+            for baud in bauds_to_try:
+                try:
+                    target.serial.baudrate = baud
+                    target.serial.reset_input_buffer()
+                    for fc in [3, 4]:
+                        try:
+                            r0 = target.read_register(0, 0, functioncode=fc)
+                            r1 = target.read_register(1, 0, functioncode=fc)
+                            if r0 is not None and r1 is not None and r0 > 0 and r1 > 0:
+                                v0 = round(r0 / 10.0, 1) if r0 > 100 else round(float(r0), 1)
+                                v1 = round(r1 / 10.0, 1) if r1 > 100 else round(float(r1), 1)
+                                if 0 <= v0 <= 100 and -10 <= v1 <= 65:
+                                    return {"room_temp": v1, "room_humi": v0}
+                                elif -10 <= v0 <= 65 and 0 <= v1 <= 100:
+                                    return {"room_temp": v0, "room_humi": v1}
+                        except Exception:
+                            pass
+
+                        try:
+                            rt = target.read_register(1, 1, signed=True, functioncode=fc)
+                            rh = target.read_register(2, 1, functioncode=fc)
+                            if rt is not None and rh is not None:
+                                return {"room_temp": round(rt, 1), "room_humi": round(rh, 1)}
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # 2. Fallback on designated port_path (closing existing handle first if needed):
+    if not port_path or not os.path.exists(port_path):
+        return None
+
+    if target and hasattr(target, 'serial') and getattr(target.serial, 'is_open', False):
+        try: target.serial.close()
+        except Exception: pass
+
+    for baud in [9600, 4800]:
+        for slave in [1, 2]:
+            inst = None
+            try:
+                inst = minimalmodbus.Instrument(port_path, slave)
+                inst.serial.baudrate = baud
+                inst.serial.timeout = 0.25
+                inst.mode = minimalmodbus.MODE_RTU
+                inst.clear_buffers_before_each_transaction = True
+
+                for fc in [3, 4]:
+                    try:
+                        r0 = inst.read_register(0, 0, functioncode=fc)
+                        r1 = inst.read_register(1, 0, functioncode=fc)
+                        if r0 is not None and r1 is not None and r0 > 0 and r1 > 0:
+                            v0 = round(r0 / 10.0, 1) if r0 > 100 else round(float(r0), 1)
+                            v1 = round(r1 / 10.0, 1) if r1 > 100 else round(float(r1), 1)
+                            if 0 <= v0 <= 100 and -10 <= v1 <= 65:
+                                return {"room_temp": v1, "room_humi": v0}
+                            elif -10 <= v0 <= 65 and 0 <= v1 <= 100:
+                                return {"room_temp": v0, "room_humi": v1}
+                    except Exception:
+                        pass
+
+                    try:
+                        rt = inst.read_register(1, 1, signed=True, functioncode=fc)
+                        rh = inst.read_register(2, 1, functioncode=fc)
+                        if rt is not None and rh is not None:
+                            return {"room_temp": round(rt, 1), "room_humi": round(rh, 1)}
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            finally:
+                if inst and hasattr(inst, "serial") and inst.serial and getattr(inst.serial, "is_open", False):
+                    try: inst.serial.close()
+                    except Exception: pass
+    return None
 
 def read_orp(inst, label):
     if not inst: return None
@@ -520,7 +599,7 @@ def read_orp(inst, label):
         except Exception:
             return inst.read_register(0x0000, 1, signed=True, functioncode=3)
     except Exception as e:
-        print(f"⚠️ [{label} ORP] Read failed: {e}")
+        print(f" [{label} ORP] Read failed: {e}")
         return None
 
 def read_co2(inst, label):
@@ -532,7 +611,7 @@ def read_co2(inst, label):
         except Exception:
             return inst.read_register(0x0000, 0, functioncode=3)
     except Exception as e:
-        print(f"⚠️ [{label} CO2] Read failed: {e}")
+        print(f" [{label} CO2] Read failed: {e}")
         return None
 
 def read_water_meters_r2(preferred_port):
@@ -585,7 +664,7 @@ def read_water_meters_r2(preferred_port):
 
             # 2. Read pH (Slave ID 1) on the EXACT SAME serial path
             time.sleep(0.03)
-            inst.address = 1
+            inst.address = 246
             for fc in [3, 4]:
                 for reg in [0, 2, 1, 3]:
                     try:
@@ -673,9 +752,9 @@ def control_room(room, data):
         m2 = data.get("md02_2")
         co2 = data.get("co2")
         if not m1 and not m2:
-            warnings.append("⚠️ MD02 SENSORS ERROR")
+            warnings.append(" MD02 SENSORS ERROR")
         if co2 is None:
-            warnings.append("⚠️ CO2 SENSOR ERROR")
+            warnings.append(" CO2 SENSOR ERROR")
 
         # AC 1 & HUMI 1 (controls using Sensor 1: m1)
         if m1:
@@ -795,7 +874,7 @@ def control_room(room, data):
             st["ec_active"] = True
             relay_on(ch["ec1"]); relay_on(ch["ec2"])
             st["last_ec"] = now
-            warnings.append("⚠ EC LOW — DOSING")
+            warnings.append(" EC LOW — DOSING")
 
         if st["ec_active"]:
             if ec >= sp["EC MAX"]:
@@ -808,7 +887,7 @@ def control_room(room, data):
         if st["ec_active"] or relay_is_on(ch["ec1"]):
             relay_off(ch["ec1"]); relay_off(ch["ec2"])
             st["ec_active"] = False
-        warnings.append("⚠️ EC SENSOR ERROR")
+        warnings.append(" EC SENSOR ERROR")
 
     # Separated control for pH
     ph = soil.get("ph") if soil else None
@@ -817,7 +896,7 @@ def control_room(room, data):
             st["ph_active"] = True
             relay_on(ch["ph"])
             st["last_ph"] = now
-            warnings.append("⚠ pH HIGH — CORRECTING")
+            warnings.append(" pH HIGH — CORRECTING")
 
         if st["ph_active"]:
             if ph <= sp["PH LOW"]:
@@ -828,7 +907,7 @@ def control_room(room, data):
         if st["ph_active"] or relay_is_on(ch["ph"]):
             relay_off(ch["ph"])
             st["ph_active"] = False
-        warnings.append("⚠️ pH SENSOR ERROR")
+        warnings.append(" pH SENSOR ERROR")
 
     if room_env:
         rt = room_env["room_temp"]; rh = room_env["room_humi"]
@@ -1556,10 +1635,10 @@ def request_setpoints_access(room):
     ops_frame = tk.Frame(main_container, bg="#ffffff")
     ops_frame.pack(pady=5)
     
-    tk.Button(ops_frame, text="✏️ RENAME USER", font=("Arial", 9, "bold"), bg="#64748b", fg="white", width=14, height=1, bd=1, relief="raised",
+    tk.Button(ops_frame, text=" RENAME USER", font=("Arial", 9, "bold"), bg="#64748b", fg="white", width=14, height=1, bd=1, relief="raised",
               command=rename_user_popup).pack(side="left", padx=5)
               
-    tk.Button(ops_frame, text="🔒 CHANGE PIN", font=("Arial", 9, "bold"), bg="#64748b", fg="white", width=14, height=1, bd=1, relief="raised",
+    tk.Button(ops_frame, text=" CHANGE PIN", font=("Arial", 9, "bold"), bg="#64748b", fg="white", width=14, height=1, bd=1, relief="raised",
               command=change_pin_popup).pack(side="left", padx=5)
 
     # Display entry for password (shows bullets/asterisks) with eye symbol
@@ -2918,11 +2997,11 @@ def save_local_telemetry(d1, d2, d3):
     try:
         new_row = pack_entry(ts_str, d1, d2, d3)
     except Exception as e:
-        print(f"⚠️ Error packing local telemetry entry: {e}")
+        print(f" Error packing local telemetry entry: {e}")
         last_local_save_time = current_time
         return
 
-    print(f"📝 Saving local telemetry offline: {ts_str}")
+    print(f" Saving local telemetry offline: {ts_str}")
 
     def write_thread():
         with local_log_lock:
@@ -2938,7 +3017,7 @@ def save_local_telemetry(d1, d2, d3):
                 if os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 1500000:
                     rot_name = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
                     os.rename(ACTIVE_LOG_FILE, rot_name)
-                print(f"✅ Offline telemetry written successfully to {ACTIVE_LOG_FILE}")
+                print(f" Offline telemetry written successfully to {ACTIVE_LOG_FILE}")
             except Exception as e:
                 print(f"Local JSON save error: {e}")
 

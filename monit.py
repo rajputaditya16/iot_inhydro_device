@@ -15,8 +15,8 @@ def get_device_id():
     if os.path.exists(ID_FILE):
         try:
             with open(ID_FILE, "r") as f:
-                val = f.read().strip()
-                if val: return val
+                lines = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+                if lines: return lines[0]
         except Exception: pass
     return "monit" # Default fallback device identity
 
@@ -35,7 +35,7 @@ if os.path.exists(OLD_FILE):
     except Exception: pass
 
 # Strict Fixed Persistent Serial By-Path Links (Zero /dev/ttyUSB* fallback)
-SERIAL_PORT_WATER = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.50-port0"  # Dedicated Combined EC & pH Port
+SERIAL_PORT_WATER = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0"  # Dedicated Combined EC & pH Port
 SERIAL_PORT_EC    = SERIAL_PORT_WATER
 SERIAL_PORT_PH    = SERIAL_PORT_WATER
 SERIAL_PORT_MD02  = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
@@ -67,7 +67,7 @@ def relay_worker_loop():
                     inst.clear_buffers_before_each_transaction = True
                     inst.write_bit(channel, 1 if state else 0, functioncode=5)
             except Exception as e:
-                print(f"⚠️ Relay Write Error on {SERIAL_PORT_RELAY}: {e}")
+                print(f" Relay Write Error on {SERIAL_PORT_RELAY}: {e}")
             finally:
                 if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
                     try: inst.serial.close()
@@ -285,82 +285,56 @@ ec_instrument   = open_modbus_instrument(SERIAL_PORT_EC, DEVICE_ID_EC)
 ph_instrument   = open_modbus_instrument(SERIAL_PORT_PH, DEVICE_ID_PH)
 md02_instrument = open_modbus_instrument(SERIAL_PORT_MD02, DEVICE_ID_MD02)
 
-def get_water_port():
-    if os.path.exists(SERIAL_PORT_WATER) and not os.path.isdir(SERIAL_PORT_WATER):
-        return SERIAL_PORT_WATER
-    return None
-
-# Read Dedicated EC Meter STRICTLY via SERIAL_PORT_WATER
+# Read Dedicated EC Meter (Slave ID 31 -> Reg 3) STRICTLY via SERIAL_PORT_WATER
 def read_ec_meter():
-    port = get_water_port()
-    if not port:
-        return None
+    inst = None
+    try:
+        inst = minimalmodbus.Instrument(SERIAL_PORT_WATER, DEVICE_ID_EC)
+        inst.serial.baudrate = 9600
+        inst.serial.timeout = 0.3
+        inst.mode = minimalmodbus.MODE_RTU
+        inst.clear_buffers_before_each_transaction = True
 
-    for slave in [DEVICE_ID_EC, 3, 31, 1]:
-        inst = None
-        try:
-            inst = minimalmodbus.Instrument(port, slave)
-            inst.serial.baudrate = 9600
-            inst.serial.timeout = 0.3
-            inst.mode = minimalmodbus.MODE_RTU
-            inst.clear_buffers_before_each_transaction = True
-
-            for fc in [3, 4]:
-                try:
-                    if hasattr(inst.serial, 'reset_input_buffer'):
-                        try: inst.serial.reset_input_buffer()
-                        except Exception: pass
-                    data = inst.read_registers(1, 3, functioncode=fc)
-                    if data and len(data) >= 3:
-                        raw_ec = data[2]
-                        if raw_ec > 0:
-                            ec_val = round(raw_ec / 1000.0, 3)
-                            return {"ec": ec_val, "raw_ec": raw_ec, "ph": None}
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        finally:
-            if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
-                try: inst.serial.close()
-                except Exception: pass
+        for fc in [3, 4]:
+            try:
+                data = inst.read_registers(1, 3, functioncode=fc) # [55 (SP), 0 (HYSt), 643 (Live EC)]
+                raw_ec = data[2] if len(data) >= 3 else inst.read_register(3, 0, functioncode=fc)
+                ec_val = round(raw_ec / 1000.0, 3)
+                return {"ec": ec_val, "raw_ec": raw_ec, "ph": None}
+            except Exception:
+                pass
+    except Exception:
+        pass
+    finally:
+        if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
+            try: inst.serial.close()
+            except Exception: pass
     return None
 
-# Read Dedicated pH Meter STRICTLY via SERIAL_PORT_WATER
+# Read Dedicated pH Meter (Slave ID 32 -> Reg 2) STRICTLY via SERIAL_PORT_WATER
 def read_ph_meter():
-    port = get_water_port()
-    if not port:
-        return None
+    inst = None
+    try:
+        inst = minimalmodbus.Instrument(SERIAL_PORT_WATER, DEVICE_ID_PH)
+        inst.serial.baudrate = 9600
+        inst.serial.timeout = 0.3
+        inst.mode = minimalmodbus.MODE_RTU
+        inst.clear_buffers_before_each_transaction = True
 
-    for slave in [DEVICE_ID_PH, 1, 32, 2]:
-        inst = None
-        try:
-            inst = minimalmodbus.Instrument(port, slave)
-            inst.serial.baudrate = 9600
-            inst.serial.timeout = 0.3
-            inst.mode = minimalmodbus.MODE_RTU
-            inst.clear_buffers_before_each_transaction = True
-
-            for fc in [3, 4]:
-                try:
-                    if hasattr(inst.serial, 'reset_input_buffer'):
-                        try: inst.serial.reset_input_buffer()
-                        except Exception: pass
-                    data = inst.read_registers(0, 3, functioncode=fc)
-                    if data and len(data) >= 3:
-                        ph_raw = data[2]
-                        if ph_raw > 0:
-                            ph_val = round(ph_raw / 100.0, 2)
-                            if 0 <= ph_val <= 14:
-                                return {"ph": ph_val}
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        finally:
-            if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
-                try: inst.serial.close()
-                except Exception: pass
+        for fc in [3, 4]:
+            try:
+                data = inst.read_registers(0, 3, functioncode=fc) # [580, 604, 790 (Live pH)]
+                ph_raw = data[2]
+                ph_val = round(ph_raw / 100.0, 2)
+                return {"ph": ph_val}
+            except Exception:
+                pass
+    except Exception:
+        pass
+    finally:
+        if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
+            try: inst.serial.close()
+            except Exception: pass
     return None
 
 # Combined Water Sensor Reader combining EC and pH meter readings
@@ -514,7 +488,7 @@ def on_control_message(client, userdata, msg):
                 try: root.after(0, update_ui)
                 except Exception: pass
     except Exception as e:
-        print(f"❌ Private Control MQTT Update Error: {e}")
+        print(f" Private Control MQTT Update Error: {e}")
 
 is_mqtt_connected = False
 control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Monit_Device_{DEVICE_NAME}")

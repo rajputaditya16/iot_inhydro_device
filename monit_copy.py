@@ -66,7 +66,7 @@ def relay_worker_loop():
                 inst.clear_buffers_before_each_transaction = True
                 inst.write_bit(channel, 1 if state else 0, functioncode=5)
             except Exception as e:
-                print(f"⚠️ Relay Write Error on {SERIAL_PORT_RELAY}: {e}")
+                print(f" Relay Write Error on {SERIAL_PORT_RELAY}: {e}")
             finally:
                 if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
                     try: inst.serial.close()
@@ -418,7 +418,7 @@ def on_control_message(client, userdata, msg):
             try: root.after(0, update_ui)
             except Exception: pass
     except Exception as e:
-        print(f"❌ Private Control MQTT Update Error: {e}")
+        print(f" Private Control MQTT Update Error: {e}")
 
 is_mqtt_connected = False
 control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Monit_Device_{DEVICE_NAME}")
@@ -2252,16 +2252,16 @@ def update():
         lbl_val_ec.config(text=f"{water_data['ec']:.3f} mS/cm ({tds:.0f} ppm)", fg="#0d47a1")
         lbl_val_ph.config(text=f"{water_data['ph']:.2f}", fg="#0d47a1")
     else:
-        lbl_val_ec.config(text="ERROR", fg="#c62828")
-        lbl_val_ph.config(text="ERROR", fg="#c62828")
+        lbl_val_ec.config(text="N/A",fg="#c62828")
+        lbl_val_ph.config(text="N/A", fg="#c62828")
 
     # 2. Update Room (MD02) Sensor Labels
     if md02_data:
         lbl_val_room_temp.config(text=f"{md02_data['room_temp']} °C", fg="#0d47a1")
         lbl_val_room_humi.config(text=f"{md02_data['room_humi']} %", fg="#0d47a1")
     else:
-        lbl_val_room_temp.config(text="ERROR", fg="#c62828")
-        lbl_val_room_humi.config(text="ERROR", fg="#c62828")
+        lbl_val_room_temp.config(text="N/A", fg="#c62828")
+        lbl_val_room_humi.config(text="N/A",fg="#c62828")
 
     # 3. Update Relay Status Labels
     relay_states = {

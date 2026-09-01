@@ -1,0 +1,9 @@
+{
+    "relay_port": "/dev/serial/by-path/usb-0:1:2:1:0-port0",
+    "upload_frequency_min": 60,
+    "temp_alarm_offset": 5.0,
+    "humi_alarm_offset": 5.0,
+    "sensor_names": {
+        "S1": "COLD ROOYYYYY"
+    }
+}
