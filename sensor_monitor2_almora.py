@@ -62,8 +62,7 @@ CO2_SENSOR_MAP = {
     "S7": "/dev/serial/by-path/usb_PLACEHOLDER_CO2_S7"
 }
 RELAY_PORT_FIXED = "/dev/serial/by-path/usb-0:1:2:1:0-port0"
-BUZZER_CHANNEL = 15   # Dedicated relay channel for 30s hardware buzzer
-LIGHTING_CHANNEL = 16 # Dedicated relay channel for Grow Light Photoperiod control
+BUZZER_CHANNEL = 22   # Dedicated relay channel for 30s hardware buzzer (after room 1-7 relays)
 
 POSSIBLE_RELAY_IDS = [255, 1, 2, 0, 3]  
 working_relay_id = None
@@ -659,33 +658,33 @@ def sensor_reader():
         ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
         now_str = datetime.datetime.now(ist_tz).strftime("%H:%M")
         
-        # Photoperiod Grow Lights Evaluation
-        current_lighting_state = False
-        for skey in SENSOR_MAP.keys():
-            sp_eval = get_active_setpoints(skey)
-            p_on_24 = format_time_24h(sp_eval.get("photoperiod_on", "06:00 AM"))
-            p_off_24 = format_time_24h(sp_eval.get("photoperiod_off", "08:00 PM"))
-            l_enabled = sp_eval.get("lighting_enabled", True)
-            if l_enabled:
-                if p_on_24 <= p_off_24:
-                    if p_on_24 <= now_str <= p_off_24: current_lighting_state = True
-                else:
-                    if now_str >= p_on_24 or now_str <= p_off_24: current_lighting_state = True
-
         if os.path.exists(RELAY_PORT_FIXED):
-            set_relay(LIGHTING_CHANNEL, current_lighting_state)
-            relay_states[LIGHTING_CHANNEL] = current_lighting_state
-
             temp_alarm_offset = float(system_config.get('temp_alarm_offset', 5.0))
             humi_alarm_offset = float(system_config.get('humi_alarm_offset', 5.0))
 
             for skey, port in SENSOR_MAP.items():
                 idx = int(skey.replace('S', '')) - 1
-                ch_f = (idx * 2) + 1        # S1→ch1, S2→ch3...
-                ch_h = (idx * 2) + 2        # S1→ch2, S2→ch4...
+                ch_f = (idx * 3) + 1        # S1→ch1, S2→ch4, S3→ch7, S4→ch10, S5→ch13, S6→ch16, S7→ch19
+                ch_h = (idx * 3) + 2        # S1→ch2, S2→ch5, S3→ch8, S4→ch11, S5→ch14, S6→ch17, S7→ch20
+                ch_l = (idx * 3) + 3        # S1→ch3, S2→ch6, S3→ch9, S4→ch12, S5→ch15, S6→ch18, S7→ch21
 
                 sp_eval = get_active_setpoints(skey)
                 
+                # Dedicated Photoperiod Lighting Relay Control for THIS Room
+                p_on_24 = format_time_24h(sp_eval.get("photoperiod_on", "06:00 AM"))
+                p_off_24 = format_time_24h(sp_eval.get("photoperiod_off", "08:00 PM"))
+                l_enabled = sp_eval.get("lighting_enabled", True)
+                
+                room_light_state = False
+                if l_enabled:
+                    if p_on_24 <= p_off_24:
+                        if p_on_24 <= now_str <= p_off_24: room_light_state = True
+                    else:
+                        if now_str >= p_on_24 or now_str <= p_off_24: room_light_state = True
+
+                set_relay(ch_l, room_light_state)
+                relay_states[ch_l] = room_light_state
+
                 with sensor_data_lock:
                     data = sensor_data.get(port, {'status': 'OFFLINE'})
 
@@ -1024,10 +1023,10 @@ def update_ui():
             sp_eval = get_active_setpoints(skey)
             if d['status'] == 'OK':
                 idx = int(skey.replace('S', '')) - 1
-                mapped_f, mapped_h = (idx * 2) + 1, (idx * 2) + 2
+                mapped_f, mapped_h, mapped_l = (idx * 3) + 1, (idx * 3) + 2, (idx * 3) + 3
                 f_s = "[ON]" if relay_states.get(mapped_f) else "[OFF]"
                 h_s = "[ON]" if relay_states.get(mapped_h) else "[OFF]"
-                l_s = "[ON]" if relay_states.get(LIGHTING_CHANNEL) else "[OFF]"
+                l_s = "[ON]" if relay_states.get(mapped_l) else "[OFF]"
                 c_val = d.get('co2')
                 co2_str = f"{c_val:.1f} ppm" if (c_val is not None and c_val > 0) else "N/A"
                 txt = (

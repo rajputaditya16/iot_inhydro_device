@@ -62,8 +62,7 @@ CO2_SENSOR_MAP = {
     "S7": "/dev/serial/by-path/usb_PLACEHOLDER_CO2_S7"
 }
 RELAY_PORT_FIXED = "/dev/serial/by-path/usb-0:1:2:1:0-port0"
-BUZZER_CHANNEL = 15   # Dedicated relay channel for 30s hardware buzzer
-LIGHTING_CHANNEL = 16 # Dedicated relay channel for Grow Light Photoperiod control
+BUZZER_CHANNEL = 22   # Dedicated relay channel for 30s hardware buzzer (after room 1-7 relays)
 
 POSSIBLE_RELAY_IDS = [255, 1, 2, 0, 3]  
 working_relay_id = None
@@ -589,28 +588,24 @@ def sensor_reader():
 
             time.sleep(DELAY_BETWEEN_PORTS)
             try:
+                instrument = minimalmodbus.Instrument(port, SLAVE_ID)
+                instrument.serial.baudrate = BAUDRATE
+                instrument.serial.timeout = 0.5
+                
+                # 1. READ 2 REGISTERS FIRST (Temp & Humi Only) - Ensures 100% MD02 Reliability
                 values = None
-                for baud in [9600, 4800]:
-                    for slave_id in [SLAVE_ID, 2, 3, 255]:
+                try:
+                    values = instrument.read_registers(1, 2, functioncode=4)
+                except Exception:
+                    try:
+                        values = instrument.read_registers(0, 2, functioncode=4)
+                    except Exception:
                         try:
-                            instrument = minimalmodbus.Instrument(port, slave_id)
-                            instrument.serial.baudrate = baud
-                            instrument.serial.timeout = 0.3
-                            instrument.close_port_after_each_call = True
-                            
-                            for fc in [4, 3]:
-                                for addr in [1, 0]:
-                                    try:
-                                        values = instrument.read_registers(addr, 2, functioncode=fc)
-                                        if values and len(values) >= 2 and (values[0] > 0 or values[1] > 0):
-                                            break
-                                    except Exception: pass
-                                if values and len(values) >= 2 and (values[0] > 0 or values[1] > 0): break
-                            try: instrument.serial.close()
+                            values = instrument.read_registers(1, 2, functioncode=3)
+                        except Exception:
+                            try:
+                                values = instrument.read_registers(0, 2, functioncode=3)
                             except Exception: pass
-                            if values and len(values) >= 2 and (values[0] > 0 or values[1] > 0): break
-                        except Exception: pass
-                    if values and len(values) >= 2 and (values[0] > 0 or values[1] > 0): break
 
                 if not values or len(values) < 2:
                     raise ValueError("MD02 Modbus Read Failed")
@@ -663,33 +658,33 @@ def sensor_reader():
         ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
         now_str = datetime.datetime.now(ist_tz).strftime("%H:%M")
         
-        # Photoperiod Grow Lights Evaluation
-        current_lighting_state = False
-        for skey in SENSOR_MAP.keys():
-            sp_eval = get_active_setpoints(skey)
-            p_on_24 = format_time_24h(sp_eval.get("photoperiod_on", "06:00 AM"))
-            p_off_24 = format_time_24h(sp_eval.get("photoperiod_off", "08:00 PM"))
-            l_enabled = sp_eval.get("lighting_enabled", True)
-            if l_enabled:
-                if p_on_24 <= p_off_24:
-                    if p_on_24 <= now_str <= p_off_24: current_lighting_state = True
-                else:
-                    if now_str >= p_on_24 or now_str <= p_off_24: current_lighting_state = True
-
         if os.path.exists(RELAY_PORT_FIXED):
-            set_relay(LIGHTING_CHANNEL, current_lighting_state)
-            relay_states[LIGHTING_CHANNEL] = current_lighting_state
-
             temp_alarm_offset = float(system_config.get('temp_alarm_offset', 5.0))
             humi_alarm_offset = float(system_config.get('humi_alarm_offset', 5.0))
 
             for skey, port in SENSOR_MAP.items():
                 idx = int(skey.replace('S', '')) - 1
-                ch_f = (idx * 2) + 1        # S1→ch1, S2→ch3...
-                ch_h = (idx * 2) + 2        # S1→ch2, S2→ch4...
+                ch_f = (idx * 3) + 1        # S1→ch1, S2→ch4, S3→ch7, S4→ch10, S5→ch13, S6→ch16, S7→ch19
+                ch_h = (idx * 3) + 2        # S1→ch2, S2→ch5, S3→ch8, S4→ch11, S5→ch14, S6→ch17, S7→ch20
+                ch_l = (idx * 3) + 3        # S1→ch3, S2→ch6, S3→ch9, S4→ch12, S5→ch15, S6→ch18, S7→ch21
 
                 sp_eval = get_active_setpoints(skey)
                 
+                # Dedicated Photoperiod Lighting Relay Control for THIS Room
+                p_on_24 = format_time_24h(sp_eval.get("photoperiod_on", "06:00 AM"))
+                p_off_24 = format_time_24h(sp_eval.get("photoperiod_off", "08:00 PM"))
+                l_enabled = sp_eval.get("lighting_enabled", True)
+                
+                room_light_state = False
+                if l_enabled:
+                    if p_on_24 <= p_off_24:
+                        if p_on_24 <= now_str <= p_off_24: room_light_state = True
+                    else:
+                        if now_str >= p_on_24 or now_str <= p_off_24: room_light_state = True
+
+                set_relay(ch_l, room_light_state)
+                relay_states[ch_l] = room_light_state
+
                 with sensor_data_lock:
                     data = sensor_data.get(port, {'status': 'OFFLINE'})
 
@@ -1028,10 +1023,10 @@ def update_ui():
             sp_eval = get_active_setpoints(skey)
             if d['status'] == 'OK':
                 idx = int(skey.replace('S', '')) - 1
-                mapped_f, mapped_h = (idx * 2) + 1, (idx * 2) + 2
+                mapped_f, mapped_h, mapped_l = (idx * 3) + 1, (idx * 3) + 2, (idx * 3) + 3
                 f_s = "[ON]" if relay_states.get(mapped_f) else "[OFF]"
                 h_s = "[ON]" if relay_states.get(mapped_h) else "[OFF]"
-                l_s = "[ON]" if relay_states.get(LIGHTING_CHANNEL) else "[OFF]"
+                l_s = "[ON]" if relay_states.get(mapped_l) else "[OFF]"
                 c_val = d.get('co2')
                 co2_str = f"{c_val:.1f} ppm" if (c_val is not None and c_val > 0) else "N/A"
                 txt = (
@@ -1235,7 +1230,7 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
             ('7', 1, 0), ('8', 1, 1), ('9', 1, 2),
             ('4', 2, 0), ('5', 2, 1), ('6', 2, 2),
             ('1', 3, 0), ('2', 3, 1), ('3', 3, 2),
-            ('-', 4, 0), ('0', 4, 1), ('2026-', 4, 2)
+            ('-', 4, 0), ('0', 4, 1), (':', 4, 2)
         ]
         for t, r, c in date_grid:
             tk.Button(kp_buttons_frame, text=t, font=("Arial", 15, "bold"), width=7, height=1, bg="#f1f5f9", fg="#0f172a",
@@ -2127,7 +2122,7 @@ def load_schedule_form():
     if not stage_enabled:
         dis_box = tk.Frame(grids_wrapper, bg="#fef2f2", bd=1, relief="solid", highlightbackground="#ef4444")
         dis_box.pack(fill="x", padx=10, pady=4)
-        tk.Label(dis_box, text=f"⛔ THIS CROP STAGE ({profile_disp_name.upper()}) IS CURRENTLY DISABLED / OFF", font=("Helvetica", 11, "bold"), fg="#b91c1c", bg="#fef2f2").pack(padx=10, pady=6)
+        tk.Label(dis_box, text=f"THIS CROP STAGE ({profile_disp_name.upper()}) IS CURRENTLY DISABLED / OFF", font=("Helvetica", 11, "bold"), fg="#b91c1c", bg="#fef2f2").pack(padx=10, pady=6)
 
     time_slots = st.get("time_slots", [])
 
@@ -2135,16 +2130,20 @@ def load_schedule_form():
     if overlaps:
         w_box = tk.Frame(grids_wrapper, bg="#fef2f2", bd=1, relief="solid", highlightbackground="#ef4444")
         w_box.pack(fill="x", padx=10, pady=4)
-        tk.Label(w_box, text=f"⚠️ TIME SLOT OVERLAP DETECTED:\n" + "\n".join(overlaps), font=("Helvetica", 11, "bold"), fg="#b91c1c", bg="#fef2f2").pack(padx=10, pady=6)
+        tk.Label(w_box, text=f" TIME SLOT OVERLAP DETECTED:\n" + "\n".join(overlaps), font=("Helvetica", 11, "bold"), fg="#b91c1c", bg="#fef2f2").pack(padx=10, pady=6)
 
     temp_inner = tk.Frame(temp_grid_frame, bg="white")
-    temp_inner.pack(fill="x", padx=8, pady=4)
+    temp_inner.pack(anchor="center", padx=8, pady=4)
 
     humi_inner = tk.Frame(humi_grid_frame, bg="white")
-    humi_inner.pack(fill="x", padx=8, pady=4)
+    humi_inner.pack(anchor="center", padx=8, pady=4)
+    
+    for c in range(6):
+        temp_inner.columnconfigure(c, weight=1)
+        humi_inner.columnconfigure(c, weight=1)
 
-    card_title_font = font.Font(size=11, weight="bold")
-    card_time_font = font.Font(size=10, weight="bold")
+    card_title_font = font.Font(size=12, weight="bold")
+    card_time_font = font.Font(size=11, weight="bold")
     card_val_font = font.Font(size=11, weight="bold")
 
     num_slots = len(time_slots)
@@ -2176,43 +2175,36 @@ def load_schedule_form():
 
         sched_entries[idx] = (l_fname, l_tstart, l_tstop, l_tset_val, l_tmax_val, l_tmin_val, l_hset_val, l_hmax_val, l_hmin_val)
 
-        # 1. HORIZONTAL ROW STRIP FOR TEMP SLOT (LEFT TO RIGHT)
-        row_t = tk.Frame(temp_inner, bg="#f8fafc", bd=1, relief="solid", highlightbackground="#cbd5e1")
-        row_t.pack(fill="x", padx=6, pady=4)
+        r_pos = idx // 3
+        c_pos = (idx % 3) * 2
 
-        f_left_t = tk.Frame(row_t, bg="#f8fafc")
-        f_left_t.pack(side="left", padx=12, pady=6)
-        tk.Label(f_left_t, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc", anchor="w").pack(anchor="w")
-        tk.Label(f_left_t, text=f"🕒 {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc", anchor="w").pack(anchor="w")
+        # CARD FOR TEMP
+        card_t = tk.Frame(temp_inner, bg="#f8fafc", bd=2, relief="solid", highlightbackground="#cbd5e1", width=240, height=170)
+        card_t.pack_propagate(False)
+        card_t.grid(row=r_pos, column=c_pos, columnspan=2, padx=8, pady=6)
 
-        f_mid_t = tk.Frame(row_t, bg="#f8fafc")
-        f_mid_t.pack(side="left", expand=True, fill="x", padx=12, pady=6)
-        tk.Label(f_mid_t, text=f"TARGET: {t_set_v:.1f}°C", font=card_val_font, fg="#1565c0", bg="#f8fafc", anchor="w").pack(anchor="w")
-        tk.Label(f_mid_t, text=f"COOLING ON: {t_max_v:.1f}°C   |   COOLING OFF: {t_min_v:.1f}°C", font=("Helvetica", 10, "bold"), fg="#475569", bg="#f8fafc", anchor="w").pack(anchor="w")
+        tk.Label(card_t, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc").pack(pady=(6,2))
+        tk.Label(card_t, text=f" {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc").pack(pady=2)
+        tk.Label(card_t, text=f"TARGET: {t_set_v:.1f}°C", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(pady=2)
+        tk.Label(card_t, text=f"ON: {t_max_v:.1f}°C | OFF: {t_min_v:.1f}°C", font=card_val_font, fg="#475569", bg="#f8fafc").pack(pady=2)
 
-        f_right_t = tk.Frame(row_t, bg="#f8fafc")
-        f_right_t.pack(side="right", padx=12, pady=6)
-        tk.Button(f_right_t, text="EDIT FRAME", font=BTN_FONT_CARD, bg="#cbd5e1", fg="#1e293b", width=11, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=3)
-        tk.Button(f_right_t, text="DELETE", font=BTN_FONT_CARD, bg="#dc2626", fg="white", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: delete_time_slot(i)).pack(side="left", padx=3)
+        t_btn_f = tk.Frame(card_t, bg="#f8fafc"); t_btn_f.pack(pady=(4, 2))
+        tk.Button(t_btn_f, text="EDIT FRAME", font=BTN_FONT_CARD, bg="#cbd5e1", fg="#1e293b", width=12, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=3)
+        tk.Button(t_btn_f, text="DELETE", font=BTN_FONT_CARD, bg="#dc2626", fg="white", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: delete_time_slot(i)).pack(side="left", padx=3)
 
-        # 2. HORIZONTAL ROW STRIP FOR HUMI SLOT (LEFT TO RIGHT)
-        row_h = tk.Frame(humi_inner, bg="#f8fafc", bd=1, relief="solid", highlightbackground="#cbd5e1")
-        row_h.pack(fill="x", padx=6, pady=4)
+        # CARD FOR HUMI
+        card_h = tk.Frame(humi_inner, bg="#f8fafc", bd=2, relief="solid", highlightbackground="#cbd5e1", width=240, height=170)
+        card_h.pack_propagate(False)
+        card_h.grid(row=r_pos, column=c_pos, columnspan=2, padx=8, pady=6)
 
-        f_left_h = tk.Frame(row_h, bg="#f8fafc")
-        f_left_h.pack(side="left", padx=12, pady=6)
-        tk.Label(f_left_h, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc", anchor="w").pack(anchor="w")
-        tk.Label(f_left_h, text=f"🕒 {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc", anchor="w").pack(anchor="w")
+        tk.Label(card_h, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc").pack(pady=(6,2))
+        tk.Label(card_h, text=f" {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc").pack(pady=2)
+        tk.Label(card_h, text=f"TARGET: {h_set_v:.1f}%", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(pady=2)
+        tk.Label(card_h, text=f"ON: {h_max_v:.1f}% | OFF: {h_min_v:.1f}%", font=card_val_font, fg="#475569", bg="#f8fafc").pack(pady=2)
 
-        f_mid_h = tk.Frame(row_h, bg="#f8fafc")
-        f_mid_h.pack(side="left", expand=True, fill="x", padx=12, pady=6)
-        tk.Label(f_mid_h, text=f"TARGET: {h_set_v:.1f}%", font=card_val_font, fg="#1565c0", bg="#f8fafc", anchor="w").pack(anchor="w")
-        tk.Label(f_mid_h, text=f"HUMIDIFIER ON: {h_min_v:.1f}%   |   HUMIDIFIER OFF: {h_max_v:.1f}%", font=("Helvetica", 10, "bold"), fg="#475569", bg="#f8fafc", anchor="w").pack(anchor="w")
-
-        f_right_h = tk.Frame(row_h, bg="#f8fafc")
-        f_right_h.pack(side="right", padx=12, pady=6)
-        tk.Button(f_right_h, text="EDIT FRAME", font=BTN_FONT_CARD, bg="#cbd5e1", fg="#1e293b", width=11, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=3)
-        tk.Button(f_right_h, text="DELETE", font=BTN_FONT_CARD, bg="#dc2626", fg="white", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: delete_time_slot(i)).pack(side="left", padx=3)
+        h_btn_f = tk.Frame(card_h, bg="#f8fafc"); h_btn_f.pack(pady=(4, 2))
+        tk.Button(h_btn_f, text="EDIT FRAME", font=BTN_FONT_CARD, bg="#cbd5e1", fg="#1e293b", width=12, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=3)
+        tk.Button(h_btn_f, text="DELETE", font=BTN_FONT_CARD, bg="#dc2626", fg="white", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: delete_time_slot(i)).pack(side="left", padx=3)
 
 def open_schedule_editor(skey="S1"):
     dname = get_sensor_display_name(skey)

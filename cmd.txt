@@ -37,6 +37,7 @@ To replace the Raspberry Pi logo in the top-left corner of the desktop menu bar:
 
 Step 1: Overwrite Default UI Icon
 bash
+sudo mkdir -p /usr/share/raspberrypi-ui-mods/icons/
 sudo cp /home/inhydro/Desktop/iot_inhydro_device/logo.png /usr/share/raspberrypi-ui-mods/icons/rpi-2020.png
 Step 2: Refresh Desktop Panel
 bash
