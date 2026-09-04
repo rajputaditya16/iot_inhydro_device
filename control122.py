@@ -1160,6 +1160,7 @@ def start_bluetooth_server():
 
 
 root = tk.Tk()
+root.update()
 root.attributes("-fullscreen", True)
 root.configure(bg="white")
 root.bind("<Escape>", lambda e: root.destroy())

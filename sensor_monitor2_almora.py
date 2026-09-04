@@ -36,7 +36,7 @@ ALARM_LOG_FILE = os.path.join(BASE_DIR, "alarm_history.jsonl")
 
 # MODBUS SETTINGS
 SLAVE_ID = 1
-BAUDRATE = 9600
+BAUDRATE = 4800
 RELAY_BAUD = 9600
 DELAY_BETWEEN_PORTS = 0.2
 
@@ -300,7 +300,11 @@ def get_active_setpoints(skey):
     active_info = {
         "skey": skey,
         "setting_name": "STATIC",
-        "slot_id": 0,
+        "program_name": "Default Program",
+        "stage_name": "Stage 1",
+        "slot_id": 1,
+        "start": "08:00 AM",
+        "stop": "12:00 PM",
         "target_temp": round((t_min + t_max) / 2.0, 1),
         "target_humi": round((h_min + h_max) / 2.0, 1),
         "photoperiod_on": "06:00 AM",
@@ -362,9 +366,15 @@ def get_active_setpoints(skey):
                 h_max_v = float(slot.get("h_max", h_set_v + 5.0))
                 h_min_v = float(slot.get("h_min", h_set_v - 5.0))
 
+                s_name = slot.get("name", slot.get("stage_name", f"Slot {slot.get('id', 1)}"))
+
                 active_info.update({
                     "setting_name": setting.get("name", set_key),
+                    "program_name": setting.get("name", set_key),
+                    "stage_name": s_name,
                     "slot_id": slot.get("id", 1),
+                    "start": slot.get("start", "08:00 AM"),
+                    "stop": slot.get("stop", "12:00 PM"),
                     "target_temp": round(t_set_v, 1),
                     "target_humi": round(h_set_v, 1),
                     "photoperiod_on": p_on,
@@ -439,7 +449,15 @@ def start_bluetooth_server():
     try:
         os.system("sudo sdptool add SP >/dev/null 2>&1"); time.sleep(1)
         srv = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        srv.bind((socket.BDADDR_ANY, 1)); srv.listen(1)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            srv.bind((socket.BDADDR_ANY, 1))
+        except OSError:
+            # Address already in use retry logic
+            time.sleep(2)
+            try: srv.bind((socket.BDADDR_ANY, 1))
+            except: return
+        srv.listen(1)
         while True:
             try:
                 client, _ = srv.accept()
@@ -460,7 +478,7 @@ def start_bluetooth_server():
             except: pass
             finally: 
                 if 'client' in locals(): client.close()
-    except Exception as e: print("BT Error:", e)
+    except Exception as e: print("BT Info:", e)
 
 
 
@@ -588,32 +606,43 @@ def sensor_reader():
 
             time.sleep(DELAY_BETWEEN_PORTS)
             try:
-                instrument = minimalmodbus.Instrument(port, SLAVE_ID)
-                instrument.serial.baudrate = BAUDRATE
-                instrument.serial.timeout = 0.5
-                
-                # 1. READ 2 REGISTERS FIRST (Temp & Humi Only) - Ensures 100% MD02 Reliability
                 values = None
-                try:
-                    values = instrument.read_registers(1, 2, functioncode=4)
-                except Exception:
-                    try:
-                        values = instrument.read_registers(0, 2, functioncode=4)
-                    except Exception:
+                for baud in [4800, 9600]:
+                    for slave_id in [SLAVE_ID, 1, 2, 3, 255]:
                         try:
-                            values = instrument.read_registers(1, 2, functioncode=3)
-                        except Exception:
-                            try:
-                                values = instrument.read_registers(0, 2, functioncode=3)
-                            except Exception: pass
+                            instrument = minimalmodbus.Instrument(port, slave_id)
+                            instrument.serial.baudrate = baud
+                            instrument.serial.timeout = 0.2
+                            instrument.close_port_after_each_call = True
+                            
+                            for fc in [4, 3]:
+                                for addr in [0, 1]:
+                                    try:
+                                        res = instrument.read_registers(addr, 2, functioncode=fc)
+                                        if res and len(res) >= 2 and (res[0] > 0 or res[1] > 0):
+                                            values = res
+                                            break
+                                    except Exception: pass
+                                if values: break
+                            if values: break
+                        except Exception: pass
+                    if values: break
 
                 if not values or len(values) < 2:
                     raise ValueError("MD02 Modbus Read Failed")
 
-                temp = values[0] / 10.0
-                humi = values[1] / 10.0
-                if temp > 150: temp /= 10.0
-                if humi > 150: humi /= 10.0
+                val0 = values[0] / 10.0
+                val1 = values[1] / 10.0
+                if val0 > 150: val0 /= 10.0
+                if val1 > 150: val1 /= 10.0
+
+                # Intelligent Auto-Detection of Temp & Humidity Registers
+                if val0 > val1 and val0 > 45.0:
+                    humi = val0
+                    temp = val1
+                else:
+                    temp = val0
+                    humi = val1
 
                 # 2. SEPARATE OPTIONAL CO2 READ (Isolated so absent CO2 never causes MD02 Error)
                 co2 = None
@@ -751,8 +780,10 @@ def sensor_reader():
         time.sleep(1)
 
 root = tk.Tk()
+root.update()
 root.attributes("-fullscreen", True)
 root.configure(bg="white")
+root.bind("<Escape>", lambda e: root.destroy())
 
 big = font.Font(family="Arial", size=20, weight="bold")
 med = font.Font(family="Arial", size=14, weight="bold")
@@ -1021,25 +1052,92 @@ def update_ui():
             d = snap[active_detail_port]
             skey = next((k for k, v in SENSOR_MAP.items() if v == active_detail_port), "S1")
             sp_eval = get_active_setpoints(skey)
-            if d['status'] == 'OK':
-                idx = int(skey.replace('S', '')) - 1
-                mapped_f, mapped_h, mapped_l = (idx * 3) + 1, (idx * 3) + 2, (idx * 3) + 3
-                f_s = "[ON]" if relay_states.get(mapped_f) else "[OFF]"
-                h_s = "[ON]" if relay_states.get(mapped_h) else "[OFF]"
-                l_s = "[ON]" if relay_states.get(mapped_l) else "[OFF]"
+            idx = int(skey.replace('S', '')) - 1
+            mapped_f, mapped_h, mapped_l = (idx * 3) + 1, (idx * 3) + 2, (idx * 3) + 3
+            
+            f_s = "ON" if relay_states.get(mapped_f) else "OFF"
+            h_s = "ON" if relay_states.get(mapped_h) else "OFF"
+            l_s = "ON" if relay_states.get(mapped_l) else "OFF"
+            
+            p_on = sp_eval.get('photoperiod_on', '06:00 AM')
+            p_off = sp_eval.get('photoperiod_off', '08:00 PM')
+            slot_start = format_time_12h(sp_eval.get('start', '08:00 AM'))
+            slot_stop = format_time_12h(sp_eval.get('stop', '12:00 PM'))
+
+            t_min, t_max = sp_eval['T MIN'], sp_eval['T MAX']
+            h_min, h_max = sp_eval['H MIN'], sp_eval['H MAX']
+
+            prog_name = sp_eval.get('program_name', sp_eval.get('setting_name', 'Default Program'))
+            stage_name = sp_eval.get('stage_name', f"Slot {sp_eval.get('slot_id', 1)}")
+
+            txt_detail_data.config(state="normal")
+            txt_detail_data.delete("1.0", "end")
+
+            # 1. Room Name (Black)
+            txt_detail_data.insert("end", f"{get_sensor_display_name(skey)}\n\n", "black")
+
+            # 2. Live Data (Black label, Blue data value, Red error/NA)
+            if d and d.get('status') == 'OK':
+                txt_detail_data.insert("end", "TEMP: ", "black")
+                txt_detail_data.insert("end", f"{d['temp']:.1f} °C\n", "blue")
+                
+                txt_detail_data.insert("end", "HUMI: ", "black")
+                txt_detail_data.insert("end", f"{d['humi']:.1f} %\n", "blue")
+                
+                txt_detail_data.insert("end", "CO2:  ", "black")
                 c_val = d.get('co2')
-                co2_str = f"{c_val:.1f} ppm" if (c_val is not None and c_val > 0) else "N/A"
-                txt = (
-                    f"{get_sensor_display_name(skey)}\n"
-                    f"Profile: {sp_eval['setting_name']} (Slot {sp_eval['slot_id']})\n\n"
-                    f"LIVE TEMP: {d['temp']:.1f} °C  (Target: {sp_eval['target_temp']:.1f} °C)\n"
-                    f"LIVE HUMI: {d['humi']:.1f} %   (Target: {sp_eval['target_humi']:.1f} %)\n"
-                    f"LIVE CO2:  {co2_str}\n\n"
-                    f"{get_f_name(skey)}: {f_s}    Humidifier: {h_s}    Grow Lights: {l_s}"
-                )
-                lbl_detail_data.config(text=txt, fg="#1565c0")
+                if c_val is not None and c_val > 0:
+                    txt_detail_data.insert("end", f"{c_val:.1f} ppm\n\n", "blue")
+                else:
+                    txt_detail_data.insert("end", "N/A\n\n", "red")
             else:
-                lbl_detail_data.config(text="OFFLINE", fg="#c62828")
+                txt_detail_data.insert("end", "TEMP: ", "black")
+                txt_detail_data.insert("end", "OFFLINE\n", "red")
+                txt_detail_data.insert("end", "HUMI: ", "black")
+                txt_detail_data.insert("end", "OFFLINE\n", "red")
+                txt_detail_data.insert("end", "CO2:  ", "black")
+                txt_detail_data.insert("end", "N/A\n\n", "red")
+
+            # 3. Program, Stage, Active Window (Black label, Blue value)
+            txt_detail_data.insert("end", "Program: ", "black")
+            txt_detail_data.insert("end", f"{prog_name}\n", "blue")
+            
+            txt_detail_data.insert("end", "Stage:   ", "black")
+            txt_detail_data.insert("end", f"{stage_name}\n", "blue")
+            
+            txt_detail_data.insert("end", "Active Window: ", "black")
+            txt_detail_data.insert("end", f"{slot_start} - {slot_stop}\n\n", "blue")
+
+            # 4. Target, Min, Max (Black labels for TARGET, MIN, MAX; Blue for numeric values)
+            txt_detail_data.insert("end", "TEMP TARGET: ", "black")
+            txt_detail_data.insert("end", f"{sp_eval['target_temp']:.1f} °C  |  ", "blue")
+            txt_detail_data.insert("end", "MIN: ", "black")
+            txt_detail_data.insert("end", f"{t_min:.1f} °C  |  ", "blue")
+            txt_detail_data.insert("end", "MAX: ", "black")
+            txt_detail_data.insert("end", f"{t_max:.1f} °C\n", "blue")
+            
+            txt_detail_data.insert("end", "HUMI TARGET: ", "black")
+            txt_detail_data.insert("end", f"{sp_eval['target_humi']:.1f} %   |  ", "blue")
+            txt_detail_data.insert("end", "MIN: ", "black")
+            txt_detail_data.insert("end", f"{h_min:.1f} %  |  ", "blue")
+            txt_detail_data.insert("end", "MAX: ", "black")
+            txt_detail_data.insert("end", f"{h_max:.1f} %\n\n", "blue")
+
+            # 5. Light Schedule (Black label, Blue value)
+            txt_detail_data.insert("end", "Light Schedule: ", "black")
+            txt_detail_data.insert("end", f"{p_on} - {p_off}\n\n", "blue")
+
+            # 6. Relays Status (Black label, Green ON / Red OFF)
+            txt_detail_data.insert("end", f"{get_f_name(skey)}: ", "black")
+            txt_detail_data.insert("end", f"{f_s}\n", "green" if f_s == "ON" else "red")
+
+            txt_detail_data.insert("end", "Humidifier: ", "black")
+            txt_detail_data.insert("end", f"{h_s}\n", "green" if h_s == "ON" else "red")
+
+            txt_detail_data.insert("end", "Grow Lights: ", "black")
+            txt_detail_data.insert("end", f"{l_s}\n", "green" if l_s == "ON" else "red")
+
+            txt_detail_data.config(state="disabled")
 
     except Exception as e: print(f"UI Error: {e}")
 
@@ -1048,9 +1146,14 @@ def update_ui():
 # --- SENSOR DETAIL VIEW UI ---
 active_detail_port = None
 lbl_detail_title = tk.Label(frame_detail, text="COLD ROOM DATA", font=big, fg="#1565c0", bg="white")
-lbl_detail_title.pack(pady=20)
-lbl_detail_data = tk.Label(frame_detail, text="--", font=font.Font(size=18, weight="bold"), bg="white", fg="#1565c0")
-lbl_detail_data.pack(pady=25)
+lbl_detail_title.pack(pady=5)
+
+txt_detail_data = tk.Text(frame_detail, font=font.Font(size=12, weight="bold"), bg="white", bd=0, highlightthickness=0, height=16, width=65)
+txt_detail_data.pack(pady=5, expand=True, fill="both")
+txt_detail_data.tag_configure("black", foreground="#000000", justify="center")
+txt_detail_data.tag_configure("blue", foreground="#1565c0", justify="center")
+txt_detail_data.tag_configure("green", foreground="#16a34a", justify="center")
+txt_detail_data.tag_configure("red", foreground="#c62828", justify="center")
 
 def open_sensor_detail(port):
     global active_detail_port; active_detail_port = port
@@ -2132,19 +2235,16 @@ def load_schedule_form():
         w_box.pack(fill="x", padx=10, pady=4)
         tk.Label(w_box, text=f" TIME SLOT OVERLAP DETECTED:\n" + "\n".join(overlaps), font=("Helvetica", 11, "bold"), fg="#b91c1c", bg="#fef2f2").pack(padx=10, pady=6)
 
+    temp_grid_frame.config(text="SCHEDULE TIME SLOTS (TEMP & HUMIDITY SETPOINTS)")
+    humi_grid_frame.pack_forget()
+
     temp_inner = tk.Frame(temp_grid_frame, bg="white")
-    temp_inner.pack(anchor="center", padx=8, pady=4)
+    temp_inner.pack(fill="x", expand=True, padx=8, pady=4)
 
-    humi_inner = tk.Frame(humi_grid_frame, bg="white")
-    humi_inner.pack(anchor="center", padx=8, pady=4)
-    
-    for c in range(6):
-        temp_inner.columnconfigure(c, weight=1)
-        humi_inner.columnconfigure(c, weight=1)
-
-    card_title_font = font.Font(size=12, weight="bold")
-    card_time_font = font.Font(size=11, weight="bold")
-    card_val_font = font.Font(size=11, weight="bold")
+    card_title_font = font.Font(size=13, weight="bold")
+    card_time_font = font.Font(size=12, weight="bold")
+    card_val_font = font.Font(size=12, weight="bold")
+    btn_font_large = font.Font(size=11, weight="bold")
 
     num_slots = len(time_slots)
 
@@ -2175,36 +2275,49 @@ def load_schedule_form():
 
         sched_entries[idx] = (l_fname, l_tstart, l_tstop, l_tset_val, l_tmax_val, l_tmin_val, l_hset_val, l_hmax_val, l_hmin_val)
 
-        r_pos = idx // 3
-        c_pos = (idx % 3) * 2
+        # HORIZONTAL SLOT ROW: LEFT (NAME & TIME), MIDDLE (STACKED TEMP & HUMI), RIGHT (LARGE BUTTONS)
+        row = tk.Frame(temp_inner, bg="#f8fafc", bd=2, relief="solid", highlightbackground="#cbd5e1", padx=12, pady=8)
+        row.pack(fill="x", expand=True, pady=4)
 
-        # CARD FOR TEMP
-        card_t = tk.Frame(temp_inner, bg="#f8fafc", bd=2, relief="solid", highlightbackground="#cbd5e1", width=240, height=170)
-        card_t.pack_propagate(False)
-        card_t.grid(row=r_pos, column=c_pos, columnspan=2, padx=8, pady=6)
+        # LEFT SIDE: Slot Name & Time Window
+        left_f = tk.Frame(row, bg="#f8fafc")
+        left_f.pack(side="left", padx=(0, 15))
 
-        tk.Label(card_t, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc").pack(pady=(6,2))
-        tk.Label(card_t, text=f" {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc").pack(pady=2)
-        tk.Label(card_t, text=f"TARGET: {t_set_v:.1f}°C", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(pady=2)
-        tk.Label(card_t, text=f"ON: {t_max_v:.1f}°C | OFF: {t_min_v:.1f}°C", font=card_val_font, fg="#475569", bg="#f8fafc").pack(pady=2)
+        tk.Label(left_f, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc", anchor="w").pack(anchor="w")
+        tk.Label(left_f, text=f"{start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc", anchor="w").pack(anchor="w", pady=(2, 0))
 
-        t_btn_f = tk.Frame(card_t, bg="#f8fafc"); t_btn_f.pack(pady=(4, 2))
-        tk.Button(t_btn_f, text="EDIT FRAME", font=BTN_FONT_CARD, bg="#cbd5e1", fg="#1e293b", width=12, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=3)
-        tk.Button(t_btn_f, text="DELETE", font=BTN_FONT_CARD, bg="#dc2626", fg="white", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: delete_time_slot(i)).pack(side="left", padx=3)
+        # RIGHT SIDE: Large Action Buttons (EDIT FRAME & DELETE)
+        right_f = tk.Frame(row, bg="#f8fafc")
+        right_f.pack(side="right", padx=(15, 0))
 
-        # CARD FOR HUMI
-        card_h = tk.Frame(humi_inner, bg="#f8fafc", bd=2, relief="solid", highlightbackground="#cbd5e1", width=240, height=170)
-        card_h.pack_propagate(False)
-        card_h.grid(row=r_pos, column=c_pos, columnspan=2, padx=8, pady=6)
+        tk.Button(right_f, text="EDIT FRAME", font=btn_font_large, bg="#cbd5e1", fg="#1e293b", width=13, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=4)
+        tk.Button(right_f, text="DELETE", font=btn_font_large, bg="#dc2626", fg="white", width=9, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: delete_time_slot(i)).pack(side="left", padx=4)
 
-        tk.Label(card_h, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc").pack(pady=(6,2))
-        tk.Label(card_h, text=f" {start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc").pack(pady=2)
-        tk.Label(card_h, text=f"TARGET: {h_set_v:.1f}%", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(pady=2)
-        tk.Label(card_h, text=f"ON: {h_max_v:.1f}% | OFF: {h_min_v:.1f}%", font=card_val_font, fg="#475569", bg="#f8fafc").pack(pady=2)
+        # MIDDLE SIDE: Stacked Temperature & Humidity Setpoints (TEMP, HUMI, MIN, MAX in Black)
+        mid_f = tk.Frame(row, bg="#f8fafc")
+        mid_f.pack(side="left", fill="both", expand=True, padx=10)
 
-        h_btn_f = tk.Frame(card_h, bg="#f8fafc"); h_btn_f.pack(pady=(4, 2))
-        tk.Button(h_btn_f, text="EDIT FRAME", font=BTN_FONT_CARD, bg="#cbd5e1", fg="#1e293b", width=12, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: edit_slot_popup(i)).pack(side="left", padx=3)
-        tk.Button(h_btn_f, text="DELETE", font=BTN_FONT_CARD, bg="#dc2626", fg="white", width=8, height=2, relief="flat", bd=0, cursor="hand2", command=lambda i=idx: delete_time_slot(i)).pack(side="left", padx=3)
+        # Temp Line (Names in Black, Values in Blue)
+        t_row = tk.Frame(mid_f, bg="#f8fafc")
+        t_row.pack(fill="x", anchor="w", pady=(0, 2))
+
+        tk.Label(t_row, text="TEMP T : ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
+        tk.Label(t_row, text=f"{t_set_v:.1f}°C", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(side="left")
+        tk.Label(t_row, text="   |   MIN: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
+        tk.Label(t_row, text=f"{t_min_v:.1f}°C", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(side="left")
+        tk.Label(t_row, text="   |   MAX: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
+        tk.Label(t_row, text=f"{t_max_v:.1f}°C", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(side="left")
+
+        # Humi Line (Names in Black, Values in Sky Blue)
+        h_row = tk.Frame(mid_f, bg="#f8fafc")
+        h_row.pack(fill="x", anchor="w", pady=(2, 0))
+
+        tk.Label(h_row, text="HUMI T : ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
+        tk.Label(h_row, text=f"{h_set_v:.1f}%", font=card_val_font, fg="#0284c7", bg="#f8fafc").pack(side="left")
+        tk.Label(h_row, text="   |   MIN: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
+        tk.Label(h_row, text=f"{h_min_v:.1f}% ", font=card_val_font, fg="#0284c7", bg="#f8fafc").pack(side="left")
+        tk.Label(h_row, text="   |   MAX: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
+        tk.Label(h_row, text=f"{h_max_v:.1f}% ", font=card_val_font, fg="#0284c7", bg="#f8fafc").pack(side="left")
 
 def open_schedule_editor(skey="S1"):
     dname = get_sensor_display_name(skey)

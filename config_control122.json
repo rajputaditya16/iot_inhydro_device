@@ -4,6 +4,6 @@
     "temp_alarm_offset": 5.0,
     "humi_alarm_offset": 5.0,
     "sensor_names": {
-        "S1": "COLD ROOYYYYY"
+        "S1": "COLD ROOM 1"
     }
 }
