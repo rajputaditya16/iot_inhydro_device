@@ -183,11 +183,10 @@ const SettingsPage = () => {
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-2.5 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap ${
-                  isActive
+                className={`flex items-center gap-2.5 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer whitespace-nowrap ${isActive
                     ? 'bg-green-500/10 text-green-400 border border-green-500/30 shadow-sm'
                     : 'text-slate-400 hover:bg-slate-800/80 hover:text-white border border-transparent'
-                }`}
+                  }`}
               >
                 <tab.icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-green-400' : 'text-slate-400'}`} />
                 <span>{tab.label}</span>
@@ -206,166 +205,166 @@ const SettingsPage = () => {
           transition={{ duration: 0.25 }}
           className="rounded-2xl border border-slate-700/50 bg-slate-800/30 p-6"
         >
-            {/* Device Control */}
-            {activeTab === 'device_config' && (
-              <DeviceSettings />
-            )}
+          {/* Device Control */}
+          {activeTab === 'device_config' && (
+            <DeviceSettings />
+          )}
 
-            {/* Almora Control */}
-            {activeTab === 'almora_config' && (
-              <AlmoraSettings />
-            )}
+          {/* Almora Control */}
+          {activeTab === 'almora_config' && (
+            <AlmoraSettings />
+          )}
 
-            {/* Almora 2 Control */}
-            {activeTab === 'almora2_config' && (
-              <Almora2Settings />
-            )}
+          {/* Almora 2 Control */}
+          {activeTab === 'almora2_config' && (
+            <Almora2Settings />
+          )}
 
-            {/* Cold Storage (Multi-Sensor) Control */}
-            {activeTab === 'cold_storage_config' && (
-              <ColdStorageSettings />
-            )}
+          {/* Cold Storage (Multi-Sensor) Control */}
+          {activeTab === 'cold_storage_config' && (
+            <ColdStorageSettings />
+          )}
 
-            {/* Light Motor Pump Control */}
-            {activeTab === 'light_motor_pump_config' && (
-              <LightMotorPumpSettings />
-            )}
+          {/* Light Motor Pump Control */}
+          {activeTab === 'light_motor_pump_config' && (
+            <LightMotorPumpSettings />
+          )}
 
-            {/* Office Control */}
-            {activeTab === 'office_control_config' && (
-              <OfficeControlSettings />
-            )}
+          {/* Office Control */}
+          {activeTab === 'office_control_config' && (
+            <OfficeControlSettings />
+          )}
 
-            {/* InHydro Controller */}
-            {activeTab === 'controlling_config' && (
-              <ControllingDeviceSettings />
-            )}
+          {/* InHydro Controller */}
+          {activeTab === 'controlling_config' && (
+            <ControllingDeviceSettings />
+          )}
 
-            {/* Monit Controller */}
-            {activeTab === 'monit_config' && (
-              <MonitSettings />
-            )}
+          {/* Monit Controller */}
+          {activeTab === 'monit_config' && (
+            <MonitSettings />
+          )}
 
-            {/* Profile */}
-            {activeTab === 'profile' && (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-base font-semibold text-white mb-4">Profile Settings</h3>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-400">Full Name</label>
-                      <input
-                        type="text"
-                        value={nameInput}
-                        onChange={(e) => setNameInput(e.target.value)}
-                        className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm text-white outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-400">Email</label>
-                      <input
-                        type="email"
-                        value={emailInput}
-                        onChange={(e) => setEmailInput(e.target.value)}
-                        className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-400">Role</label>
-                      <input
-                        type="text"
-                        value={currentUser.role}
-                        disabled
-                        className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm text-slate-500 outline-none uppercase"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-400">Timezone</label>
-                      <select className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500">
-                        <option>Asia/Kolkata (IST)</option>
-                        <option>UTC</option>
-                        <option>America/New_York (EST)</option>
-                      </select>
-                    </div>
+          {/* Profile */}
+          {activeTab === 'profile' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-base font-semibold text-white mb-4">Profile Settings</h3>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-slate-400">Full Name</label>
+                    <input
+                      type="text"
+                      value={nameInput}
+                      onChange={(e) => setNameInput(e.target.value)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm text-white outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20"
+                    />
                   </div>
-                </div>
-
-                <div className="border-t border-slate-700/50 pt-6">
-                  <h3 className="text-base font-semibold text-white mb-4">Security Settings</h3>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-400">Current Password</label>
-                      <div className="relative">
-                        <input
-                          type={showCurrentPassword ? 'text' : 'password'}
-                          placeholder="Enter current password"
-                          value={currentPassword}
-                          onChange={(e) => setCurrentPassword(e.target.value)}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-900/50 pl-4 pr-10 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 font-mono"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowCurrentPassword(!showCurrentPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                        >
-                          {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-400">New Password</label>
-                      <div className="relative">
-                        <input
-                          type={showNewPassword ? 'text' : 'password'}
-                          placeholder="Enter new password"
-                          value={newPassword}
-                          onChange={(e) => setNewPassword(e.target.value)}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-900/50 pl-4 pr-10 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 font-mono"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowNewPassword(!showNewPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                        >
-                          {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-slate-400">Confirm New Password</label>
-                      <div className="relative">
-                        <input
-                          type={showConfirmPassword ? 'text' : 'password'}
-                          placeholder="Confirm new password"
-                          value={confirmPassword}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-900/50 pl-4 pr-10 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 font-mono"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                        >
-                          {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-slate-400">Email</label>
+                    <input
+                      type="email"
+                      value={emailInput}
+                      onChange={(e) => setEmailInput(e.target.value)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    />
                   </div>
-                </div>
-
-                <div className="pt-4 border-t border-slate-700/30">
-                  <button
-                    onClick={handleSaveSettings}
-                    className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-green-500/20 active:scale-95 transition-all"
-                  >
-                    <Save className="h-4 w-4" /> Save Changes
-                  </button>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-slate-400">Role</label>
+                    <input
+                      type="text"
+                      value={currentUser.role}
+                      disabled
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm text-slate-500 outline-none uppercase"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-slate-400">Timezone</label>
+                    <select className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500">
+                      <option>Asia/Kolkata (IST)</option>
+                      <option>UTC</option>
+                      <option>America/New_York (EST)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
-            )}
 
-          </motion.div>
-        </div>
+              <div className="border-t border-slate-700/50 pt-6">
+                <h3 className="text-base font-semibold text-white mb-4">Security Settings</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-slate-400">Current Password</label>
+                    <div className="relative">
+                      <input
+                        type={showCurrentPassword ? 'text' : 'password'}
+                        placeholder="Enter current password"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-900/50 pl-4 pr-10 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      >
+                        {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-slate-400">New Password</label>
+                    <div className="relative">
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        placeholder="Enter new password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-900/50 pl-4 pr-10 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword(!showNewPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      >
+                        {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-slate-400">Confirm New Password</label>
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        placeholder="Confirm new password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-900/50 pl-4 pr-10 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 font-mono"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      >
+                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-700/30">
+                <button
+                  onClick={handleSaveSettings}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-green-500/20 active:scale-95 transition-all"
+                >
+                  <Save className="h-4 w-4" /> Save Changes
+                </button>
+              </div>
+            </div>
+          )}
+
+        </motion.div>
+      </div>
 
       {/* Toast Notification */}
       <AnimatePresence>
@@ -375,8 +374,8 @@ const SettingsPage = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
             className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-2xl border bg-slate-900/90 px-4 py-3 shadow-xl backdrop-blur-md ${popupType === 'error'
-                ? 'border-rose-500/20 text-rose-400 shadow-rose-500/5'
-                : 'border-emerald-500/20 text-emerald-400 shadow-emerald-500/5'
+              ? 'border-rose-500/20 text-rose-400 shadow-rose-500/5'
+              : 'border-emerald-500/20 text-emerald-400 shadow-emerald-500/5'
               }`}
           >
             <div className={`rounded-full p-1.5 ${popupType === 'error' ? 'bg-rose-500/10' : 'bg-emerald-500/10'

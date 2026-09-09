@@ -3,7 +3,6 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const User = require('./models/User');
 const Admin = require('./models/Admin');
-// const { syncAllDevices } = require('./scripts/syncThingspeak');
 const { startMqttSubscriber } = require('./utils/mqttSubscriber');
 require('dotenv').config();
 
@@ -126,6 +125,9 @@ if (process.env.NODE_ENV === 'production') {
 // ── Global error handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error('[Unhandled Error]', err);
+  if (res.headersSent) {
+    return next(err);
+  }
   res.status(err.statusCode || 500).json({
     success: false,
     message: err.message || 'Internal Server Error',

@@ -56,43 +56,6 @@ const deviceSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
-    // ── ThingSpeak Configuration ──────────────────────────────────────────
-    thingspeak: {
-      channelId: {
-        type: String,
-        trim: true,
-        default: '',
-      },
-      readApiKey: {
-        type: String,
-        trim: true,
-        default: '',
-      },
-      writeApiKey: {
-        type: String,
-        trim: true,
-        default: '',
-      },
-      port: {
-        type: Number,
-        default: 1883,
-      },
-      username: {
-        type: String,
-        trim: true,
-        default: '',
-      },
-      password: {
-        type: String,
-        trim: true,
-        default: '',
-      },
-      clientId: {
-        type: String,
-        trim: true,
-        default: '',
-      },
-    },
   },
   {
     timestamps: true,

@@ -5,7 +5,8 @@ const telemetryLogSchema = new mongoose.Schema(
     deviceId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Device',
-      required: true,
+      required: false,
+      default: null,
       index: true,
     },
     mqttId: {

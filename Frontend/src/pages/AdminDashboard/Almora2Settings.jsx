@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Edit3, Radio } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Edit3, Sliders, ShieldCheck } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
 const defaultSetpoints = {
@@ -14,7 +14,7 @@ const InputRow = ({ label, objKey, type = "number", data, onChange }) => (
     <label className="text-xs font-medium text-slate-400">{label}</label>
     <input
       type={type}
-      value={data[objKey] || ""}
+      value={data[objKey] ?? ""}
       onChange={(e) => onChange(objKey, e.target.value)}
       className="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
     />
@@ -29,18 +29,16 @@ const Almora2Settings = () => {
   const [loading, setLoading] = useState(true);
   const [client, setClient] = useState(null);
   const [liveData, setLiveData] = useState(null);
+  const [machineOnline, setMachineOnline] = useState(false);
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const token = localStorage.getItem('token');
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const role = user.role === 'superadmin' ? 'superadmin' : (user.accountType || user.role || 'user');
-  const isSuperadmin = role === 'superadmin';
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
-  // Fetch Almora 2 devices from database
+  // Fetch Almora 2 (CO2 / Environmental) devices from database
   useEffect(() => {
     const fetchAlmoraDevices = async () => {
       try {
@@ -72,7 +70,8 @@ const Almora2Settings = () => {
   const selectedDevice = almoraDevices.find(d => (d.mqttId || d._id) === deviceRoot);
 
   useEffect(() => {
-    setTempName(selectedDevice?.name || 'Unknown Settings');
+    setTempName(selectedDevice?.name || 'Unknown Almora 2');
+    setMachineOnline(selectedDevice?.status === 'online');
     setIsEditingName(false);
   }, [deviceRoot, selectedDevice]);
 
@@ -103,39 +102,18 @@ const Almora2Settings = () => {
     setStatus('disconnected');
     const mqttClient = createMqttClient();
 
-    // Merge database ThingSpeak config if it exists
-    const initialSetpoints = { ...defaultSetpoints };
-    if (isSuperadmin && selectedDevice && selectedDevice.thingspeak) {
-      const ts = selectedDevice.thingspeak;
-      if (ts.clientId) initialSetpoints["CLIENT ID"] = ts.clientId;
-      if (ts.username) initialSetpoints["USERNAME"] = ts.username;
-      if (ts.password) initialSetpoints["PASSWORD"] = ts.password;
-      if (ts.channelId) initialSetpoints["CHANNEL ID"] = ts.channelId;
-      if (ts.port) initialSetpoints["PORT"] = ts.port;
-      if (ts.readApiKey) initialSetpoints["READ API KEY"] = ts.readApiKey;
-      if (ts.writeApiKey) initialSetpoints["WRITE API KEY"] = ts.writeApiKey;
-    }
-    setSetpoints(initialSetpoints);
-
-    mqttClient.on('connect', () => {
-      console.log(`Connected to MQTT Cloud Broker for ${deviceRoot}`);
-      setStatus('connected');
-
-      mqttClient.subscribe(`inhydro/${deviceRoot}/setpoints/current`);
-      mqttClient.subscribe(`inhydro/${deviceRoot}/telemetry/live`);
-      mqttClient.publish(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
-    });
-
-    mqttClient.on('message', (topic, message) => {
+    const handleIncomingPacket = (topic, messageData) => {
       if (topic === `inhydro/${deviceRoot}/telemetry/live`) {
         try {
-          const liveData = JSON.parse(message.toString());
-          setLiveData(liveData);
-        } catch (e) { }
-      }
-      else if (topic === `inhydro/${deviceRoot}/setpoints/current`) {
+          const incoming = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
+          setLiveData(incoming);
+          setMachineOnline(true);
+        } catch (err) {
+          console.debug('Telemetry parse error:', err);
+        }
+      } else if (topic === `inhydro/${deviceRoot}/setpoints/current`) {
         try {
-          const incomingData = JSON.parse(message.toString());
+          const incomingData = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
           setSetpoints(prev => ({
             ...prev,
             ...incomingData
@@ -144,20 +122,54 @@ const Almora2Settings = () => {
           console.error("Error parsing current setpoints from device", error);
         }
       }
+    };
+
+    mqttClient.on('connect', () => {
+      console.log(`Connected to Private MQTT Broker for ${deviceRoot}`);
+      setStatus('connected');
+
+      mqttClient.subscribe(`inhydro/${deviceRoot}/setpoints/current`);
+      mqttClient.subscribe(`inhydro/${deviceRoot}/telemetry/live`);
+      mqttClient.publish(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
     });
 
-    mqttClient.on('error', (err) => {
+    mqttClient.on('message', (topic, message) => {
+      handleIncomingPacket(topic, message.toString());
+    });
+
+    mqttClient.on('error', () => {
       setStatus('error');
     });
 
     setClient(mqttClient);
 
+    // Real-time SSE Stream Fallback (100% reliable over HTTPS cloud deployment)
+    const sseUrl = `${API_BASE}/api/devices/stream?deviceId=${selectedDevice?._id || ''}&mqttId=${deviceRoot}`;
+    const eventSource = new EventSource(sseUrl);
+
+    eventSource.onopen = () => {
+      setStatus('connected');
+    };
+
+    eventSource.onmessage = (event) => {
+      try {
+        const packet = JSON.parse(event.data);
+        if (packet.mqttId === deviceRoot || packet.topic?.includes(deviceRoot)) {
+          setStatus('connected');
+          handleIncomingPacket(packet.topic, packet.data);
+        }
+      } catch (err) {
+        console.debug('SSE packet parse error:', err);
+      }
+    };
+
     return () => {
       if (mqttClient) {
         mqttClient.end();
       }
+      eventSource.close();
     };
-  }, [deviceRoot, selectedDevice, isSuperadmin]);
+  }, [deviceRoot, selectedDevice, API_BASE]);
 
   const handleChange = (key, value) => {
     setSetpoints(prev => ({
@@ -166,64 +178,74 @@ const Almora2Settings = () => {
     }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    setStatus('saving');
+
+    const payload = { ...setpoints };
+    const numericFields = ['T MIN', 'T MAX', 'H MIN', 'H MAX'];
+
+    numericFields.forEach(field => {
+      if (payload[field] !== undefined && payload[field] !== "") {
+        const numValue = Number(payload[field]);
+        payload[field] = isNaN(numValue) ? payload[field] : numValue;
+      }
+    });
+
+    let published = false;
+
+    // 1. Direct WebSocket MQTT Publish
     if (client && client.connected) {
-      setStatus('saving');
+      try {
+        client.publish(`inhydro/${deviceRoot}/setpoints/update`, JSON.stringify(payload), { retain: true });
+        published = true;
+      } catch (e) {
+        console.warn("Direct WebSocket publish failed, using backend push API:", e);
+      }
+    }
 
-      const payload = { ...setpoints };
-      const numericFields = ['T MIN', 'T MAX', 'H MIN', 'H MAX', 'PORT'];
+    // 2. Push via Backend Private Broker API (Reliable over HTTPS)
+    try {
+      const res = await fetch(`${API_BASE}/api/devices/${selectedDevice._id}/push-config`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success || published) {
+        setStatus('saved');
+        setTimeout(() => setStatus('connected'), 3000);
+      } else {
+        setStatus('error');
+      }
+    } catch (err) {
+      if (published) {
+        setStatus('saved');
+        setTimeout(() => setStatus('connected'), 3000);
+      } else {
+        console.error("Save error:", err);
+        setStatus('error');
+      }
+    }
+  };
 
-      numericFields.forEach(field => {
-        if (payload[field] !== undefined && payload[field] !== "") {
-          const numValue = Number(payload[field]);
-          payload[field] = isNaN(numValue) ? payload[field] : numValue;
+  const handleSyncRequest = async () => {
+    if (!selectedDevice) return;
+    if (client && client.connected) {
+      client.publish(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
+    }
+    try {
+      await fetch(`${API_BASE}/api/devices/${selectedDevice._id}/push-config?action=sync`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
         }
       });
-
-      if (!isSuperadmin) {
-        delete payload["CLIENT ID"];
-        delete payload["USERNAME"];
-        delete payload["PASSWORD"];
-        delete payload["CHANNEL ID"];
-        delete payload["PORT"];
-        delete payload["READ API KEY"];
-        delete payload["WRITE API KEY"];
-      }
-
-      if (isSuperadmin) {
-        const dbPayload = {
-          thingspeak: {
-            clientId: payload["CLIENT ID"],
-            username: payload["USERNAME"],
-            password: payload["PASSWORD"],
-            channelId: payload["CHANNEL ID"],
-            port: Number(payload["PORT"]),
-            readApiKey: payload["READ API KEY"],
-            writeApiKey: payload["WRITE API KEY"]
-          }
-        };
-
-        fetch(`${API_BASE}/api/devices/${selectedDevice._id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(dbPayload)
-        }).catch(err => console.error("DB Sync error:", err));
-      }
-
-      client.publish(`inhydro/${deviceRoot}/setpoints/update`, JSON.stringify(payload), { retain: true }, (err) => {
-        if (err) {
-          console.error(err);
-          setStatus('error');
-        } else {
-          setStatus('saved');
-          setTimeout(() => setStatus('connected'), 3000);
-        }
-      });
-    } else {
-      setStatus('error');
+    } catch (err) {
+      console.debug('Sync request error:', err);
     }
   };
 
@@ -271,30 +293,36 @@ const Almora2Settings = () => {
               </h3>
             )}
           </div>
-          <p className="text-sm text-slate-400 mt-1">Manage CO2 & Environmental Integrations</p>
+          <p className="text-sm text-slate-400 mt-1">Manage Temperature, Humidity & CO2 Private Broker Setpoints</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
           {/* Live Analytics Engine (Premium Display) */}
           {liveData && (
             <div className="flex items-center gap-2 overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-900/40 p-1 shadow-2xl backdrop-blur-md">
-              <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-orange-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-orange-500/20">
-                <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-orange-400Shadow shadow-orange-500/50"></div>
-                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Temp</span>
-                <span className="text-sm font-black text-white">{liveData.temp}<span className="text-[10px] text-orange-400 ml-0.5">°C</span></span>
-              </div>
+              {(liveData.temp !== undefined || liveData.temperature !== undefined) && (
+                <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-orange-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-orange-500/20">
+                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-orange-400 shadow-orange-500/50 shadow-[0_0_8px_rgba(251,146,60,0.5)]"></div>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Temp</span>
+                  <span className="text-sm font-black text-white">{liveData.temp ?? liveData.temperature ?? 0}<span className="text-[10px] text-orange-400 ml-0.5">°C</span></span>
+                </div>
+              )}
 
-              <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-blue-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-blue-500/20">
-                <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400Shadow shadow-blue-500/50"></div>
-                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Hum</span>
-                <span className="text-sm font-black text-white">{liveData.hum}<span className="text-[10px] text-blue-400 ml-0.5">%</span></span>
-              </div>
+              {(liveData.hum !== undefined || liveData.humidity !== undefined) && (
+                <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-blue-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-blue-500/20">
+                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400 shadow-blue-500/50 shadow-[0_0_8px_rgba(96,165,250,0.5)]"></div>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">Hum</span>
+                  <span className="text-sm font-black text-white">{liveData.hum ?? liveData.humidity ?? 0}<span className="text-[10px] text-blue-400 ml-0.5">%</span></span>
+                </div>
+              )}
 
-              <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-emerald-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-emerald-500/20">
-                <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400Shadow shadow-emerald-500/50"></div>
-                <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">CO2</span>
-                <span className="text-sm font-black text-white">{Math.round(liveData.co2)}<span className="text-[10px] text-emerald-400 ml-1">PPM</span></span>
-              </div>
+              {(liveData.co2 !== undefined || liveData.CO2 !== undefined) && (
+                <div className="flex items-center gap-2 rounded-xl bg-gradient-to-br from-emerald-500/10 to-transparent px-3 py-1.5 ring-1 ring-inset ring-emerald-500/20">
+                  <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 shadow-emerald-500/50 shadow-[0_0_8px_rgba(52,211,153,0.5)]"></div>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">CO2</span>
+                  <span className="text-sm font-black text-white">{Math.round(liveData.co2 ?? liveData.CO2 ?? 0)}<span className="text-[10px] text-emerald-400 ml-1">PPM</span></span>
+                </div>
+              )}
             </div>
           )}
 
@@ -305,7 +333,7 @@ const Almora2Settings = () => {
               className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium text-white outline-none transition-all ${isDropdownOpen ? 'border-green-500 bg-slate-800' : 'border-slate-700 bg-slate-900/50 hover:border-green-500 hover:bg-slate-800'}`}
             >
               <Server className="h-4 w-4 text-green-400" />
-              <span className="max-w-[150px] truncate">{selectedDevice?.name || 'Select Node'}</span>
+              <span className="max-w-[150px] truncate">{selectedDevice?.name || 'Select Almora 2 Node'}</span>
               <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
 
@@ -328,45 +356,79 @@ const Almora2Settings = () => {
                       <span className={`h-1.5 w-1.5 rounded-full ${dev.status === 'online' ? 'bg-emerald-400' : 'bg-slate-500'}`} title={dev.status} />
                     </button>
                   ))}
+                  {almoraDevices.length === 0 && (
+                    <div className="px-4 py-3 text-sm text-slate-500 italic">No Almora 2 devices found</div>
+                  )}
                 </div>
               </>
             )}
           </div>
 
-          <div className="min-w-[140px] flex justify-end">
-            {status === 'connected' && selectedDevice?.status === 'online' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
-              </span>
-            )}
-            {(status !== 'connected' || selectedDevice?.status !== 'online') && status !== 'saving' && status !== 'saved' && status !== 'error' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
-              </span>
-            )}
-            {status === 'saving' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400">
-                <RefreshCw className="h-4 w-4 animate-spin" /> Pushing...
-              </span>
-            )}
-            {status === 'saved' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                <CheckCircle2 className="h-4 w-4" /> Live Successfully
-              </span>
-            )}
-            {status === 'error' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
-                <AlertCircle className="h-4 w-4" /> Connection Error
-              </span>
-            )}
+          {/* Differentiated Status Indicators: Broker vs Machine */}
+          <div className="flex items-center gap-2.5">
+            {/* Broker Status */}
+            <div className="flex items-center gap-1.5 rounded-lg bg-slate-900/60 border border-slate-700/50 px-2.5 py-1 text-xs">
+              <span className="text-slate-400">Broker:</span>
+              {status === 'connected' ? (
+                <span className="flex items-center gap-1 font-semibold text-emerald-400">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
+                </span>
+              ) : status === 'saving' ? (
+                <span className="flex items-center gap-1 font-semibold text-green-400">
+                  <RefreshCw className="h-3 w-3 animate-spin" /> Pushing...
+                </span>
+              ) : status === 'saved' ? (
+                <span className="flex items-center gap-1 font-semibold text-emerald-400">
+                  <CheckCircle2 className="h-3 w-3" /> Pushed
+                </span>
+              ) : status === 'error' ? (
+                <span className="flex items-center gap-1 font-semibold text-red-400">
+                  <AlertCircle className="h-3 w-3" /> Error
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 font-semibold text-slate-400">
+                  <span className="h-2 w-2 rounded-full bg-slate-600" /> Connecting...
+                </span>
+              )}
+            </div>
+
+            {/* Machine Hardware Status */}
+            <div className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold ${machineOnline
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                : 'border-slate-700/50 bg-slate-900/60 text-slate-400'
+              }`}>
+              <span className={`h-2 w-2 rounded-full ${machineOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+              {machineOnline ? 'Machine Online' : 'Machine Offline'}
+            </div>
           </div>
         </div>
       </div>
 
       <div className="space-y-6">
-        {/* Core Environmental */}
+        {/* Machine Offline Retained-Message Notice */}
+        {!machineOnline && (
+          <div className="flex items-center gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5 text-xs text-amber-300/90 shadow-sm">
+            <AlertCircle className="h-4 w-4 shrink-0 text-amber-400" />
+            <span>
+              Physical machine <strong>"{selectedDevice?.name || deviceRoot}"</strong> is currently offline/standby. Any setpoints updated here will be <strong>retained on the Private Mosquitto Broker</strong> and automatically synced to the machine as soon as it powers on.
+            </span>
+          </div>
+        )}
+
+        {/* Core Environmental Limits */}
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
-          <h4 className="mb-4 text-sm font-semibold text-green-400">Core Environmental Limits</h4>
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="flex items-center gap-2 text-sm font-semibold text-green-400">
+              <Sliders className="h-4 w-4" /> Core Environmental Limits
+            </h4>
+            <button
+              onClick={handleSyncRequest}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-green-500 hover:text-green-400 transition-colors"
+              title="Request active setpoints from physical edge machine"
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> Sync from Machine
+            </button>
+          </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <InputRow data={setpoints} onChange={handleChange} label="T Minimum (°C)" objKey="T MIN" />
             <InputRow data={setpoints} onChange={handleChange} label="T Maximum (°C)" objKey="T MAX" />
@@ -375,34 +437,33 @@ const Almora2Settings = () => {
           </div>
         </div>
 
-        {isSuperadmin && (
-          <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 shadow-lg shadow-blue-500/5 transition-all hover:border-blue-500/30">
-            <h4 className="mb-4 flex items-center gap-2 text-sm font-semibold text-blue-400">
-              <Radio className="h-4 w-4 animate-pulse" /> ThingSpeak Cloud Configuration
-            </h4>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-              <InputRow data={setpoints} onChange={handleChange} label="MQTT Client ID" objKey="CLIENT ID" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="MQTT Username" objKey="USERNAME" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="MQTT Password" objKey="PASSWORD" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="Channel ID" objKey="CHANNEL ID" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="Read API Key" objKey="READ API KEY" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="Write API Key" objKey="WRITE API KEY" type="text" />
-              <InputRow data={setpoints} onChange={handleChange} label="MQTT Port" objKey="PORT" />
+        {/* Private Broker Active Routing Card */}
+        <div className="rounded-xl border border-slate-700/50 bg-slate-800/20 p-5 shadow-lg shadow-emerald-500/5 transition-all">
+          <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-400">
+            <ShieldCheck className="h-4 w-4" /> Private Broker & Edge Communication
+          </h4>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
+              <span className="text-slate-500 block mb-1">Target Device Root</span>
+              <span className="font-mono text-white font-semibold">{deviceRoot || 'N/A'}</span>
             </div>
-            <p className="mt-4 text-[11px] text-slate-500">
-              Changes will trigger a ThingSpeak reconnection on the device.
-            </p>
+            <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
+              <span className="text-slate-500 block mb-1">Setpoints Channel</span>
+              <span className="font-mono text-emerald-400">inhydro/{deviceRoot}/setpoints/update</span>
+            </div>
+            <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
+              <span className="text-slate-500 block mb-1">Telemetry Channel</span>
+              <span className="font-mono text-blue-400">inhydro/{deviceRoot}/telemetry/live</span>
+            </div>
           </div>
-        )}
-
-
+        </div>
       </div>
 
-      <div className="pt-4">
+      <div className="pt-4 flex items-center gap-3">
         <button
           onClick={handleSave}
-          disabled={status === 'disconnected' || status === 'saving'}
-          className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-transform active:scale-95 disabled:opacity-50"
+          disabled={status === 'saving'}
+          className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 transition-transform active:scale-95 disabled:opacity-50 cursor-pointer"
         >
           <Save className="h-4 w-4" /> Send Values to {deviceRoot.toUpperCase()}
         </button>

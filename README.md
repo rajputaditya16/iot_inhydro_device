@@ -1,333 +1,329 @@
-# InHydro -- IoT-Based Hydroponic Monitoring and Control System
+# InHydro: Enterprise IoT Smart Farming, Precision Hydroponics and Environmental Control System
 
-A full-stack IoT platform for real-time hydroponic environment monitoring and automated nutrient dosing. The system combines a Raspberry Pi edge controller with a modern React web dashboard to provide end-to-end visibility and remote control over soil and nutrient parameters.
+An enterprise-grade, full-stack IoT platform engineered for Controlled Environment Agriculture (CEA), precision commercial hydroponics, multi-zone greenhouse automation, and multi-probe cold storage facilities. The system integrates industrial sensory networks, autonomous closed-loop edge computing, cloud telemetry pipelines, and a high-performance web dashboard for real-time monitoring and centralized operations.
 
 ---
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [System Architecture](#system-architecture)
-- [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Hardware Requirements](#hardware-requirements)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-- [Configuration](#configuration)
-- [MQTT Topics](#mqtt-topics)
-- [Frontend Pages](#frontend-pages)
-- [Sensor Thresholds](#sensor-thresholds)
-- [Systemd Service](#systemd-service)
-- [License](#license)
+- [1. Executive Summary and Business Objectives](#1-executive-summary-and-business-objectives)
+- [2. High-Level System Architecture](#2-high-level-system-architecture)
+- [3. Core Subsystems and Hardware Profiles](#3-core-subsystems-and-hardware-profiles)
+- [4. Edge Automation and Firmware Capabilities](#4-edge-automation-and-firmware-capabilities)
+- [5. Cloud Infrastructure and Data Security](#5-cloud-infrastructure-and-data-security)
+- [6. Operations Web Portal and Management Modules](#6-operations-web-portal-and-management-modules)
+- [7. Telemetry Ingestion and Bidirectional Control](#7-telemetry-ingestion-and-bidirectional-control)
+- [8. Hardware Specifications and Sensor Interfaces](#8-hardware-specifications-and-sensor-interfaces)
+- [9. System Deployment and Operations Guide](#9-system-deployment-and-operations-guide)
+- [10. Business Value and Return on Investment (ROI)](#10-business-value-and-return-on-investment-roi)
+- [11. Intellectual Property and Commercial Terms](#11-intellectual-property-and-commercial-terms)
 
 ---
 
-## Overview
+## 1. Executive Summary and Business Objectives
 
-InHydro is designed for precision agriculture environments where maintaining optimal soil EC (Electrical Conductivity), pH, temperature, and moisture levels is critical. The system continuously reads sensor data via Modbus RS485, activates dosing relays when parameters drift outside defined setpoints, and streams telemetry to ThingSpeak for cloud storage and visualization. A React-based web dashboard consumes this cloud data to deliver live monitoring, analytics, device management, and remote configuration -- all from any browser.
+Commercial precision agriculture and cold chain facilities demand continuous, automated oversight to guarantee peak crop yields, optimize resource consumption, eliminate biological risks, and safeguard perishable assets. 
 
----
-
-## System Architecture
+The InHydro IoT platform provides an end-to-end, autonomous management ecosystem that replaces manual testing and subjective decision-making with precision data analytics and automated control.
 
 ```
-+-------------------+        Modbus RS485        +--------------------+
-|  Soil Sensor      | <----------------------->  |  Raspberry Pi      |
-|  (Temp, Moisture, |    (Read/Write Registers)  |  (system2.py)      |
-|   EC, pH)         |                            |                    |
-+-------------------+                            |  GPIO Relays       |
-                                                 |  - EC Dosing (x2)  |
-                                                 |  - pH Correction   |
-                                                 |  - Cyclic Timers   |
-                                                 +--------+-----------+
-                                                          |
-                                          +---------------+---------------+
-                                          |                               |
-                                   MQTT (ThingSpeak)              MQTT (HiveMQ)
-                                   Telemetry Upload               Remote Control
-                                          |                               |
-                                          v                               v
-                                 +------------------+          +-------------------+
-                                 | ThingSpeak Cloud |          | HiveMQ Public     |
-                                 | (Data Storage)   |          | Broker            |
-                                 +--------+---------+          +--------+----------+
-                                          ^                             ^
-                                          |                             |
-                                          |    +------------------+     |
-                                          |    |                  |     |
-                                          +----+ React Dashboard +-----+
-                                   Fetch Data  |   (Frontend)    |  Push Setpoints
-                                   (REST API)  |                 |  Sync Config
-                                               +------------------+ (WebSocket MQTT)
++---------------------------------------------------------------------------------------------------+
+|                                      KEY SYSTEM DELIVERABLES                                      |
++---------------------------------------------------------------------------------------------------+
+| 1. Autonomous Fertigation: Closed-loop EC and pH dosing maintaining optimal nutrient levels.      |
+| 2. Multi-Zone Climate Management: Real-time cooling, heating, dehumidification, and CO2 control. |
+| 3. Cold Storage Protection: Up to 7 independent high-precision probes with 30-second alarm alarms.|
+| 4. Precision Irrigation: Multi-channel cyclic timers and customized day/night watering schedules. |
+| 5. Zero-Latency Cloud Monitoring: Live telemetry streaming directly to any browser or device.     |
+| 6. Compliance and Audit Intelligence: Trend analytics, threshold breach alerts, and CSV exports.  |
+| 7. Multi-Tier Governance: SuperAdmin, Admin, and Viewer role-based security access control.        |
++---------------------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## Features
-
-### Edge Controller (Raspberry Pi)
-
-- **Modbus RS485 Sensor Integration** -- Reads temperature, moisture, EC, and pH from industrial soil sensors via the `minimalmodbus` library.
-- **Automated EC Dosing** -- Activates two dosing relays when EC drops below the configured minimum and deactivates them when EC reaches the configured maximum.
-- **Automated pH Correction** -- Activates a pH dosing relay when pH exceeds the high limit and deactivates it when pH falls to the low limit.
-- **Cyclic Timer Relays** -- Three independently configurable cyclic timers with adjustable active windows (start/stop times), ON durations, and OFF durations for irrigation scheduling.
-- **Dual MQTT Communication** -- Publishes telemetry data to ThingSpeak every 2 seconds and accepts remote setpoint updates from HiveMQ.
-- **Tkinter HMI** -- A fullscreen touchscreen-friendly interface displaying real-time sensor readings, relay statuses, timer states, and an on-screen keypad for local setpoint editing.
-- **Persistent Configuration** -- Setpoints are saved to a local JSON file (`setpoints.json`) and loaded on startup.
-- **Safety Controls** -- Manual stop button to immediately deactivate all relays, program restart capability, and safe GPIO cleanup on exit via `atexit`.
-
-### Web Dashboard (React Frontend)
-
-- **Admin Dashboard** -- Overview cards showing total locations, total devices, online/offline counts, and active alerts. Live device cards display real-time sensor readings pulled from ThingSpeak.
-- **Live Monitoring** -- Dedicated monitoring page with large animated metric displays for temperature, moisture, EC, and pH. Real-time trend charts rendered with Recharts. Automatic 10-second polling with visual "Updated" / "No change" indicators.
-- **Device Management** -- Searchable, filterable device table with status badges, battery levels, and navigation to per-device live monitoring.
-- **Location Management** -- Grid and table views for managing deployment locations with device counts and active device tracking.
-- **Analytics** -- Per-device historical trend charts with time range selection (24h, 7d, 30d), summary statistics (average, min, max), and data export capability.
-- **Remote Device Configuration** -- Push EC/pH setpoints and cyclic timer settings directly to the Raspberry Pi over MQTT via WebSocket (HiveMQ). Includes real-time connection status and sync of current device settings.
-- **User Management** -- Role-based user table (Admin, Manager, Operator, Viewer) with device and location assignment via modal dialogs.
-- **Settings Panel** -- Tabbed interface for profile management, device control, notification preferences, security (password change, 2FA), and appearance (theme, density).
-- **Responsive Design** -- Collapsible sidebar navigation with smooth animations, fully responsive layout for desktop and mobile.
-- **Loading States** -- Skeleton loaders across all pages for a polished loading experience.
-
----
-
-## Tech Stack
-
-### Backend (Edge Device)
-
-| Component       | Technology                                   |
-|-----------------|----------------------------------------------|
-| Language        | Python 3                                     |
-| Sensor Protocol | Modbus RTU via `minimalmodbus`               |
-| Serial          | `pyserial`                                   |
-| GPIO Control    | `gpiozero` with `pigpio` backend             |
-| MQTT Client     | `paho-mqtt`                                  |
-| Cloud Platform  | ThingSpeak (telemetry), HiveMQ (control)     |
-| HMI Framework   | Tkinter with PIL/Pillow for image rendering  |
-
-### Frontend (Web Dashboard)
-
-| Component       | Technology                                   |
-|-----------------|----------------------------------------------|
-| Framework       | React 19                                     |
-| Build Tool      | Vite 7                                       |
-| Styling         | Tailwind CSS v4                              |
-| Routing         | React Router DOM v7                          |
-| Charts          | Recharts                                     |
-| Animations      | Framer Motion                                |
-| Icons           | Lucide React                                 |
-| MQTT Client     | mqtt.js (WebSocket)                          |
-
----
-
-## Hardware Requirements
-
-- Raspberry Pi (3B+/4/5) with Raspbian OS
-- RS485-to-USB adapter (e.g., CH340/FT232)
-- Modbus RTU soil sensor (temperature, moisture, EC, pH)
-- 3-channel relay module for EC and pH dosing pumps (GPIO 22, 23, 24)
-- 4-channel relay module for cyclic timer outputs (GPIO 5, 6, 13, 19)
-- 7-inch touchscreen display (recommended for HMI)
-- Stable internet connection for MQTT communication
-
----
-
-## Project Structure
+## 2. High-Level System Architecture
 
 ```
-IOT_PROJECT/
-|-- system2.py              # Raspberry Pi edge controller (sensor, relays, MQTT, HMI)
-|-- hmi.service             # systemd unit file for auto-starting the HMI on boot
-|-- setpoints.json          # Persisted setpoint configuration (auto-generated)
-|-- Frontend/
-    |-- index.html          # Application entry point
-    |-- package.json        # Dependencies and scripts
-    |-- vite.config.js      # Vite build configuration
-    |-- src/
-        |-- main.jsx        # React DOM root
-        |-- App.jsx         # Route definitions
-        |-- index.css       # Global styles
-        |-- pages/
-        |   |-- LoginPage.jsx         # Authentication page
-        |   |-- AdminDashboard.jsx    # Main dashboard with stat cards and device overview
-        |   |-- LiveMonitoring.jsx    # Real-time sensor metrics and trend charts
-        |   |-- DevicesPage.jsx       # Device inventory table
-        |   |-- LocationsPage.jsx     # Location management (grid/table views)
-        |   |-- AnalyticsPage.jsx     # Historical data analysis and charts
-        |   |-- DeviceSettings.jsx    # Remote MQTT device configuration
-        |   |-- SettingsPage.jsx      # User settings (profile, notifications, security)
-        |   |-- UserManagement.jsx    # Role-based user and access management
-        |-- components/
-        |   |-- DeviceCard.jsx        # Individual device card with sensor readings
-        |   |-- LiveChart.jsx         # Recharts-based live data chart
-        |   |-- StatCard.jsx          # Dashboard summary statistic card
-        |   |-- Modal.jsx             # Reusable modal dialog
-        |   |-- Skeleton.jsx          # Loading skeleton components
-        |   |-- EmptyState.jsx        # Empty state placeholder
-        |-- layouts/
-        |   |-- DashboardLayout.jsx   # Main layout wrapper with sidebar
-        |   |-- Sidebar.jsx           # Collapsible navigation sidebar
-        |   |-- TopNavbar.jsx         # Top navigation bar
-        |-- hooks/
-        |   |-- useAnimatedCounter.js # Smooth numeric animation hook
-        |-- utils/
-        |   |-- helpers.js            # Status colors, metric thresholds, formatting
-        |-- data/
-            |-- mockData.js           # Mock data for development and demo
++---------------------------------------------------------------------------------------------------+
+|                                      DATA ACQUISITION LAYER                                       |
+|                                                                                                   |
+|  [Modbus Soil Sensor]   [MD02 Temp/Humi]   [Water EC / pH]   [ORP & CO2]   [Probes S1 - S7]       |
+|    (Moisture/EC/pH/T)     (Ambient Air)       (Dosing Tank)    (Disinfection)   (Cold Storage)    |
++---------------------------------------------------------------------------------------------------+
+                                                  |
+                                                  | Industrial RS485 Modbus RTU / UART / GPIO
+                                                  v
++---------------------------------------------------------------------------------------------------+
+|                                       EDGE CONTROLLER LAYER                                       |
+|                                                                                                   |
+|  Industrial Microprocessor Units & Microcontrollers                                               |
+|  - Real-Time Closed-Loop Dosing and Environmental Feedback Control                                |
+|  - Multi-Channel High-Power Actuator Relay Control (4 to 32 Relay Channels)                       |
+|  - On-Site Fullscreen Touchscreen Interface with Secure Local Override                            |
+|  - Fail-Safe Watchdog Protection and Local Offline Buffering                                      |
++---------------------------------------------------------------------------------------------------+
+                                                  |
+                                                  | Secure TCP Port 1883 & Encrypted WebSockets
+                                                  v
++---------------------------------------------------------------------------------------------------+
+|                                    COMMUNICATION & CLOUD LAYER                                    |
+|                                                                                                   |
+|  [Private Mosquitto MQTT Broker]             [Cloud API & Ingestion Microservices]                |
+|  - Authenticated Device Telemetry Topics     - High-Throughput Ingestion Service                  |
+|  - Bidirectional Setpoint Push Channels      - Dynamic Per-Device Sharded Time-Series Database    |
+|  - Multi-Zone Synchronization Pipelines      - Sub-Second Server-Sent Events (SSE) Engine         |
+|                                              - Role-Based Access Control & JWT Security           |
++---------------------------------------------------------------------------------------------------+
+                                                  |
+                                                  | HTTPS / REST APIs / Server-Sent Events
+                                                  v
++---------------------------------------------------------------------------------------------------+
+|                                      FRONTEND WEB DASHBOARD                                       |
+|                                                                                                   |
+|  Enterprise Responsive Web Application                                                            |
+|  - Executive Overview with Status Counters and Health Indicators                                  |
+|  - Live Monitoring with Animated Metric Gauges and Real-Time Charts                               |
+|  - Multi-Zone Greenhouses and Cold Storage Facility Management                                    |
+|  - Remote Equipment Setpoint and Schedule Configuration Center                                    |
+|  - Historical Analytics Engine with Anomaly Detection and One-Click CSV Export                    |
+|  - Multi-Organization Governance, User Management, and Hardware Provisioning                      |
++---------------------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## Getting Started
+## 3. Core Subsystems and Hardware Profiles
 
-### Prerequisites
+The InHydro platform provides specialized hardware configurations engineered for distinct agricultural and storage facilities:
 
-- **Node.js** v18 or higher
-- **npm** v9 or higher
-- **Python 3.8+** (for edge controller)
+### 3.1 InHydro Almora Hydroponics Subsystem
+- **Purpose**: Precision hydroponic nutrient dosing and primary grow-room climate control.
+- **Sensory Inputs**: Industrial Submersible Water EC & pH sensors, MD02 Ambient Temperature & Humidity probe.
+- **Actuator Outputs**:
+  - Dosing Pump A (Nutrient Part A)
+  - Dosing Pump B (Nutrient Part B)
+  - pH Correction Pump (Acid/Base Buffer)
+  - Grow-Room Climate Cooling Unit
+  - Grow-Room Dehumidifier Unit
+  - Cyclic Irrigation Circuit 1
+  - Cyclic Irrigation Circuit 2
+- **On-Site Display**: Fullscreen touch interface with real-time numeric readouts, parameter gauges, and on-screen keypad for local setpoint adjustments.
 
-### Frontend Setup
+### 3.2 InHydro Monit Precision Water Chemistry and Dosing Subsystem
+- **Purpose**: Dedicated water treatment, batch fertigation, and reservoir conditioning.
+- **Sensory Inputs**: High-precision dual-channel water chemistry transmitters (Electrical Conductivity and pH) and ambient climate sensors.
+- **Actuator Outputs**: Industrial 16-channel Modbus RTU relay bank managing primary dosing lines, mixing pumps, purge valves, and circulation loops.
+- **Control Strategy**: Millisecond-accurate dosing pulse widths with programmable hysteresis bands to eliminate overshoot and nutrient burn.
 
-```bash
-# Navigate to the frontend directory
-cd Frontend
+### 3.3 InHydro Office Control: 3-Zone Commercial Greenhouse Automation
+- **Purpose**: Large-scale greenhouse automation managing up to three independent climate and fertigation zones.
+- **Zone Architecture**:
+  - **Zone 1 (Grow Zone A)**: Soil Sensor (Moisture, Soil Temp, EC, pH), MD02 Climate Sensor, ORP Sensor, CO2 Sensor, Relay Outputs 1 to 8.
+  - **Zone 2 (Grow Zone B)**: Soil Sensor (Moisture, Soil Temp, EC, pH), MD02 Climate Sensor, ORP Sensor, CO2 Sensor, Relay Outputs 17 to 24.
+  - **Zone 3 (Specialized Climate Zone)**: Dual redundant MD02 Climate Sensors, CO2 Sensor, Relay Outputs 25 to 32 (Dual-stage AC cooling, dual dehumidifiers, and auxiliary circulation circuits).
+- **Operation**: Supports synchronized Day/Night temperature curves, humidity triggers, and multi-channel irrigation schedules.
 
-# Install dependencies
-npm install
+### 3.4 InHydro Cold Storage and Perishable Inventory Protection Subsystem
+- **Purpose**: Multi-room cold storage temperature tracking, freezer monitoring, and automated alarm dispatch.
+- **Sensory Inputs**: Up to 7 independent Modbus RS485 temperature and humidity probes distributed across multiple cold rooms or chambers.
+- **Actuator Outputs**: 14 actuator channels (cooling unit and humidifier control per room) and a dedicated 30-second audible hardware buzzer.
+- **Operating Modes**:
+  - **Static Mode**: Continuous threshold monitoring against fixed minimum and maximum limits.
+  - **Calendar-Scheduled Mode**: Multi-setting presets (Settings A through E) mapped to custom date ranges with 5 programmable time slots per day.
+- **Safety System**: Immediate visual warning and automated physical buzzer activation upon temperature or humidity deviation.
 
-# Start the development server
-npm run dev
+### 3.5 InHydro 17-Factor Environmental and Agronomy Station
+- **Purpose**: Comprehensive agronomic research and climate analytics.
+- **Monitored Parameters**: Water Temperature, Water Moisture, Water EC, Water pH, Ambient Temperature, Ambient Humidity, ORP, CO2, Vapor Pressure Deficit (VPD), Daily Light Integral (DLI), Wind Speed, Wind Direction, Dissolved Oxygen (DO), Photosynthetic Photon Flux Density (PPFD), and Soil N-P-K (Nitrogen, Phosphorus, Potassium).
+
+### 3.6 InHydro Standalone Soil Station
+- **Purpose**: Low-power standalone soil monitoring for nursery beds and open-field plots.
+- **Sensory Inputs**: 4-in-1 Soil probe measuring Moisture, Soil Temperature, EC, and pH.
+- **Display**: High-resolution HDMI output for direct field-level observation.
+
+### 3.7 InHydro Actuator and Power Control Unit
+- **Purpose**: Wireless peripheral actuator automation for supplemental grow lighting, circulation fans, and booster pumps.
+- **Features**: Dual Manual and Autonomous operation modes, weekday filtering schedules, and network clock synchronization.
+
+---
+
+## 4. Edge Automation and Firmware Capabilities
+
+### 4.1 Industrial Modbus RS485 Communication
+- **Standard**: Modbus RTU protocol over shielded twisted-pair cabling.
+- **Reliability**: Deterministic polling cycles with hardware-level port mapping, preventing sensor channel crosstalk during power cycles.
+
+### 4.2 Closed-Loop Control Algorithms
+- **EC Optimization**: Continuous monitoring triggers dosing pumps when nutrient levels fall below target minimums and automatically disengages once target concentrations are restored.
+- **pH Stabilization**: Closed-loop acid/base dosing maintains the ideal nutrient absorption window (pH 5.8 - 6.5).
+- **Anti-Chatter Protection**: Programmable deadbands and minimum dwell times protect mechanical contactors, pumps, and compressors from rapid cycling.
+- **Time-Windowed Irrigation**: Equipment cycles through precise ON and OFF durations only within authorized operational hours.
+
+### 4.3 Offline Data Buffering and Automatic Recovery
+In the event of an internet or cloud network interruption:
+- All sensor metrics are buffered securely to local persistent edge storage.
+- An automated reconnection engine monitors network availability.
+- Upon reconnection, buffered historical records are uploaded in synchronized batches to ensure zero data loss.
+
+---
+
+## 5. Cloud Infrastructure and Data Security
+
+### 5.1 Dynamic Telemetry Database
+- **High-Performance Sharding**: Sensor data is organized into dedicated per-device telemetry collections, ensuring continuous high write throughput without table locks.
+- **Optimized Indexing**: Time-series compound indexing enables instant data retrieval across millions of historical records.
+
+### 5.2 Real-Time Telemetry Pipeline
+- **Server-Sent Events (SSE)**: Delivers sub-second telemetry updates to client dashboards with minimal network overhead.
+- **Connection Health**: Integrated 15-second heartbeat pings prevent reverse proxies and cloud gateways from terminating active monitoring sessions.
+
+### 5.3 Three-Tier Role-Based Access Governance
+
+| Role | Scope | Functional Permissions |
+| :--- | :--- | :--- |
+| **SuperAdmin** | Global Platform | System-wide visibility, creation and management of Organization Admins, device quota allocation, global hardware assignment, and infrastructure auditing. |
+| **Admin** | Organization / Facility | Management of operational user accounts, live device monitoring, historical analytics, remote setpoint configuration via MQTT, and CSV report downloads. |
+| **Viewer / Operator** | Assigned Devices Only | Read-only live telemetry monitoring and historical chart views for explicitly authorized farm zones and devices. |
+
+---
+
+## 6. Operations Web Portal and Management Modules
+
+### 6.1 Executive Dashboard
+- Comprehensive status cards displaying total active facilities, registered devices, online/offline status, and critical alerts.
+- Live device grid displaying immediate sensor values and connection health.
+
+### 6.2 Real-Time Monitoring Center
+- Animated metric widgets for Temperature, Moisture, Electrical Conductivity, and pH with threshold-aware color coding.
+- Dynamic multi-room switcher for multi-zone greenhouse installations.
+- Multi-probe Cold Storage visualization with independent temperature status indicators for each room.
+- Interactive live trendline charts displaying real-time parameter movements.
+
+### 6.3 Historical Analytics and Audit Engine
+- Flexible time-range filtering: Last 24 Hours, Last 7 Days, Last 30 Days, or Custom Date Ranges.
+- Statistical computation: Minimum, Maximum, Mean, and Standard Deviation.
+- Threshold breach counters identifying environmental anomalies and compliance deviations.
+- Instant client-side CSV export generating formatted spreadsheets for compliance audits and agronomy reports.
+
+### 6.4 Remote Device Configuration Center
+- Centralized setpoint management: Update EC targets, pH limits, temperature curves, humidity triggers, and cyclic timer intervals remotely.
+- Live synchronization verification: Confirms when physical edge controllers have received and applied new setpoints.
+
+---
+
+## 7. Telemetry Ingestion and Bidirectional Control
+
+### 7.1 Ingestion Topics and Data Feeds
+
+| Topic Channel | Direction | Functional Purpose |
+| :--- | :--- | :--- |
+| `Device Telemetry Feed` | Device -> Cloud | Real-time transmission of primary sensor metrics. |
+| `Multi-Zone Greenhouse Feed` | Device -> Cloud | Consolidated multi-zone greenhouse telemetry. |
+| `Cold Storage Probe Array` | Device -> Cloud | Multi-channel temperature and humidity records. |
+| `Remote Setpoint Update` | Cloud -> Device | Push updated operational setpoints to physical hardware. |
+| `Configuration Synchronization` | Device <-> Cloud | Bi-directional verification of active device parameters. |
+
+### 7.2 Sample Data Structures
+
+#### Multi-Zone Greenhouse Record:
+```json
+{
+  "zone1": {
+    "soil": { "soil_temp": 24.2, "moisture": 68.5, "ec": 1.45, "ph": 6.2 },
+    "climate": { "room_temp": 26.1, "room_humi": 62.0 },
+    "orp": 380,
+    "co2": 720
+  },
+  "zone2": {
+    "soil": { "soil_temp": 23.8, "moisture": 64.0, "ec": 1.50, "ph": 6.1 },
+    "climate": { "room_temp": 25.4, "room_humi": 60.5 },
+    "orp": 375,
+    "co2": 705
+  },
+  "zone3": {
+    "sensor_a": { "room_temp": 18.5, "room_humi": 85.0 },
+    "sensor_b": { "room_temp": 18.6, "room_humi": 84.8 },
+    "co2": 650
+  }
+}
 ```
 
-The development server will start at `http://localhost:5173` by default.
-
-### Production Build
-
-```bash
-cd Frontend
-npm run build
-npm run preview
+#### Cold Storage Multi-Probe Record:
+```json
+{
+  "probe_1": { "temperature": 4.2, "humidity": 88.5 },
+  "probe_2": { "temperature": 3.9, "humidity": 89.1 },
+  "probe_3": { "temperature": 4.0, "humidity": 87.8 },
+  "probe_4": { "temperature": 4.5, "humidity": 86.4 },
+  "probe_5": { "temperature": 4.1, "humidity": 88.0 },
+  "probe_6": { "temperature": 3.8, "humidity": 90.2 },
+  "probe_7": { "temperature": 22.4, "humidity": 65.0 }
+}
 ```
 
-### Edge Controller Setup (Raspberry Pi)
+---
 
-```bash
-# Create a virtual environment
-python3 -m venv venv
-source venv/bin/activate
+## 8. Hardware Specifications and Sensor Interfaces
 
-# Install Python dependencies
-pip install minimalmodbus pyserial paho-mqtt gpiozero pigpio Pillow
+### 8.1 Environmental and Agricultural Sensor Specifications
 
-# Run the controller
-python3 system2.py
+| Parameter | Measurement Range | Resolution / Accuracy | Sensor Technology |
+| :--- | :--- | :--- | :--- |
+| **Water Electrical Conductivity (EC)** | 0 - 20,000 uS/cm | 1 uS/cm (+/- 1% FS) | Modbus RS485 Submersible Electrode |
+| **Water pH** | 0.0 - 14.0 pH | 0.01 pH (+/- 0.05 pH) | Modbus RS485 Glass Composite Electrode |
+| **Soil Moisture** | 0 - 100% Volumetric | 0.1% (+/- 2%) | Frequency Domain Reflectometry (FDR) |
+| **Soil Temperature** | -40 to +80 deg C | 0.1 deg C (+/- 0.5 deg C) | Embedded Platinum RTD Probe |
+| **Ambient Air Temperature** | -40 to +80 deg C | 0.1 deg C (+/- 0.3 deg C) | MD02 Industrial Modbus Transmitter |
+| **Relative Humidity** | 0 - 100% RH | 0.1% (+/- 3% RH) | Capacitive Humidity Polymer |
+| **Carbon Dioxide (CO2)** | 0 - 5,000 ppm | 1 ppm (+/- 50 ppm) | Non-Dispersive Infrared (NDIR) |
+| **Oxidation-Reduction Potential (ORP)**| -1000 to +1000 mV | 1 mV (+/- 5 mV) | Platinum Band Modbus Probe |
+
+---
+
+## 9. System Deployment and Operations Guide
+
+### 9.1 Infrastructure Deployment Overview
+The platform supports modular deployment across local edge controllers, private enterprise servers, and cloud environments.
+
+```
++---------------------------------------------------------------------------------------------------+
+|                                      DEPLOYMENT WORKFLOW                                          |
++---------------------------------------------------------------------------------------------------+
+| Step 1: Deploy Cloud Microservices (Node.js API, MongoDB Database, and Mosquitto Broker).         |
+| Step 2: Build and publish the Web Dashboard client application to cloud hosting.                  |
+| Step 3: Commission Edge Controller hardware, configure serial buses, and assign Device IDs.       |
+| Step 4: Configure systemd auto-start daemons for unattended edge operation on system boot.        |
+| Step 5: Provision Organization Admins and assign device access scopes via the SuperAdmin portal.  |
++---------------------------------------------------------------------------------------------------+
 ```
 
-> **Note:** The edge controller requires physical hardware (Modbus sensor, relays, GPIO) and is intended to run exclusively on a Raspberry Pi.
+### 9.2 Edge Controller Auto-Start Daemon
+Edge hardware units run as dedicated Linux background services with automatic recovery upon power interruption:
 
----
-
-## Configuration
-
-### Setpoints (Default Values)
-
-| Parameter        | Default  | Description                          |
-|------------------|----------|--------------------------------------|
-| `EC_MIN`         | 1200     | EC lower threshold (uS/cm)          |
-| `EC_MAX`         | 1800     | EC upper threshold (uS/cm)          |
-| `PH_LOW`         | 5.8      | pH lower limit                       |
-| `PH_HIGH`        | 6.5      | pH upper limit                       |
-| `timer1_start`   | 10:00    | Timer 1 active window start          |
-| `timer1_stop`    | 17:00    | Timer 1 active window stop           |
-| `timer1_on_min`  | 15       | Timer 1 ON duration (minutes)        |
-| `timer1_off_min` | 30       | Timer 1 OFF duration (minutes)       |
-
-Timers 2 and 3 follow the same configuration pattern. All setpoints can be modified locally via the Tkinter HMI or remotely via the web dashboard.
-
-### GPIO Pin Mapping
-
-| GPIO Pin | Function              | Relay Type     |
-|----------|-----------------------|----------------|
-| 22       | EC Dosing Relay 1     | Active Low     |
-| 23       | EC Dosing Relay 2     | Active Low     |
-| 24       | pH Correction Relay   | Active Low     |
-| 5        | Cyclic Timer Relay 1  | Active High    |
-| 6        | Cyclic Timer Relay 2  | Active High    |
-| 13       | Cyclic Timer Relay 3  | Active High    |
-| 19       | Cyclic Timer Relay 4  | Active High    |
-
----
-
-## MQTT Topics
-
-### ThingSpeak (Telemetry -- Outbound)
-
-| Topic                                    | Direction | Purpose                      |
-|------------------------------------------|-----------|------------------------------|
-| `channels/{CHANNEL_ID}/publish`          | Device -> Cloud | Publish sensor telemetry |
-
-Payload format: `field1={temp}&field2={moisture}&field3={ph}&field4={ec}`
-
-### HiveMQ (Remote Control -- Bidirectional)
-
-| Topic                                    | Direction        | Purpose                          |
-|------------------------------------------|------------------|----------------------------------|
-| `inhydro/device1/setpoints/update`       | Cloud -> Device  | Push new setpoint values         |
-| `inhydro/device1/setpoints/current`      | Device -> Cloud  | Publish current setpoint state   |
-
-Payload format: JSON object containing setpoint key-value pairs.
-
----
-
-## Frontend Pages
-
-| Route          | Page               | Description                                                    |
-|----------------|--------------------|----------------------------------------------------------------|
-| `/login`       | Login              | Authentication entry point                                     |
-| `/dashboard`   | Admin Dashboard    | Overview stats, live device cards with sensor readings          |
-| `/monitoring`  | Live Monitoring    | Per-device real-time metrics with animated counters and charts  |
-| `/devices`     | Devices            | Searchable device inventory with status filtering              |
-| `/locations`   | Locations          | Grid/table view of deployment locations                        |
-| `/analytics`   | Analytics          | Historical trend analysis with configurable time ranges        |
-| `/users`       | User Management    | Role-based access control and device assignment                |
-| `/settings`    | Settings           | Profile, device control, notifications, security, appearance   |
-
----
-
-## Sensor Thresholds
-
-The dashboard uses the following thresholds for color-coded status indicators:
-
-| Metric       | Normal        | Warning         | Critical          |
-|--------------|---------------|-----------------|-------------------|
-| Temperature  | <= 35 C       | 35 - 40 C       | > 40 C            |
-| Moisture     | >= 40%        | 25% - 40%       | < 25%             |
-| EC           | <= 3 mS/cm    | 3 - 4 mS/cm     | > 4 mS/cm         |
-| pH           | 5.5 - 7.5     | 4.5 - 5.5 or 7.5 - 8.5 | < 4.5 or > 8.5 |
-
----
-
-## Systemd Service
-
-The project includes a systemd service unit (`hmi.service`) for auto-starting the HMI application on boot:
-
-```bash
-# Copy the service file
-sudo cp hmi.service /etc/systemd/system/
-
-# Enable and start the service
-sudo systemctl daemon-reload
-sudo systemctl enable hmi.service
-sudo systemctl start hmi.service
-
-# Check status
-sudo systemctl status hmi.service
+```
+Service Name:    InHydro Edge HMI Service
+Execution Mode:  Autonomous Boot via systemd
+Restart Policy:  Always Restart with zero startup delay
+Display Mode:    Direct Framebuffer / X11 Fullscreen Touch Interface
 ```
 
-The service is configured with `Restart=always` and `StartLimitIntervalSec=0` to ensure the HMI recovers from any crash or display-manager timing issue.
+---
+
+## 10. Business Value and Return on Investment (ROI)
+
+Implementing the InHydro IoT platform delivers direct, quantifiable operational and financial advantages:
+
+1. **Labor Reduction**: Automates continuous water testing, chemical dosing, and manual valve switching, saving hundreds of labor hours annually per facility.
+2. **Nutrient and Water Efficiency**: Precision EC dosing prevents over-fertilization, cutting commercial nutrient costs by up to 30% while preserving water supplies.
+3. **Crop Yield and Quality Protection**: Closed-loop stabilization eliminates nutrient toxicity, root burn, and thermal shock, maximizing crop uniformity and market value.
+4. **Cold Chain Risk Mitigation**: Continuous temperature surveillance with audible and digital alarms eliminates spoilage risks in cold storage facilities.
+5. **Data-Driven Agronomy**: Comprehensive historical records enable data-driven optimization of crop recipes, harvest cycles, and resource forecasting.
 
 ---
 
-## License
+## 11. Intellectual Property and Commercial Terms
 
-This project is proprietary. All rights reserved.
+Copyright (c) InHydro Technologies. All rights reserved.
+
+This software platform, edge firmware, hardware interface architecture, and associated documentation are proprietary commercial assets. Unauthorized reproduction, reverse engineering, redistribution, or modification of any part of this system is strictly prohibited without prior written authorization.

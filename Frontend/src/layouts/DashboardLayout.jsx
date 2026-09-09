@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 const pageTitles = {
   '/dashboard': 'Dashboard',
   // '/locations': 'Locations',
-   '/superadmin-dashboard': 'Super Admin Dashboard',
+  '/superadmin-dashboard': 'Super Admin Dashboard',
   '/devices': 'Devices',
   '/monitoring': 'Live Monitoring',
   '/analytics': 'Analytics',
@@ -23,19 +23,19 @@ const DashboardLayout = ({ userRole: initialUserRole }) => {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024);
   const location = useLocation();
   const pageTitle = pageTitles[location.pathname] || 'Dashboard';
-  
+
   const [userRole, setUserRole] = useState(initialUserRole || 'user');
 
   useEffect(() => {
     try {
       const userStr = localStorage.getItem('user');
       if (userStr) {
-        
+
         const parsed = JSON.parse(userStr);
         const bestRole = parsed.role === 'superadmin' ? 'superadmin' : (parsed.role || parsed.accountType || 'user');
         setUserRole(bestRole);
       }
-    } catch (e) {}
+    } catch (e) { }
   }, []);
 
   useEffect(() => {
