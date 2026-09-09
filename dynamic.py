@@ -1,12 +1,11 @@
 import os, sys, json, time, datetime, socket, glob, fcntl
-import subprocess, threading
+import subprocess, threading, queue
 import tkinter as tk
 from PIL import Image, ImageTk
 from tkinter import font
 import minimalmodbus
 import serial
 import paho.mqtt.client as mqtt
-
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ID_FILE = os.path.join(BASE_DIR, "device_id.txt")
@@ -18,15 +17,16 @@ def get_device_id():
                 lines = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
                 if lines: return lines[0]
         except Exception: pass
-    return "monit" # Default fallback device identity
+    return "monit"
 
 DEVICE_NAME = get_device_id()
 print(f" Device Identity Loaded: {DEVICE_NAME}")
 
+CONFIG_FILE = os.path.join(BASE_DIR, f"config_{DEVICE_NAME}.json")
 SETPOINT_FILE = os.path.join(BASE_DIR, f"setpoints_{DEVICE_NAME}.json")
+print(f" Using config file: {CONFIG_FILE}")
 print(f" Using setpoint file: {SETPOINT_FILE}")
 
-# Remove legacy config to prevent sync issues
 OLD_FILE = os.path.join(BASE_DIR, "setpoints.json")
 if os.path.exists(OLD_FILE):
     try:
@@ -34,20 +34,139 @@ if os.path.exists(OLD_FILE):
         print(" Removed legacy setpoints.json...")
     except Exception: pass
 
-# Strict Fixed Persistent Serial By-Path Links (Zero /dev/ttyUSB* fallback)
-SERIAL_PORT_WATER = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0"  # Dedicated Combined EC & pH Port
-SERIAL_PORT_EC    = SERIAL_PORT_WATER
-SERIAL_PORT_PH    = SERIAL_PORT_WATER
-SERIAL_PORT_MD02  = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
-SERIAL_PORT_RELAY = "/dev/serial/by-path/"
+DEFAULT_CONFIG = {
+    "sensors": {
+        "water": {
+            "name": "Water Sensor (EC & pH)",
+            "path": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0",
+            "ec_slave_id": 31,
+            "ph_slave_id": 32,
+            "enabled": True
+        },
+        "room_md02": {
+            "name": "Room Sensor (MD02)",
+            "path": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0",
+            "slave_id": 1,
+            "enabled": True
+        }
+    },
+    "relays": {
+        "name": "Modbus Relays",
+        "path": "/dev/serial/by-path/",
+        "slave_id": 1,
+        "enabled": True
+    }
+}
 
-DEVICE_ID_EC   = 31
-DEVICE_ID_PH   = 32
-DEVICE_ID_MD02 = 1
+system_config = dict(DEFAULT_CONFIG)
 
-RELAY_SLAVE_ID = 1
+def load_system_config():
+    global system_config
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    if "sensors" in loaded:
+                        for skey, sval in loaded["sensors"].items():
+                            if skey in system_config["sensors"]:
+                                system_config["sensors"][skey].update(sval)
+            "path": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0",
+            "slave_id": 1,
+            "enabled": True
+        }
+    },
+    "relays": {
+        "name": "Modbus Relays",
+        "path": "/dev/serial/by-path/",
+        "slave_id": 1,
+        "enabled": True
+    }
+}
 
-import queue
+            "path": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0",
+            "slave_id": 1,
+            "enabled": True
+        }
+    },
+    "relays": {
+        "name": "Modbus Relays",
+        "path": "/dev/serial/by-path/",
+            "path": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0",
+            "slave_id": 1,
+            "enabled": True
+        }
+    },
+    "relays": {
+        "name": "Modbus Relays",
+        "path": "/dev/serial/by-path/",
+        "slave_id": 1,
+        "enabled": True
+    }
+}
+
+        "slave_id": 1,
+        "enabled": True
+    }
+}
+
+                            else:
+                                system_config["sensors"][skey] = sval
+                    if "relays" in loaded:
+                        system_config["relays"].update(loaded["relays"])
+                    print(f" Loaded configuration from {CONFIG_FILE}")
+        except Exception as e:
+            print(f" Error reading config file: {e}")
+    else:
+        save_system_config()
+
+def save_system_config():
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(system_config, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
+        print(f" Saved configuration to {CONFIG_FILE}")
+    except Exception as e:
+        print(f" Error saving config file: {e}")
+
+load_system_config()
+
+def is_sensor_assigned(sensor_key):
+    sensor_cfg = system_config.get("sensors", {}).get(sensor_key, {})
+    if not sensor_cfg.get("enabled", True):
+        return False
+    path = str(sensor_cfg.get("path", "")).strip()
+    if not path or path.upper() in ["NONE", "NULL", "UNASSIGNED", "EMPTY"]:
+        return False
+    if path.rstrip("/") in ["/dev/serial/by-path", "/dev/serial", "/dev"] or os.path.isdir(path):
+        return False
+    return True
+
+def is_sensor_path_valid(sensor_key):
+    if not is_sensor_assigned(sensor_key):
+        return False
+    path = system_config.get("sensors", {}).get(sensor_key, {}).get("path", "").strip()
+    return bool(os.path.exists(path) and not os.path.isdir(path))
+
+def get_sensor_path(sensor_key):
+    return system_config.get("sensors", {}).get(sensor_key, {}).get("path", "").strip()
+
+def is_relay_assigned():
+    relay_cfg = system_config.get("relays", {})
+    if not relay_cfg.get("enabled", True):
+        return False
+    path = str(relay_cfg.get("path", "")).strip()
+    return bool(path and path != "NONE" and path != "/dev/serial/by-path/" and os.path.exists(path) and not os.path.isdir(path))
+
+def get_relay_path():
+    return system_config.get("relays", {}).get("path", "").strip()
+
+DEVICE_ID_EC   = system_config["sensors"]["water"].get("ec_slave_id", 31)
+DEVICE_ID_PH   = system_config["sensors"]["water"].get("ph_slave_id", 32)
+DEVICE_ID_MD02 = system_config["sensors"]["room_md02"].get("slave_id", 1)
+RELAY_SLAVE_ID = system_config["relays"].get("slave_id", 1)
+
 relay_cmd_queue = queue.Queue()
 
 def relay_worker_loop():
@@ -57,17 +176,18 @@ def relay_worker_loop():
             if cmd is None: break
             channel, state = cmd
 
+            relay_path = get_relay_path()
             inst = None
             try:
-                if os.path.exists(SERIAL_PORT_RELAY) and not os.path.isdir(SERIAL_PORT_RELAY):
-                    inst = minimalmodbus.Instrument(SERIAL_PORT_RELAY, RELAY_SLAVE_ID)
+                if relay_path and os.path.exists(relay_path) and not os.path.isdir(relay_path):
+                    inst = minimalmodbus.Instrument(relay_path, RELAY_SLAVE_ID)
                     inst.serial.baudrate = 9600
                     inst.serial.timeout = 0.2
                     inst.mode = minimalmodbus.MODE_RTU
                     inst.clear_buffers_before_each_transaction = True
                     inst.write_bit(channel, 1 if state else 0, functioncode=5)
             except Exception as e:
-                print(f" Relay Write Error on {SERIAL_PORT_RELAY}: {e}")
+                print(f" Relay Write Error on {relay_path}: {e}")
             finally:
                 if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
                     try: inst.serial.close()
@@ -96,11 +216,9 @@ class ModbusRelay:
         self.is_active = False
         send_modbus_relay_cmd(self.channel, False)
 
-# Modbus RTU Relays (Slave ID 1, Channels 0-13)
 relay_ec1        = ModbusRelay(0, "EC1 ")
 relay_ec2        = ModbusRelay(1, "EC2 ")
 relay_ph         = ModbusRelay(2, "pH ")
-# Channel 3 (Physical Relay 4) left BLANK / UNUSED
 relay_blank      = ModbusRelay(3, "Blank ")
 relay_fan1       = ModbusRelay(4, "1. Fan ")
 relay_fan2       = ModbusRelay(5, "2. Fan ")
@@ -113,22 +231,27 @@ relay_timer1     = ModbusRelay(11, "Cyclic Timer 1")
 relay_timer2     = ModbusRelay(12, "Cyclic Timer 2")
 relay_solenoid   = ModbusRelay(13, "S-Tank Solenoid")
 
-# Alias for backwards compatibility
 relay_temp = relay_fan1
 relay_humi = relay_fogger
 
+all_relays_list = [
+    relay_ec1, relay_ec2, relay_ph, relay_blank, relay_fan1, relay_fan2,
+    relay_pad, relay_fogger, relay_acf, relay_sprinkler, relay_irrigation,
+    relay_timer1, relay_timer2, relay_solenoid
+]
+
 def all_relays_off():
-    for r in [relay_ec1, relay_ec2, relay_ph, relay_blank, relay_fan1, relay_fan2, relay_pad, relay_fogger, relay_acf, relay_sprinkler, relay_irrigation, relay_timer1, relay_timer2, relay_solenoid]:
+    for r in all_relays_list:
         try: r.off()
         except: pass
 
 all_relays_off()
 
-ec_active      = False
-ph_active      = False
-solenoid_active = False
-temp_active    = False
-humi_active    = False
+ec_active         = False
+ph_active         = False
+solenoid_active   = False
+temp_active       = False
+humi_active       = False
 humi_logic_active = False
 
 last_ec        = 0
@@ -146,51 +269,43 @@ timer_state = {
     "Irrigation": {"state": "OFF", "last": 0.0}
 }
 
-# DEFAULT SETPOINTS
 setpoints = {
-    # Nutrients & pH
     "EC MIN": 1.2,
     "EC MAX": 1.8,
     "PH LOW": 5.8,
     "PH HIGH": 6.5,
     "S_TANK": 2.0,
-    
-    # Climate Control (MD02 Temp & Cooling Pad Humidity Safety)
+
     "TEMP MIN": 22.0,
     "TEMP MED": 25.0,
     "TEMP MAX": 28.0,
     "TEMP Hyst": 0.5,
     "PAD H_Max": 75.0,
     "PAD Safety": 2.0,
-    
-    # Cooling Pad Pump Timer
+
     "PAD Start": "06:00",
     "PAD Stop": "18:00",
     "PAD ON Min": 5,
     "PAD OFF Min": 15,
 
-    # Air Circulation Fan (ACF)
     "ACF Name": "AIR CIRCULATION FAN",
     "ACF Start": "06:00",
     "ACF Stop": "22:00",
     "ACF ON Min": 10,
     "ACF OFF Min": 20,
 
-    # Overhead Sprinkler
     "Sprinkler Name": " SPRINKLER",
     "Sprinkler Start": "08:00",
     "Sprinkler Stop": "17:00",
     "Sprinkler ON Min": 2,
     "Sprinkler OFF Min": 30,
 
-    # Daytime Irrigation
     "Irrigation Name": " IRRIGATION",
     "Irrigation Start": "06:00",
     "Irrigation Stop": "18:00",
     "Irrigation ON Min": 15,
     "Irrigation OFF Min": 45,
 
-    # Humidifier Day/Night Cyclic Timer & Separate Day/Night Thresholds
     "HUMI Name": "FOGGER TIMER",
     "HUMI D_Start": "06:00",
     "HUMI D_Stop": "18:00",
@@ -206,27 +321,23 @@ setpoints = {
     "HUMI N_Max": 80.0,
     "HUMI N_Min": 60.0,
 
-    # Cyclic Timer 1 (Water Mixing Pump)
     "Timer1 Name": "WATER MIXING PUMP",
     "Timer1 Start": "06:00",
     "Timer1 Stop": "18:00",
     "Timer1 ON Min": 5,
     "Timer1 OFF Min": 15,
-    
-    # Cyclic Timer 2
+
     "Timer2 Name": "CYCLIC TIMER 2",
     "Timer2 Start": "00:00",
     "Timer2 Stop": "23:59",
     "Timer2 ON Min": 10,
     "Timer2 OFF Min": 20,
-    
-    # Two-User Authentication Credentials
+
     "USER 1 Name": "Operator 1",
     "USER 1 PASSWORD": "1111",
     "USER 2 Name": "Operator 2",
     "USER 2 PASSWORD": "2222",
-    
-    # Cloud Config
+
     "PORT": 1883
 }
 
@@ -247,7 +358,6 @@ else:
         except Exception as e:
             print(f" Error reading alt setpoint file: {e}")
 
-# Legacy auto-migration from uS/cm (1200/1800)D to mS/cm (1.2/1.8)
 if float(setpoints.get("EC MIN", 1.2)) > 100:
     setpoints["EC MIN"] = round(float(setpoints["EC MIN"]) / 1000.0, 2)
 if float(setpoints.get("EC MAX", 1.8)) > 100:
@@ -267,29 +377,13 @@ def save_setpoints():
 
 save_setpoints()
 
-def open_modbus_instrument(port, slave_id, baudrate=9600):
-    try:
-        inst = minimalmodbus.Instrument(port, slave_id)
-        inst.serial.baudrate = baudrate
-        inst.serial.bytesize = 8
-        inst.serial.parity   = serial.PARITY_NONE
-        inst.serial.stopbits = 1
-        inst.serial.timeout  = 0.5
-        inst.mode = minimalmodbus.MODE_RTU
-        inst.clear_buffers_before_each_transaction = True
-        return inst
-    except Exception:
-        return None
-
-ec_instrument   = open_modbus_instrument(SERIAL_PORT_EC, DEVICE_ID_EC)
-ph_instrument   = open_modbus_instrument(SERIAL_PORT_PH, DEVICE_ID_PH)
-md02_instrument = open_modbus_instrument(SERIAL_PORT_MD02, DEVICE_ID_MD02)
-
-# Read Dedicated EC Meter (Slave ID 31 -> Reg 3) STRICTLY via SERIAL_PORT_WATER
 def read_ec_meter():
+    port = get_sensor_path("water")
+    if not port or not os.path.exists(port) or os.path.isdir(port):
+        return None
     inst = None
     try:
-        inst = minimalmodbus.Instrument(SERIAL_PORT_WATER, DEVICE_ID_EC)
+        inst = minimalmodbus.Instrument(port, DEVICE_ID_EC)
         inst.serial.baudrate = 9600
         inst.serial.timeout = 0.3
         inst.mode = minimalmodbus.MODE_RTU
@@ -297,7 +391,7 @@ def read_ec_meter():
 
         for fc in [3, 4]:
             try:
-                data = inst.read_registers(1, 3, functioncode=fc) # [55 (SP), 0 (HYSt), 643 (Live EC)]
+                data = inst.read_registers(1, 3, functioncode=fc)
                 raw_ec = data[2] if len(data) >= 3 else inst.read_register(3, 0, functioncode=fc)
                 ec_val = round(raw_ec / 1000.0, 3)
                 return {"ec": ec_val, "raw_ec": raw_ec, "ph": None}
@@ -311,11 +405,13 @@ def read_ec_meter():
             except Exception: pass
     return None
 
-# Read Dedicated pH Meter (Slave ID 32 -> Reg 2) STRICTLY via SERIAL_PORT_WATER
 def read_ph_meter():
+    port = get_sensor_path("water")
+    if not port or not os.path.exists(port) or os.path.isdir(port):
+        return None
     inst = None
     try:
-        inst = minimalmodbus.Instrument(SERIAL_PORT_WATER, DEVICE_ID_PH)
+        inst = minimalmodbus.Instrument(port, DEVICE_ID_PH)
         inst.serial.baudrate = 9600
         inst.serial.timeout = 0.3
         inst.mode = minimalmodbus.MODE_RTU
@@ -323,7 +419,7 @@ def read_ph_meter():
 
         for fc in [3, 4]:
             try:
-                data = inst.read_registers(0, 3, functioncode=fc) # [580, 604, 790 (Live pH)]
+                data = inst.read_registers(0, 3, functioncode=fc)
                 ph_raw = data[2]
                 ph_val = round(ph_raw / 100.0, 2)
                 return {"ph": ph_val}
@@ -337,8 +433,9 @@ def read_ph_meter():
             except Exception: pass
     return None
 
-# Combined Water Sensor Reader combining EC and pH meter readings
 def read_water_sensor():
+    if not is_sensor_path_valid("water"):
+        return None
     ec_data = read_ec_meter()
     time.sleep(0.08)
     ph_data = read_ph_meter()
@@ -356,7 +453,6 @@ def read_water_sensor():
             }
     return None
 
-# Read MD02 Temperature & Humidity Transmitter (Slave ID 1) STRICTLY via SERIAL_PORT_MD02
 _md02_inst_cache = None
 
 def get_md02_instrument(force_reopen=False):
@@ -373,21 +469,26 @@ def get_md02_instrument(force_reopen=False):
         except Exception:
             _md02_inst_cache = None
 
+    port = get_sensor_path("room_md02")
+    if not port or not os.path.exists(port) or os.path.isdir(port):
+        return None
+
     try:
-        if os.path.exists(SERIAL_PORT_MD02) and not os.path.isdir(SERIAL_PORT_MD02):
-            inst = minimalmodbus.Instrument(SERIAL_PORT_MD02, DEVICE_ID_MD02)
-            inst.serial.baudrate = 4800
-            inst.serial.timeout = 0.5
-            inst.mode = minimalmodbus.MODE_RTU
-            inst.clear_buffers_before_each_transaction = True
-            _md02_inst_cache = inst
-            return _md02_inst_cache
+        inst = minimalmodbus.Instrument(port, DEVICE_ID_MD02)
+        inst.serial.baudrate = 4800
+        inst.serial.timeout = 0.5
+        inst.mode = minimalmodbus.MODE_RTU
+        inst.clear_buffers_before_each_transaction = True
+        _md02_inst_cache = inst
+        return _md02_inst_cache
     except Exception:
         _md02_inst_cache = None
     return None
 
 def read_md02_sensor():
     global _md02_inst_cache
+    if not is_sensor_path_valid("room_md02"):
+        return None
 
     for attempt in range(3):
         inst = get_md02_instrument(force_reopen=(attempt > 0))
@@ -408,10 +509,8 @@ def read_md02_sensor():
                         d0 = round(v0 / 10.0, 1) if v0 > 100 else round(float(v0), 1)
                         d1 = round(v1 / 10.0, 1) if v1 > 100 else round(float(v1), 1)
 
-                        # Check if Reg 0 is Humidity (%RH) and Reg 1 is Temp (°C)
                         if 0 <= d0 <= 100 and -10 <= d1 <= 75:
                             return {"room_temp": d1, "room_humi": d0}
-                        # Check if Reg 0 is Temp (°C) and Reg 1 is Humidity (%RH)
                         elif -10 <= d0 <= 75 and 0 <= d1 <= 100:
                             return {"room_temp": d0, "room_humi": d1}
                 except Exception:
@@ -419,7 +518,6 @@ def read_md02_sensor():
         except Exception:
             pass
 
-        # Close stale connection handle on failed attempt so next attempt/loop opens fresh port
         if _md02_inst_cache:
             try: _md02_inst_cache.serial.close()
             except Exception: pass
@@ -435,19 +533,20 @@ cached_md02_data  = None
 def sensor_polling_loop():
     global cached_water_data, cached_md02_data
     while True:
-        try:
-            cached_water_data = read_water_sensor()
-        except Exception:
+        if is_sensor_assigned("water"):
+            try: cached_water_data = read_water_sensor()
+            except Exception: cached_water_data = None
+        else:
             cached_water_data = None
 
-        try:
-            cached_md02_data = read_md02_sensor()
-        except Exception:
+        if is_sensor_assigned("room_md02"):
+            try: cached_md02_data = read_md02_sensor()
+            except Exception: cached_md02_data = None
+        else:
             cached_md02_data = None
 
         time.sleep(1.0)
 
-# Launch non-blocking background sensor polling thread
 threading.Thread(target=sensor_polling_loop, daemon=True).start()
 
 CONTROL_BROKER = "147.93.106.142"
@@ -465,7 +564,6 @@ def on_control_message(client, userdata, msg):
             control_client.publish(CURRENT_SETP_TOPIC, json.dumps(setpoints), retain=True)
             return
 
-        # Ignore retained messages so stale broker payloads don't overwrite local HMI disk setpoints on restart
         if msg.retain:
             print(" Ignoring retained setpoint update from MQTT broker.")
             return
@@ -478,7 +576,7 @@ def on_control_message(client, userdata, msg):
         if isinstance(new_data, dict) and new_data:
             setpoints.update(new_data)
             save_setpoints()
-                
+
             def update_ui():
                 if 'sp_labels' in globals():
                     for key in new_data:
@@ -491,7 +589,7 @@ def on_control_message(client, userdata, msg):
         print(f" Private Control MQTT Update Error: {e}")
 
 is_mqtt_connected = False
-control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Monit_Device_{DEVICE_NAME}")
+control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Dynamic_Monit_{DEVICE_NAME}")
 control_client.on_message = on_control_message
 
 def on_control_connect(client, userdata, flags, rc, properties=None):
@@ -519,7 +617,6 @@ try:
     control_client.loop_start()
 except Exception as e:
     print(f" VPS Control MQTT Error: {e}")
-
 
 def log_auth_event(user_idx, user_name, status):
     try:
@@ -655,12 +752,15 @@ def process_humi_day_night_timer(relay_obj, room_humi=None):
         ts["state"] = "OFF"
         ts["last"] = 0.0
 
-    if room_humi is None:
+    if not is_sensor_assigned("room_md02"):
+        humi_logic_active = True
+        status_msg = f"{mode} ({ts['state']})"
+    elif room_humi is None:
         humi_logic_active = False
         status_msg = f"{mode} (SENSOR ERR)"
     elif room_humi >= h_max:
         humi_logic_active = False
-        status_msg = f"{mode} (CUTOFF ≥{h_max:.0f}%)"
+        status_msg = f"{mode} (CUTOFF >={h_max:.0f}%)"
     elif room_humi <= h_min:
         humi_logic_active = True
         status_msg = f"{mode} ({ts['state']})"
@@ -675,177 +775,153 @@ def process_humi_day_night_timer(relay_obj, room_humi=None):
     return status_msg
 
 _pad_humi_allowed = True
-_pad_temp_active = False
+_pad_temp_active  = False
 
 def control_system(water_data, md02_data):
     warnings = []
     global ec_active, ph_active, solenoid_active, temp_active, humi_active, last_ec, last_ph, ec_start_time, ph_start_time, _pad_humi_allowed, _pad_temp_active
 
     now = time.time()
-    # 1. WATER SENSOR DOSING LOGIC (EC & pH & S-Tank Solenoid)
-    if water_data:
-        ec_val = water_data["ec"]
-        ph_val = water_data["ph"]
 
-        ec_min = float(setpoints.get("EC MIN", 1.2))
-        ec_max = float(setpoints.get("EC MAX", 1.8))
-        ph_low = float(setpoints.get("PH LOW", 5.5))
-        ph_high = float(setpoints.get("PH HIGH", 6.5))
-        s_tank = float(setpoints.get("S_TANK", 2.0))
+    if is_sensor_assigned("water"):
+        if water_data:
+            ec_val = water_data["ec"]
+            ph_val = water_data["ph"]
 
-        # Solenoid Control: Turns ON when EC >= S_TANK, stays ON until EC <= EC_MIN
-        if not solenoid_active and ec_val >= s_tank:
-            solenoid_active = True
-            relay_solenoid.on()
-            warnings.append(f"S-TANK SOLENOID ON (EC >= {s_tank})")
-        elif solenoid_active:
-            if ec_val <= ec_min:
-                solenoid_active = False
-                relay_solenoid.off()
-                warnings.append(f"S-TANK SOLENOID OFF (EC <= {ec_min})")
-            else:
+            ec_min = float(setpoints.get("EC MIN", 1.2))
+            ec_max = float(setpoints.get("EC MAX", 1.8))
+            ph_low = float(setpoints.get("PH LOW", 5.5))
+            ph_high = float(setpoints.get("PH HIGH", 6.5))
+            s_tank = float(setpoints.get("S_TANK", 2.0))
+
+            if not solenoid_active and ec_val >= s_tank:
+                solenoid_active = True
                 relay_solenoid.on()
-                warnings.append(f"S-TANK SOLENOID ACTIVE (EC: {ec_val})")
+                warnings.append(f"S-TANK SOLENOID ON (EC >= {s_tank})")
+            elif solenoid_active:
+                if ec_val <= ec_min:
+                    solenoid_active = False
+                    relay_solenoid.off()
+                    warnings.append(f"S-TANK SOLENOID OFF (EC <= {ec_min})")
+                else:
+                    relay_solenoid.on()
+                    warnings.append(f"S-TANK SOLENOID ACTIVE (EC: {ec_val})")
+            else:
+                relay_solenoid.off()
+
+            if not ec_active and ec_val < ec_min:
+                if now - last_ec >= 180 or last_ec == 0:
+                    ec_active = True
+                    ec_start_time = now
+                    relay_ec1.on()
+                    relay_ec2.on()
+                    last_ec = now
+                    warnings.append("EC LOW - DOSING EC1 & EC2")
+                else:
+                    rem = int(180 - (now - last_ec))
+                    warnings.append(f"EC MIXING PAUSE ({rem}s remaining)")
+            elif ec_active:
+                if ec_val >= ec_max or (now - ec_start_time >= 60):
+                    ec_active = False
+                    relay_ec1.off()
+                    relay_ec2.off()
+                    last_ec = now
+                else:
+                    relay_ec1.on()
+                    relay_ec2.on()
+                    warnings.append("EC DOSING ACTIVE")
+
+            if not ph_active and ph_val > ph_high:
+                if now - last_ph >= 180 or last_ph == 0:
+                    ph_active = True
+                    ph_start_time = now
+                    relay_ph.on()
+                    last_ph = now
+                    warnings.append("PH HIGH - DOSING PH MINUS")
+                else:
+                    rem = int(180 - (now - last_ph))
+                    warnings.append(f"PH MIXING PAUSE ({rem}s remaining)")
+            elif ph_active:
+                if ph_val <= ph_low or (now - ph_start_time >= 60):
+                    ph_active = False
+                    relay_ph.off()
+                    last_ph = now
+                else:
+                    relay_ph.on()
+                    warnings.append("PH DOSING ACTIVE")
         else:
-            relay_solenoid.off()
-
-        # EC Control (Doses for max 60s, then waits 180s / 3 min for mixing before re-evaluating)
-        if not ec_active and ec_val < ec_min:
-            if now - last_ec >= 180 or last_ec == 0:
-                ec_active = True
-                ec_start_time = now
-                relay_ec1.on()
-                relay_ec2.on()
-                last_ec = now
-                warnings.append("EC LOW - DOSING EC1 & EC2")
-            else:
-                rem = int(180 - (now - last_ec))
-                warnings.append(f"EC MIXING PAUSE ({rem}s remaining)")
-        elif ec_active:
-            if ec_val >= ec_max or (now - ec_start_time >= 60):
-                ec_active = False
-                relay_ec1.off()
-                relay_ec2.off()
-                last_ec = now
-            else:
-                relay_ec1.on()
-                relay_ec2.on()
-                warnings.append("EC DOSING ACTIVE")
-
-        # pH Control (Doses for max 60s, then waits 180s / 3 min for mixing before re-evaluating)
-        if not ph_active and ph_val > ph_high:
-            if now - last_ph >= 180 or last_ph == 0:
-                ph_active = True
-                ph_start_time = now
-                relay_ph.on()
-                last_ph = now
-                warnings.append("PH HIGH - DOSING PH MINUS")
-            else:
-                rem = int(180 - (now - last_ph))
-                warnings.append(f"PH MIXING PAUSE ({rem}s remaining)")
-        elif ph_active:
-            if ph_val <= ph_low or (now - ph_start_time >= 60):
-                ph_active = False
-                relay_ph.off()
-                last_ph = now
-            else:
-                relay_ph.on()
-                warnings.append("PH DOSING ACTIVE")
+            ec_active = ph_active = solenoid_active = False
+            relay_ec1.off(); relay_ec2.off(); relay_ph.off(); relay_solenoid.off()
+            warnings.append("WATER SENSOR ERR - DOSING DISABLED")
     else:
-        ec_active = False
-        ph_active = False
-        solenoid_active = False
-        relay_ec1.off()
-        relay_ec2.off()
-        relay_ph.off()
-        relay_solenoid.off()
-        warnings.append("WATER SENSOR ERR - DOSING DISABLED")
+        ec_active = ph_active = solenoid_active = False
+        relay_ec1.off(); relay_ec2.off(); relay_ph.off(); relay_solenoid.off()
 
-    # 2. CLIMATE CONTROL (2-Stage Fan & Cooling Pad)
-    if md02_data:
-        room_temp = md02_data["room_temp"]
-        room_humi = md02_data["room_humi"]
+    if is_sensor_assigned("room_md02"):
+        if md02_data:
+            room_temp = md02_data["room_temp"]
+            room_humi = md02_data["room_humi"]
 
-        t_min    = float(setpoints.get("TEMP MIN", 22.0))
-        t_med    = float(setpoints.get("TEMP MED", 25.0))
-        t_max    = float(setpoints.get("TEMP MAX", 28.0))
-        t_buffer = float(setpoints.get("TEMP BUFFER", setpoints.get("TEMP Hyst", 0.5)))
-        t_hyst   = t_buffer
-        # Cooling Pad Pump Independent Humidity Interlock & Safety Buffer
-        pad_h_max = float(setpoints.get("PAD H_Max", setpoints.get("PAD H_MAX", 75.0)))
-        pad_safety = float(setpoints.get("PAD Safety", setpoints.get("PAD Hyst", 2.0)))
+            t_min    = float(setpoints.get("TEMP MIN", 22.0))
+            t_med    = float(setpoints.get("TEMP MED", 25.0))
+            t_max    = float(setpoints.get("TEMP MAX", 28.0))
+            t_buffer = float(setpoints.get("TEMP BUFFER", setpoints.get("TEMP Hyst", 0.5)))
+            pad_h_max = float(setpoints.get("PAD H_Max", setpoints.get("PAD H_MAX", 75.0)))
+            pad_safety = float(setpoints.get("PAD Safety", setpoints.get("PAD Hyst", 2.0)))
 
-        # 2-Stage Exhaust Fan Logic:
-        # Rising (Heat Up): 
-        #   - Fan 1 (1st Relay) turns ON at >= t_med
-        #   - Fan 2 (2nd Relay) turns ON at >= t_max (Both ON)
-        # Falling (Cool Down):
-        #   - Fan 2 (2nd Relay) turns OFF at < (t_med - t_buffer)
-        #   - Fan 1 (1st Relay) turns OFF at <= t_min
-        
-        # Fan 1 (1st Relay) State:
-        if room_temp >= t_med:
-            fan1_on = True
-        elif room_temp <= t_min:
-            fan1_on = False
+            if room_temp >= t_med:
+                fan1_on = True
+            elif room_temp <= t_min:
+                fan1_on = False
+            else:
+                fan1_on = relay_fan1.is_active
+
+            if room_temp >= t_max:
+                fan2_on = True
+            elif room_temp < (t_med - t_buffer):
+                fan2_on = False
+            else:
+                fan2_on = relay_fan2.is_active
+
+            if fan1_on: relay_fan1.on()
+            else: relay_fan1.off()
+
+            if fan2_on: relay_fan2.on()
+            else: relay_fan2.off()
+
+            if fan1_on and fan2_on:
+                warnings.append("TEMP HIGH (STAGE 2: ALL FANS ON)")
+            elif fan1_on:
+                warnings.append("TEMP MED (STAGE 1: FAN 1 ON)")
+
+            if room_temp >= t_max:
+                _pad_temp_active = True
+            elif room_temp <= t_min:
+                _pad_temp_active = False
+
+            if room_humi >= pad_h_max:
+                _pad_humi_allowed = False
+            elif room_humi < (pad_h_max - pad_safety):
+                _pad_humi_allowed = True
+
+            if _pad_temp_active and _pad_humi_allowed:
+                process_generic_cyclic_timer("PAD", relay_pad)
+                if relay_pad.is_active:
+                    warnings.append("COOLING PAD PUMP ON")
+            else:
+                relay_pad.off()
+                if not _pad_humi_allowed:
+                    warnings.append("COOLING PAD CUTOFF (HUMIDITY HIGH)")
         else:
-            fan1_on = relay_fan1.is_active
+            relay_fan1.off(); relay_fan2.off(); relay_pad.off(); relay_fogger.off()
+            warnings.append("ROOM SENSOR ERROR")
 
-        # Fan 2 (2nd Relay) State:
-        if room_temp >= t_max:
-            fan2_on = True
-        elif room_temp < (t_med - t_buffer):
-            fan2_on = False
-        else:
-            fan2_on = relay_fan2.is_active
-
-        if fan1_on: relay_fan1.on()
-        else: relay_fan1.off()
-
-        if fan2_on: relay_fan2.on()
-        else: relay_fan2.off()
-
-        if fan1_on and fan2_on:
-            warnings.append("TEMP HIGH (STAGE 2: ALL FANS ON)")
-        elif fan1_on:
-            warnings.append("TEMP MED (STAGE 1: FAN 1 ON)")
-
-        # Cooling Pad Pump Temperature Hysteresis (ON at >= t_max, stays active until <= t_min)
-        if room_temp >= t_max:
-            _pad_temp_active = True
-        elif room_temp <= t_min:
-            _pad_temp_active = False
-
-        # Cooling Pad Pump Automation + Humidity Safety Interlock with Hysteresis
-        # Cutoff ON when room_humi >= pad_h_max; Pad re-enabled when room_humi < (pad_h_max - pad_safety)
-        if room_humi >= pad_h_max:
-            _pad_humi_allowed = False
-        elif room_humi < (pad_h_max - pad_safety):
-            _pad_humi_allowed = True
-
-        pad_humi_allowed = _pad_humi_allowed
-        pad_temp_allowed = _pad_temp_active
-
-        if pad_temp_allowed and pad_humi_allowed:
-            process_generic_cyclic_timer("PAD", relay_pad)
-            if relay_pad.is_active:
-                warnings.append("COOLING PAD PUMP ON")
-        else:
-            relay_pad.off()
-            if not pad_humi_allowed:
-                warnings.append("COOLING PAD CUTOFF (HUMIDITY HIGH)")
+        humi_mode = process_humi_day_night_timer(relay_fogger, md02_data["room_humi"] if md02_data else None)
+        if relay_fogger.is_active:
+            warnings.append(f"FOGGER ON ({humi_mode})")
     else:
-        relay_fan1.off()
-        relay_fan2.off()
-        relay_pad.off()
-        warnings.append("ROOM SENSOR ERROR")
+        relay_fan1.off(); relay_fan2.off(); relay_pad.off(); relay_fogger.off()
 
-    # 3. FOGGER AUTOMATION (Day/Night + Humi Threshold)
-    humi_mode = process_humi_day_night_timer(relay_fogger, md02_data["room_humi"] if md02_data else None)
-    if relay_fogger.is_active:
-        warnings.append(f"FOGGER ON ({humi_mode})")
-
-    # 4. SOW CYCLIC TIMERS
     process_generic_cyclic_timer("ACF", relay_acf)
     process_generic_cyclic_timer("Sprinkler", relay_sprinkler)
     process_generic_cyclic_timer("Irrigation", relay_irrigation)
@@ -868,10 +944,6 @@ def manual_stop():
 
 def restart_program():
     manual_stop()
-    for inst in [ec_instrument, ph_instrument, md02_instrument]:
-        if inst:
-            try: inst.serial.close()
-            except: pass
     os.execl(sys.executable, sys.executable, *sys.argv)
 
 def set_wifi(ssid, password):
@@ -912,7 +984,7 @@ def scan_wifi():
             response = "\r\n--- NEARBY WIFI NETWORKS ---\r\n"
             for i, (ssid, sig) in enumerate(found.items(), 1):
                 response += f"{i}. {ssid} ({sig}% Signal)\r\n"
-            response += "\r\nUse command [4.] to connnect another wifi\r\n"
+            response += "\r\nUse command [4.] to connect another wifi\r\n"
             return response
         else:
             return f"SCAN FAILED: {result.stderr.strip()}"
@@ -924,16 +996,14 @@ active_bt_fds = set()
 def handle_bt_client_fd(fd_int):
     active_bt_fds.add(fd_int)
     try:
-        print(f" 📱 Bluetooth Client Connected (FD: {fd_int})")
+        print(f" Bluetooth Client Connected (FD: {fd_int})")
         welcome_msg = (
             "\r\n--- INHYDRO CONTROLLER MENU ---\r\n\r\n"
-            #f"Device ID: {DEVICE_NAME}\r\n\r\n"
             "COMMAND MENU:\r\n"
             "1. PING\r\n"
             "2. SCAN\r\n"
             "3. STATUS\r\n"
             "4. WIFI:SSID:PASSWORD\r\n\r\n"
-            #"5. ID:new_device_id\r\n\r\n"
         )
         os.write(fd_int, welcome_msg.encode('utf-8'))
 
@@ -989,27 +1059,27 @@ def handle_bt_client_fd(fd_int):
                 elif text.upper() in ["PING", "1"]:
                     os.write(fd_int, b"\r\nPONG - System Alive & Ready!\r\n\r\n")
                 elif text.upper() in ["STATUS", "INFO", "3"]:
-                    if cached_water_data:
-                        w_ec = f"{cached_water_data.get('ec', 'SENSOR ERR')}"
-                        w_ph = f"{cached_water_data.get('ph', 'SENSOR ERR')}"
-                    else:
-                        w_ec = "SENSOR ERR"
-                        w_ph = "SENSOR ERR"
+                    st_lines = ["--- SYSTEM STATUS ---"]
+                    if is_sensor_assigned("water"):
+                        if cached_water_data:
+                            st_lines.append(f"Water EC  : {cached_water_data.get('ec', 'SENSOR ERR')} mS/cm")
+                            st_lines.append(f"Water pH  : {cached_water_data.get('ph', 'SENSOR ERR')}")
+                        else:
+                            st_lines.append("Water EC  : SENSOR ERR")
+                            st_lines.append("Water pH  : SENSOR ERR")
 
-                    if cached_md02_data:
-                        r_t = f"{cached_md02_data.get('room_temp', 'SENSOR ERR')} C"
-                        r_h = f"{cached_md02_data.get('room_humi', 'SENSOR ERR')} %"
-                    else:
-                        r_t = "SENSOR ERR"
-                        r_h = "SENSOR ERR"
+                    if is_sensor_assigned("room_md02"):
+                        if cached_md02_data:
+                            st_lines.append(f"Room Temp : {cached_md02_data.get('room_temp', 'SENSOR ERR')} °C")
+                            st_lines.append(f"Room Humi : {cached_md02_data.get('room_humi', 'SENSOR ERR')} %")
+                        else:
+                            st_lines.append("Room Temp : SENSOR ERR")
+                            st_lines.append("Room Humi : SENSOR ERR")
 
-                    st_msg = (
-                        f"--- SYSTEM STATUS ---\r\n"
-                        f"Water EC  : {w_ec}\r\n"
-                        f"Water PH  : {w_ph}\r\n"
-                        f"Room Temp : {r_t}\r\n"
-                        f"Room Humi : {r_h}"
-                    )
+                    if len(st_lines) == 1:
+                        st_lines.append("No active sensor paths assigned.")
+
+                    st_msg = "\r\n".join(st_lines)
                     os.write(fd_int, f"\r\n{st_msg}\r\n\r\n".encode('utf-8'))
                 else:
                     fallback_msg = f"\r\nACK: Received '{text}'\r\nCmds: 1.PING | 2.SCAN | 3.STATUS | 4.WIFI:SSID:PASS \r\n\r\n"
@@ -1026,8 +1096,7 @@ def register_spp_dbus():
     try:
         import sys, glob
         for path in glob.glob('/usr/lib/python3*/dist-packages'):
-            if path not in sys.path:
-                sys.path.append(path)
+            if path not in sys.path: sys.path.append(path)
         import dbus, dbus.service
         from dbus.mainloop.glib import DBusGMainLoop
         from gi.repository import GLib
@@ -1091,7 +1160,7 @@ def register_spp_dbus():
         opts = {
             'AutoConnect': dbus.Boolean(True),
             'Role': 'server',
-            'Name': f'Inhydro_{DEVICE_NAME}',
+            'Name': f'InHydro_{DEVICE_NAME}',
             'Service': '00001101-0000-1000-8000-00805F9B34FB',
             'Channel': dbus.UInt16(1),
             'RequireAuthentication': dbus.Boolean(False),
@@ -1100,7 +1169,6 @@ def register_spp_dbus():
         manager_p.RegisterProfile(profile_path, '00001101-0000-1000-8000-00805F9B34FB', opts)
         print(" DBus SPP Profile1 Registered with Full SDP Record!")
 
-        # Spin GLib MainLoop in background thread to process DBus signals/methods
         mainloop = GLib.MainLoop()
         threading.Thread(target=mainloop.run, daemon=True).start()
         print(" GLib DBus Event Dispatcher Thread Started!")
@@ -1129,7 +1197,6 @@ def auto_trust_devices():
         time.sleep(15)
 
 def start_bluetooth_server():
-    # Enforce Bluetooth Power, Discoverable and Pairable state via DBus Adapter
     try:
         import sys, glob
         for path in glob.glob('/usr/lib/python3*/dist-packages'):
@@ -1154,7 +1221,6 @@ def start_bluetooth_server():
     while True:
         time.sleep(3600)
 
-
 LOG_DIR = os.path.join(BASE_DIR, "local_logs")
 ACTIVE_LOG_FILE = os.path.join(LOG_DIR, "active.jsonl")
 local_log_lock = threading.Lock()
@@ -1175,12 +1241,12 @@ def publish_live_telemetry(water_data, md02_data):
         payload = {
             "device": DEVICE_NAME,
             "timestamp": ts_str,
-            "temp": water_data.get("temp") if water_data else None,
-            "moist": water_data.get("moist") if water_data else None,
-            "ec": water_data.get("ec") if water_data else None,
-            "ph": water_data.get("ph") if water_data else None,
-            "room_temp": md02_data.get("room_temp") if md02_data else None,
-            "room_humi": md02_data.get("room_humi") if md02_data else None,
+            "temp": water_data.get("temp") if (is_sensor_assigned("water") and water_data) else None,
+            "moist": water_data.get("moist") if (is_sensor_assigned("water") and water_data) else None,
+            "ec": water_data.get("ec") if (is_sensor_assigned("water") and water_data) else None,
+            "ph": water_data.get("ph") if (is_sensor_assigned("water") and water_data) else None,
+            "room_temp": md02_data.get("room_temp") if (is_sensor_assigned("room_md02") and md02_data) else None,
+            "room_humi": md02_data.get("room_humi") if (is_sensor_assigned("room_md02") and md02_data) else None,
             "timer1": relay_timer1.is_active,
             "timer2": relay_timer2.is_active,
             "relay_temp": relay_temp.is_active,
@@ -1199,7 +1265,7 @@ def publish_live_telemetry(water_data, md02_data):
         }
         control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", json.dumps(payload), retain=False)
         control_client.publish(f"inhydro/{DEVICE_NAME}/room1/telemetry/live", json.dumps(payload), retain=False)
-    except Exception as e:
+    except Exception:
         pass
 
 def save_local_telemetry(water_data, md02_data):
@@ -1207,25 +1273,22 @@ def save_local_telemetry(water_data, md02_data):
     try: connected = is_mqtt_connected and control_client.is_connected()
     except: connected = False
 
-    # Store locally ONLY when device is disconnected from cloud broker
-    if connected:
-        return
+    if connected: return
 
     cur_time = time.time()
-    if cur_time - last_local_save_time < 1:
-        return
+    if cur_time - last_local_save_time < 1: return
 
     ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
     ts_str = datetime.datetime.now(ist_tz).isoformat()
 
     row = [
         ts_str,
-        water_data.get("temp") if water_data else None,
-        water_data.get("moist") if water_data else None,
-        water_data.get("ec") if water_data else None,
-        water_data.get("ph") if water_data else None,
-        md02_data.get("room_temp") if md02_data else None,
-        md02_data.get("room_humi") if md02_data else None,
+        water_data.get("temp") if (is_sensor_assigned("water") and water_data) else None,
+        water_data.get("moist") if (is_sensor_assigned("water") and water_data) else None,
+        water_data.get("ec") if (is_sensor_assigned("water") and water_data) else None,
+        water_data.get("ph") if (is_sensor_assigned("water") and water_data) else None,
+        md02_data.get("room_temp") if (is_sensor_assigned("room_md02") and md02_data) else None,
+        md02_data.get("room_humi") if (is_sensor_assigned("room_md02") and md02_data) else None,
         1 if relay_timer1.is_active else 0,
         1 if relay_timer2.is_active else 0,
         1 if relay_temp.is_active else 0,
@@ -1245,19 +1308,15 @@ def save_local_telemetry(water_data, md02_data):
 
     last_local_save_time = cur_time
 
-    # Non-blocking lock acquire to prevent thread stacking / app freezing
-    if not local_log_lock.acquire(blocking=False):
-        return
+    if not local_log_lock.acquire(blocking=False): return
 
     try:
         os.makedirs(LOG_DIR, exist_ok=True)
         write_header = not os.path.exists(ACTIVE_LOG_FILE) or os.path.getsize(ACTIVE_LOG_FILE) == 0
         with open(ACTIVE_LOG_FILE, "a") as f:
-            if write_header:
-                f.write(json.dumps(COLUMNS) + "\n")
+            if write_header: f.write(json.dumps(COLUMNS) + "\n")
             f.write(json.dumps(row) + "\n")
 
-        # Rotate file if active log exceeds ~1.5MB (10,000 entries)
         if os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 1500000:
             rot_name = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
             os.rename(ACTIVE_LOG_FILE, rot_name)
@@ -1267,8 +1326,7 @@ def save_local_telemetry(water_data, md02_data):
         local_log_lock.release()
 
 def unpack_row(r):
-    if not isinstance(r, list) or len(r) < 7:
-        return None
+    if not isinstance(r, list) or len(r) < 7: return None
     return {
         "device": DEVICE_NAME,
         "timestamp": r[0],
@@ -1341,11 +1399,10 @@ def sync_offline_data_worker():
                     print(f"[OfflineSync] Syncing segment {fname} with {len(rows)} entries...")
                     remaining_rows = list(rows)
                     success = True
-
                     batch_size = 500
+
                     for idx in range(0, len(rows), batch_size):
                         batch = rows[idx:idx+batch_size]
-
                         try: conn = is_mqtt_connected and control_client.is_connected()
                         except: conn = False
                         if not conn:
@@ -1370,29 +1427,24 @@ def sync_offline_data_worker():
 
                         remaining_rows = remaining_rows[len(batch):]
 
-                    # Update or remove the log segment file
                     with local_log_lock:
                         try:
                             if remaining_rows:
                                 with open(fpath, "w") as f:
                                     f.write(json.dumps(COLUMNS) + "\n")
-                                    for r in remaining_rows:
-                                        f.write(json.dumps(r) + "\n")
+                                    for r in remaining_rows: f.write(json.dumps(r) + "\n")
                             else:
-                                if os.path.exists(fpath):
-                                    os.remove(fpath)
+                                if os.path.exists(fpath): os.remove(fpath)
                                 print(f"[OfflineSync] Finished and removed log segment: {fname}")
                         except Exception as we:
                             print(f"[OfflineSync] Error updating log segment {fname}: {we}")
                             success = False
 
-                    if not success:
-                        break
+                    if not success: break
         except Exception as e:
             print(f"[OfflineSync] General error: {e}")
 
         time.sleep(15)
-
 
 root = tk.Tk()
 root.update()
@@ -1420,14 +1472,11 @@ def show(frame):
         root.focus_force()
     except Exception:
         pass
-    if 'lbl_logo' in globals():
-        lbl_logo.lift()
-    if 'lbl_clock' in globals():
-        lbl_clock.lift()
+    if 'lbl_logo' in globals(): lbl_logo.lift()
+    if 'lbl_clock' in globals(): lbl_clock.lift()
 
 show(frame_main)
 
-# LOGO & CLOCK HEADER
 LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
 try:
     logo_img_raw = Image.open(LOGO_PATH).resize((130, 85), Image.LANCZOS)
@@ -1442,10 +1491,8 @@ except Exception:
 lbl_clock = tk.Label(root, text="", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff", justify="left")
 lbl_clock.place(x=10, y=8, anchor="nw")
 
+tk.Label(frame_main, text=" FARM AUTOMATION ", font=FONT_BIG, fg="#1565c0", bg="#ffffff").pack(pady=(4, 2))
 
-tk.Label(frame_main, text=f" FARM AUTOMATION ", font=FONT_BIG, fg="#1565c0", bg="#ffffff").pack(pady=(4, 2))
-
-# Pack Footer FIRST at bottom with increased height
 footer_main = tk.Frame(frame_main, bg="#ffffff", height=45)
 footer_main.pack(side="bottom", fill="x", pady=4)
 footer_main.pack_propagate(False)
@@ -1458,12 +1505,13 @@ tk.Button(footer_main, text="EXIT", font=FONT_MED, bg="#334155", fg="white", wid
 content_grid = tk.Frame(frame_main, bg="#ffffff")
 content_grid.pack(expand=True, fill="both", padx=10, pady=(63, 6))
 
-# Column 1 (LEFT COLUMN - SENSORS DATA)
 col_sensors = tk.Frame(content_grid, bg="#e0e0e0")
 col_sensors.pack(side="left", fill="both", expand=True, padx=4)
 
-# Section 1: Water Sensor
-tk.Label(col_sensors, text="WATER SENSOR", font=("Arial", 11, "bold"), fg="#1565c0", bg="#e0e0e0").pack(anchor="w", pady=(4, 1))
+lbl_val_ec = None
+lbl_val_ph = None
+lbl_val_room_temp = None
+lbl_val_room_humi = None
 
 def create_sensor_row(parent, label_text, is_ec=False):
     f = tk.Frame(parent, bg="#e0e0e0")
@@ -1474,60 +1522,103 @@ def create_sensor_row(parent, label_text, is_ec=False):
     lbl_val.pack(side="right")
     return lbl_val
 
-lbl_val_ec         = create_sensor_row(col_sensors, "EC", is_ec=True)
-lbl_val_ph         = create_sensor_row(col_sensors, "pH")
+def build_sensors_column():
+    global lbl_val_ec, lbl_val_ph, lbl_val_room_temp, lbl_val_room_humi, warn_box_frame
 
-tk.Frame(col_sensors, bg="black", height=1).pack(fill="x", pady=4)
+    for child in col_sensors.winfo_children():
+        child.destroy()
 
-# Section 2: Room Sensor (MD02)
-tk.Label(col_sensors, text="ROOM SENSOR", font=("Arial", 11, "bold"), fg="#1565c0", bg="#e0e0e0").pack(anchor="w", pady=(2, 1))
+    water_assigned = is_sensor_assigned("water")
+    room_assigned  = is_sensor_assigned("room_md02")
 
-lbl_val_room_temp = create_sensor_row(col_sensors, "Room Temp")
-lbl_val_room_humi = create_sensor_row(col_sensors, "Room Humi")
+    has_any_sensor = False
 
-# Warning / Status Container at bottom of Column 1
-warn_box_frame = tk.Frame(col_sensors, bg="#e0e0e0")
-warn_box_frame.pack(pady=4, anchor="w", fill="x")
+    if water_assigned:
+        has_any_sensor = True
+        tk.Label(col_sensors, text="WATER SENSOR", font=("Arial", 11, "bold"), fg="#1565c0", bg="#e0e0e0").pack(anchor="w", pady=(4, 1))
+        lbl_val_ec = create_sensor_row(col_sensors, "EC", is_ec=True)
+        lbl_val_ph = create_sensor_row(col_sensors, "pH")
+        tk.Frame(col_sensors, bg="black", height=1).pack(fill="x", pady=4)
+    else:
+        lbl_val_ec = None
+        lbl_val_ph = None
 
-# Sleek Divider Line 1 (Sleeker 2px thickness)
+    if room_assigned:
+        has_any_sensor = True
+        tk.Label(col_sensors, text="ROOM SENSOR", font=("Arial", 11, "bold"), fg="#1565c0", bg="#e0e0e0").pack(anchor="w", pady=(2, 1))
+        lbl_val_room_temp = create_sensor_row(col_sensors, "Room Temp")
+        lbl_val_room_humi = create_sensor_row(col_sensors, "Room Humi")
+        tk.Frame(col_sensors, bg="black", height=1).pack(fill="x", pady=4)
+    else:
+        lbl_val_room_temp = None
+        lbl_val_room_humi = None
+
+    if not has_any_sensor:
+        no_sensor_card = tk.Frame(col_sensors, bg="#f8fafc", bd=1, relief="solid")
+        no_sensor_card.pack(fill="x", pady=20, padx=10)
+        tk.Label(no_sensor_card, text="NO SENSORS ASSIGNED", font=("Arial", 11, "bold"), fg="#0369a1", bg="#f8fafc").pack(pady=(10, 4))
+        tk.Label(no_sensor_card, text="Configure sensor serial paths\nto activate monitoring.", font=("Arial", 9), fg="#64748b", bg="#f8fafc", justify="center").pack(pady=(0, 10))
+
+    warn_box_frame = tk.Frame(col_sensors, bg="#e0e0e0")
+    warn_box_frame.pack(pady=4, anchor="w", fill="x")
+
+build_sensors_column()
+
 sep1 = tk.Frame(content_grid, bg="black", width=2)
 sep1.pack(side="left", fill="y", pady=4)
 
-# Column 2 (MIDDLE COLUMN - RELAY STATUS)
 col_relays = tk.Frame(content_grid, bg="#e0e0e0")
 col_relays.pack(side="left", fill="both", expand=True, padx=4)
 
-tk.Label(col_relays, text="RELAY STATUS", font=("Arial", 11, "bold"), fg="#1565c0", bg="#e0e0e0").pack(pady=(4, 2))
-
 labels_relays = {}
-relay_items = [
-    ("EC1 ",        "ec1"),
-    ("EC2 ",        "ec2"),
-    ("pH ",         "ph"),
-    ("S-Tank Solenoid", "solenoid"),
-    ("Fan(1st 50%)",       "fan1"),
-    ("Fan(2nd 50%)",       "fan2"),
-    ("Cooling Pad", "pad"),
-    ("Fogger ",     "fogger"),
-    ("ACF Fan",     "acf"),
-    ("Sprinkler",   "sprinkler"),
-    ("Irrigation Pump",   "irrigation"),
-    ("Cyclic Timer 1",    "timer1"),
-    ("Cyclic Timer 2",    "timer2"),
-]
-for lbl_txt, r_key in relay_items:
-    f = tk.Frame(col_relays, bg="#e0e0e0")
-    f.pack(fill="x", pady=0)
-    tk.Label(f, text=lbl_txt, font=("Arial", 9, "bold"), fg="#333333", bg="#e0e0e0", width=15, anchor="w").pack(side="left")
-    lbl_st = tk.Label(f, text="OFF", font=("Arial", 9, "bold"), fg="#c62828", bg="#e0e0e0", anchor="e")
-    lbl_st.pack(side="right")
-    labels_relays[r_key] = lbl_st
 
-# Sleek Divider Line 2 (Sleeker 2px thickness)
+def build_relays_column():
+    global labels_relays
+    for child in col_relays.winfo_children():
+        child.destroy()
+    labels_relays.clear()
+
+    tk.Label(col_relays, text="RELAY STATUS", font=("Arial", 11, "bold"), fg="#1565c0", bg="#e0e0e0").pack(pady=(4, 2))
+
+    active_relay_items = []
+
+    if is_sensor_assigned("water"):
+        active_relay_items.extend([
+            ("EC1 ",            "ec1"),
+            ("EC2 ",            "ec2"),
+            ("pH ",             "ph"),
+            ("S-Tank Solenoid", "solenoid"),
+        ])
+
+    if is_sensor_assigned("room_md02"):
+        active_relay_items.extend([
+            ("Fan(1st 50%)",    "fan1"),
+            ("Fan(2nd 50%)",    "fan2"),
+            ("Cooling Pad",     "pad"),
+            ("Fogger ",         "fogger"),
+        ])
+
+    active_relay_items.extend([
+        ("ACF Fan",         "acf"),
+        ("Sprinkler",       "sprinkler"),
+        ("Irrigation Pump", "irrigation"),
+        ("Cyclic Timer 1",  "timer1"),
+        ("Cyclic Timer 2",  "timer2"),
+    ])
+
+    for lbl_txt, r_key in active_relay_items:
+        f = tk.Frame(col_relays, bg="#e0e0e0")
+        f.pack(fill="x", pady=0)
+        tk.Label(f, text=lbl_txt, font=("Arial", 9, "bold"), fg="#333333", bg="#e0e0e0", width=15, anchor="w").pack(side="left")
+        lbl_st = tk.Label(f, text="OFF", font=("Arial", 9, "bold"), fg="#c62828", bg="#e0e0e0", anchor="e")
+        lbl_st.pack(side="right")
+        labels_relays[r_key] = lbl_st
+
+build_relays_column()
+
 sep2 = tk.Frame(content_grid, bg="black", width=2)
 sep2.pack(side="left", fill="y", pady=4)
 
-# Column 3 (RIGHT COLUMN - CYCLIC TIMERS TOP-TO-BOTTOM FILLING RIGHT SIDE SPACE)
 col_timers = tk.Frame(content_grid, bg="#e0e0e0")
 col_timers.pack(side="left", fill="both", expand=True, padx=4)
 
@@ -1581,8 +1672,6 @@ def create_humi_timer_widget(parent):
         lbl_v.pack(side="right", padx=4, pady=1)
         t_sub_labels[sub_key] = lbl_v
 
-    labels_timers["humi"] = t_sub_labels[sub_key] = lbl_v
-
     labels_timers["humi"] = t_sub_labels
 
 timer_canvas = tk.Canvas(col_timers, bg="#e0e0e0", highlightthickness=0)
@@ -1596,21 +1685,28 @@ def _on_canvas_configure(event):
 
 timer_canvas.bind("<Configure>", _on_canvas_configure)
 scroll_timers_frame.bind("<Configure>", lambda e: timer_canvas.configure(scrollregion=timer_canvas.bbox("all")))
-
 timer_canvas.configure(yscrollcommand=timer_scrollbar.set)
 
 timer_canvas.pack(side="left", fill="both", expand=True)
 timer_scrollbar.pack(side="right", fill="y")
 
-# Render 7 Equipment Timers Top-to-Bottom, Filling Full Right Side Width (Identical to almora2.py)
-create_humi_timer_widget(scroll_timers_frame)
-create_timer_widget(scroll_timers_frame, "PAD",        "COOLING PAD PUMP")
-create_timer_widget(scroll_timers_frame, "ACF",        "AIR CIRCULATION FAN")
-create_timer_widget(scroll_timers_frame, "Sprinkler",  "OVERHEAD SPRINKLER")
-create_timer_widget(scroll_timers_frame, "Irrigation", "DAYTIME IRRIGATION")
-create_timer_widget(scroll_timers_frame, "Timer1",     "CYCLIC TIMER 1")
-create_timer_widget(scroll_timers_frame, "Timer2",     "CYCLIC TIMER 2")
+def build_timers_column():
+    global labels_timers
+    for child in scroll_timers_frame.winfo_children():
+        child.destroy()
+    labels_timers.clear()
 
+    if is_sensor_assigned("room_md02"):
+        create_humi_timer_widget(scroll_timers_frame)
+        create_timer_widget(scroll_timers_frame, "PAD", "COOLING PAD PUMP")
+
+    create_timer_widget(scroll_timers_frame, "ACF",        "AIR CIRCULATION FAN")
+    create_timer_widget(scroll_timers_frame, "Sprinkler",  "OVERHEAD SPRINKLER")
+    create_timer_widget(scroll_timers_frame, "Irrigation", "DAYTIME IRRIGATION")
+    create_timer_widget(scroll_timers_frame, "Timer1",     "CYCLIC TIMER 1")
+    create_timer_widget(scroll_timers_frame, "Timer2",     "CYCLIC TIMER 2")
+
+build_timers_column()
 
 def request_setpoints_access():
     sw = root.winfo_screenwidth()
@@ -1638,8 +1734,7 @@ def request_setpoints_access():
             root.geometry(f"{sw}x{sh}+0+0")
             root.attributes("-fullscreen", True)
             root.focus_force()
-        except Exception:
-            pass
+        except Exception: pass
 
     password_entered = ""
     selected_user = 1
@@ -1665,10 +1760,8 @@ def request_setpoints_access():
             tk.Label(header_frame, image=logo_img_modal, bg="#ffffff").pack(side="right", padx=10)
         except Exception: pass
 
-    # TWO USER SELECTION BUTTONS ONLY
     user_frame = tk.Frame(main_container, bg="#ffffff")
     user_frame.pack(pady=10)
-
     user_btns = []
 
     def show_error_in_display(msg):
@@ -1704,8 +1797,7 @@ def request_setpoints_access():
                 win.attributes("-fullscreen", True)
                 win.focus_force()
                 win.grab_set()
-            except Exception:
-                pass
+            except Exception: pass
 
         name_entered = setpoints.get(f"USER {selected_user} Name", f"Operator {selected_user}")
         container = tk.Frame(pop, bg="#ffffff")
@@ -1778,8 +1870,7 @@ def request_setpoints_access():
                 win.attributes("-fullscreen", True)
                 win.focus_force()
                 win.grab_set()
-            except Exception:
-                pass
+            except Exception: pass
 
         step = 1
         old_pin = ""; new_pin = ""; input_value = ""
@@ -1893,27 +1984,23 @@ def request_setpoints_access():
                 btn.config(bg="#cbd5e1", fg="#0f172a", relief="raised")
         kp_clear()
 
-    # User 1 Button
     u1_name = setpoints.get("USER 1 Name", "Operator 1")
     btn_u1 = tk.Button(user_frame, text=u1_name, font=("Arial", 11, "bold"), width=16, height=1, bd=1)
     btn_u1.config(command=lambda: select_user(1))
     btn_u1.pack(side="left", padx=10)
     user_btns.append(btn_u1)
 
-    # User 2 Button
     u2_name = setpoints.get("USER 2 Name", "Operator 2")
     btn_u2 = tk.Button(user_frame, text=u2_name, font=("Arial", 11, "bold"), width=16, height=1, bd=1)
     btn_u2.config(command=lambda: select_user(2))
     btn_u2.pack(side="left", padx=10)
     user_btns.append(btn_u2)
 
-    # Operator Sub-actions
     ops_frame = tk.Frame(main_container, bg="#ffffff")
     ops_frame.pack(pady=5)
     tk.Button(ops_frame, text=" RENAME USER", font=("Arial", 9, "bold"), bg="#64748b", fg="white", width=14, height=1, bd=1, relief="raised", command=rename_user_popup).pack(side="left", padx=5)
     tk.Button(ops_frame, text=" CHANGE PIN", font=("Arial", 9, "bold"), bg="#64748b", fg="white", width=14, height=1, bd=1, relief="raised", command=change_pin_popup).pack(side="left", padx=5)
 
-    # Display entry for password
     display_container = tk.Frame(main_container, bg="#ffffff")
     display_container.pack(pady=10)
 
@@ -1960,6 +2047,7 @@ def request_setpoints_access():
         if password_entered == correct_password:
             log_auth_event(selected_user, user_name, "SUCCESS")
             close_win()
+            rebuild_setpoints_ui()
             show(frame_set)
         else:
             log_auth_event(selected_user, user_name, "FAILED")
@@ -1988,15 +2076,13 @@ def request_setpoints_access():
 
 tk.Label(frame_set, text="SYSTEM SETPOINTS CONFIGURATION", font=FONT_BIG, fg="#1565c0", bg="#ffffff").pack(pady=(4, 1))
 
-# Setpoint Footer (Packed FIRST at side="bottom" like control121.py)
 footer_set = tk.Frame(frame_set, bg="#ffffff", height=45)
 footer_set.pack(side="bottom", fill="x")
 footer_set.pack_propagate(False)
 
 tk.Button(footer_set, text="SAVE & RETURN", font=FONT_MED, bg="#0284c7", fg="white", width=18,
-          command=lambda: (save_setpoints(), show(frame_main))).pack(pady=4)
+          command=lambda: (save_setpoints(), build_sensors_column(), build_relays_column(), build_timers_column(), show(frame_main))).pack(pady=4)
 
-# Setpoints Scrollable Canvas & Vertical Touch Slider (Fits Full Width of 7-inch Display)
 sp_canvas = tk.Canvas(frame_set, bg="#ffffff", highlightthickness=0)
 sp_scrollbar = tk.Scrollbar(frame_set, orient="vertical", command=sp_canvas.yview, width=28, bd=2, relief="raised")
 sp_container = tk.Frame(sp_canvas, bg="#ffffff")
@@ -2015,20 +2101,6 @@ sp_canvas.configure(yscrollcommand=sp_scrollbar.set)
 
 sp_scrollbar.pack(side="right", fill="y", pady=(32, 0))
 sp_canvas.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=(32, 0))
-
-# Top Section: 2 Equal Columns (Left: Dosing & Climate, Right: Humidifier)
-sp_top_container = tk.Frame(sp_container, bg="#ffffff")
-sp_top_container.pack(fill="x", side="top", pady=(0, 4))
-
-left_sp_pane = tk.Frame(sp_top_container, bg="#ffffff")
-left_sp_pane.pack(side="left", fill="both", expand=True, padx=4)
-
-right_sp_pane = tk.Frame(sp_top_container, bg="#ffffff")
-right_sp_pane.pack(side="right", fill="both", expand=True, padx=4)
-
-# Bottom Section: 2 Vertical Stacked Cards for Equipment Cyclic Timers
-sp_bottom_container = tk.Frame(sp_container, bg="#ffffff")
-sp_bottom_container.pack(fill="x", side="top", pady=(4, 6), padx=4)
 
 sp_labels = {}
 sp_selected_key = None
@@ -2049,116 +2121,6 @@ def make_sp_cell(parent, key, label_text=None, width_lbl=10, default_val=0.0):
     btn.pack(side="right", padx=2)
     sp_labels[key] = val_lbl
     return cell
-
-# Card 1 (LEFT PANE): Nutrients & pH
-card_dosing = tk.LabelFrame(left_sp_pane, text=" NUTRIENTS & PH ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
-card_dosing.pack(fill="x", pady=4, padx=4)
-grid_dosing = tk.Frame(card_dosing, bg="#ffffff")
-grid_dosing.pack(pady=4, padx=6, fill="x")
-grid_dosing.columnconfigure(0, weight=1)
-grid_dosing.columnconfigure(1, weight=1)
-
-make_sp_cell(grid_dosing, "EC MIN", "EC Min:").grid(row=0, column=0, padx=4, pady=3, sticky="ew")
-make_sp_cell(grid_dosing, "EC MAX", "EC Max:").grid(row=0, column=1, padx=4, pady=3, sticky="ew")
-make_sp_cell(grid_dosing, "PH LOW", "pH Low:").grid(row=1, column=0, padx=4, pady=3, sticky="ew")
-make_sp_cell(grid_dosing, "PH HIGH", "pH High:").grid(row=1, column=1, padx=4, pady=3, sticky="ew")
-make_sp_cell(grid_dosing, "S_TANK", "S Tank:").grid(row=2, column=0, padx=4, pady=3, sticky="ew")
-
-# Card 3 (LEFT PANE): Climate Control
-card_climate_sp = tk.LabelFrame(left_sp_pane, text=" CLIMATE CONTROL ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
-card_climate_sp.pack(fill="x", pady=4, padx=4)
-grid_climate_sp = tk.Frame(card_climate_sp, bg="#ffffff")
-grid_climate_sp.pack(pady=4, padx=6, fill="x")
-
-# Left Section: Temperature Setpoints (Top to Bottom)
-temp_section = tk.Frame(grid_climate_sp, bg="#ffffff")
-temp_section.pack(side="left", fill="both", expand=True, padx=4)
-tk.Label(temp_section, text="TEMPERATURE SETPOINTS", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w", pady=(1, 3))
-make_sp_cell(temp_section, "TEMP MIN", "Temp Min:").pack(fill="x", pady=3)
-make_sp_cell(temp_section, "TEMP MED", "Temp Med:").pack(fill="x", pady=3)
-make_sp_cell(temp_section, "TEMP MAX", "Temp Max:").pack(fill="x", pady=3)
-make_sp_cell(temp_section, "TEMP Hyst", "Safety:").pack(fill="x", pady=3)
-
-# Vertical Separator Line
-tk.Frame(grid_climate_sp, bg="#cbd5e1", width=1).pack(side="left", fill="y", padx=4, pady=2)
-
-# Right Section: Cooling Pad Humidity Interlock & Safety Buffer
-humi_section = tk.Frame(grid_climate_sp, bg="#ffffff")
-humi_section.pack(side="right", fill="both", expand=True, padx=4)
-tk.Label(humi_section, text="COOLING PAD HUMIDITY", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w", pady=(1, 3))
-make_sp_cell(humi_section, "PAD H_Max", "Max_Humi:").pack(fill="x", pady=3)
-make_sp_cell(humi_section, "PAD Safety", "Safety:   ").pack(fill="x", pady=3)
-
-# Card 2 (RIGHT PANE): Humidifier Day/Night Cyclic Timer
-card_humi_sp = tk.LabelFrame(right_sp_pane, text=f" {str(setpoints.get('HUMI Name', 'HUMIDIFIER')).upper()} DAY/NIGHT TIMER ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
-card_humi_sp.pack(fill="x", pady=(45, 2), padx=4)
-
-humi_hdr = tk.Frame(card_humi_sp, bg="#f1f5f9")
-humi_hdr.pack(fill="x", pady=4, padx=6)
-tk.Label(humi_hdr, text="Setting", font=("Arial", 10, "bold"), fg="#64748b", bg="#f1f5f9", width=10, anchor="w").pack(side="left", padx=2)
-tk.Label(humi_hdr, text="DAY WINDOW", font=("Arial", 10, "bold"), fg="#1565c0", bg="#f1f5f9", width=15, anchor="center").pack(side="left", expand=True)
-tk.Label(humi_hdr, text="NIGHT WINDOW", font=("Arial", 10, "bold"), fg="#1565c0", bg="#f1f5f9", width=15, anchor="center").pack(side="left", expand=True)
-
-r_name = tk.Frame(card_humi_sp, bg="#ffffff")
-r_name.pack(fill="x", pady=4, padx=6)
-tk.Label(r_name, text="Timer Name", font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", width=10, anchor="w").pack(side="left", padx=2)
-v_name = tk.Label(r_name, text=str(setpoints.get("HUMI Name", "HUMIDIFIER")), font=("Arial", 10, "bold"), fg="#0f172a", bg="#f8fafc", anchor="center", relief="sunken", bd=1)
-v_name.pack(side="left", expand=True, fill="x", padx=4)
-btn_name = tk.Button(r_name, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
-                     command=lambda: open_keypad_sp("HUMI Name"))
-btn_name.pack(side="right", padx=2)
-sp_labels["HUMI Name"] = v_name
-
-humi_rows = [
-    ("Start Time", "HUMI D_Start",  "HUMI N_Start"),
-    ("Stop Time",  "HUMI D_Stop",   "HUMI N_Stop"),
-    ("ON Min",     "HUMI D_ON Min",  "HUMI N_ON Min"),
-    ("OFF Min",    "HUMI D_OFF Min", "HUMI N_OFF Min"),
-    ("H Min %",    "HUMI D_Min",     "HUMI N_Min"),
-    ("H Max %",    "HUMI D_Max",     "HUMI N_Max"),
-]
-
-for r_lbl, d_k, n_k in humi_rows:
-    r_f = tk.Frame(card_humi_sp, bg="#ffffff")
-    r_f.pack(fill="x", pady=4, padx=6)
-    tk.Label(r_f, text=r_lbl, font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", width=10, anchor="w").pack(side="left", padx=2)
-
-    c_day = tk.Frame(r_f, bg="#ffffff")
-    c_day.pack(side="left", expand=True, fill="x")
-    v_d = tk.Label(c_day, text=str(setpoints.get(d_k, "")), font=("Arial", 10, "bold"), fg="#e65100", bg="#f8fafc", width=6, anchor="center", relief="sunken", bd=1)
-    v_d.pack(side="left", expand=True, padx=2)
-    tk.Button(c_day, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
-              command=lambda k=d_k: open_keypad_sp(k)).pack(side="right", padx=2)
-    sp_labels[d_k] = v_d
-
-    c_night = tk.Frame(r_f, bg="#ffffff")
-    c_night.pack(side="left", expand=True, fill="x")
-    v_n = tk.Label(c_night, text=str(setpoints.get(n_k, "")), font=("Arial", 10, "bold"), fg="#e65100", bg="#f8fafc", width=6, anchor="center", relief="sunken", bd=1)
-    v_n.pack(side="left", expand=True, padx=2)
-    tk.Button(c_night, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
-              command=lambda k=n_k: open_keypad_sp(k)).pack(side="right", padx=2)
-    sp_labels[n_k] = v_n
-
-# Bottom Section: 2 Vertical Stacked Cards (Top & Bottom) for Equipment Cyclic Timers
-# Grid Box 1: Top Card (3 Equipment Timers: Pad Pump, ACF Fan, Sprinkler)
-card_timers_1 = tk.LabelFrame(sp_bottom_container, text=" CYCLIC TIMERS 1 - 3 ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
-card_timers_1.pack(fill="x", pady=(3, 6), padx=4)
-
-cols_group1 = [
-    {"name": "Pad Pump",   "keys": {"Name": "PAD Name", "Start": "PAD Start", "Stop": "PAD Stop", "ON Min": "PAD ON Min", "OFF Min": "PAD OFF Min"}},
-    {"name": "ACF Fan",    "keys": {"Name": "ACF Name", "Start": "ACF Start", "Stop": "ACF Stop", "ON Min": "ACF ON Min", "OFF Min": "ACF OFF Min"}},
-    {"name": "Sprinkler",  "keys": {"Name": "Sprinkler Name", "Start": "Sprinkler Start", "Stop": "Sprinkler Stop", "ON Min": "Sprinkler ON Min", "OFF Min": "Sprinkler OFF Min"}}
-]
-
-# Grid Box 2: Bottom Card (3 Equipment Timers: Irrigation, Timer 1, Timer 2)
-card_timers_2 = tk.LabelFrame(sp_bottom_container, text=" CYCLIC TIMERS 4 - 6 ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
-card_timers_2.pack(fill="x", pady=(3, 6), padx=4)
-
-cols_group2 = [
-    {"name": "Irrigation", "keys": {"Name": "Irrigation Name", "Start": "Irrigation Start", "Stop": "Irrigation Stop", "ON Min": "Irrigation ON Min", "OFF Min": "Irrigation OFF Min"}},
-    {"name": "Timer 1",    "keys": {"Name": "Timer1 Name", "Start": "Timer1 Start", "Stop": "Timer1 Stop", "ON Min": "Timer1 ON Min", "OFF Min": "Timer1 OFF Min"}},
-    {"name": "Timer 2",    "keys": {"Name": "Timer2 Name", "Start": "Timer2 Start", "Stop": "Timer2 Stop", "ON Min": "Timer2 ON Min", "OFF Min": "Timer2 OFF Min"}}
-]
 
 def build_timer_grid_box(parent_card, cols_group):
     header_frame = tk.Frame(parent_card, bg="#f1f5f9")
@@ -2197,8 +2159,135 @@ def build_timer_grid_box(parent_card, cols_group):
                 btn.pack(side="right", padx=2)
                 sp_labels[full_key] = val_lbl
 
-build_timer_grid_box(card_timers_1, cols_group1)
-build_timer_grid_box(card_timers_2, cols_group2)
+def rebuild_setpoints_ui():
+    for child in sp_container.winfo_children():
+        child.destroy()
+    sp_labels.clear()
+
+    water_assigned = is_sensor_assigned("water")
+    room_assigned  = is_sensor_assigned("room_md02")
+
+    sp_top_container = tk.Frame(sp_container, bg="#ffffff")
+    sp_top_container.pack(fill="x", side="top", pady=(0, 4))
+
+    left_sp_pane = tk.Frame(sp_top_container, bg="#ffffff")
+    left_sp_pane.pack(side="left", fill="both", expand=True, padx=4)
+
+    right_sp_pane = tk.Frame(sp_top_container, bg="#ffffff")
+    right_sp_pane.pack(side="right", fill="both", expand=True, padx=4)
+
+    if water_assigned:
+        card_dosing = tk.LabelFrame(left_sp_pane, text=" NUTRIENTS & PH ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
+        card_dosing.pack(fill="x", pady=4, padx=4)
+        grid_dosing = tk.Frame(card_dosing, bg="#ffffff")
+        grid_dosing.pack(pady=4, padx=6, fill="x")
+        grid_dosing.columnconfigure(0, weight=1)
+        grid_dosing.columnconfigure(1, weight=1)
+
+        make_sp_cell(grid_dosing, "EC MIN", "EC Min:").grid(row=0, column=0, padx=4, pady=3, sticky="ew")
+        make_sp_cell(grid_dosing, "EC MAX", "EC Max:").grid(row=0, column=1, padx=4, pady=3, sticky="ew")
+        make_sp_cell(grid_dosing, "PH LOW", "pH Low:").grid(row=1, column=0, padx=4, pady=3, sticky="ew")
+        make_sp_cell(grid_dosing, "PH HIGH", "pH High:").grid(row=1, column=1, padx=4, pady=3, sticky="ew")
+        make_sp_cell(grid_dosing, "S_TANK", "S Tank:").grid(row=2, column=0, padx=4, pady=3, sticky="ew")
+
+    if room_assigned:
+        card_climate_sp = tk.LabelFrame(left_sp_pane, text=" CLIMATE CONTROL ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
+        card_climate_sp.pack(fill="x", pady=4, padx=4)
+        grid_climate_sp = tk.Frame(card_climate_sp, bg="#ffffff")
+        grid_climate_sp.pack(pady=4, padx=6, fill="x")
+
+        temp_section = tk.Frame(grid_climate_sp, bg="#ffffff")
+        temp_section.pack(side="left", fill="both", expand=True, padx=4)
+        tk.Label(temp_section, text="TEMPERATURE SETPOINTS", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w", pady=(1, 3))
+        make_sp_cell(temp_section, "TEMP MIN", "Temp Min:").pack(fill="x", pady=3)
+        make_sp_cell(temp_section, "TEMP MED", "Temp Med:").pack(fill="x", pady=3)
+        make_sp_cell(temp_section, "TEMP MAX", "Temp Max:").pack(fill="x", pady=3)
+        make_sp_cell(temp_section, "TEMP Hyst", "Safety:").pack(fill="x", pady=3)
+
+        tk.Frame(grid_climate_sp, bg="#cbd5e1", width=1).pack(side="left", fill="y", padx=4, pady=2)
+
+        humi_section = tk.Frame(grid_climate_sp, bg="#ffffff")
+        humi_section.pack(side="right", fill="both", expand=True, padx=4)
+        tk.Label(humi_section, text="COOLING PAD HUMIDITY", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w", pady=(1, 3))
+        make_sp_cell(humi_section, "PAD H_Max", "Max_Humi:").pack(fill="x", pady=3)
+        make_sp_cell(humi_section, "PAD Safety", "Safety:   ").pack(fill="x", pady=3)
+
+    if room_assigned:
+        card_humi_sp = tk.LabelFrame(right_sp_pane, text=f" {str(setpoints.get('HUMI Name', 'HUMIDIFIER')).upper()} DAY/NIGHT TIMER ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
+        card_humi_sp.pack(fill="x", pady=(4, 2), padx=4)
+
+        humi_hdr = tk.Frame(card_humi_sp, bg="#f1f5f9")
+        humi_hdr.pack(fill="x", pady=4, padx=6)
+        tk.Label(humi_hdr, text="Setting", font=("Arial", 10, "bold"), fg="#64748b", bg="#f1f5f9", width=10, anchor="w").pack(side="left", padx=2)
+        tk.Label(humi_hdr, text="DAY WINDOW", font=("Arial", 10, "bold"), fg="#1565c0", bg="#f1f5f9", width=15, anchor="center").pack(side="left", expand=True)
+        tk.Label(humi_hdr, text="NIGHT WINDOW", font=("Arial", 10, "bold"), fg="#1565c0", bg="#f1f5f9", width=15, anchor="center").pack(side="left", expand=True)
+
+        r_name = tk.Frame(card_humi_sp, bg="#ffffff")
+        r_name.pack(fill="x", pady=4, padx=6)
+        tk.Label(r_name, text="Timer Name", font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", width=10, anchor="w").pack(side="left", padx=2)
+        v_name = tk.Label(r_name, text=str(setpoints.get("HUMI Name", "HUMIDIFIER")), font=("Arial", 10, "bold"), fg="#0f172a", bg="#f8fafc", anchor="center", relief="sunken", bd=1)
+        v_name.pack(side="left", expand=True, fill="x", padx=4)
+        btn_name = tk.Button(r_name, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
+                             command=lambda: open_keypad_sp("HUMI Name"))
+        btn_name.pack(side="right", padx=2)
+        sp_labels["HUMI Name"] = v_name
+
+        humi_rows = [
+            ("Start Time", "HUMI D_Start",  "HUMI N_Start"),
+            ("Stop Time",  "HUMI D_Stop",   "HUMI N_Stop"),
+            ("ON Min",     "HUMI D_ON Min",  "HUMI N_ON Min"),
+            ("OFF Min",    "HUMI D_OFF Min", "HUMI N_OFF Min"),
+            ("H Min %",    "HUMI D_Min",     "HUMI N_Min"),
+            ("H Max %",    "HUMI D_Max",     "HUMI N_Max"),
+        ]
+
+        for r_lbl, d_k, n_k in humi_rows:
+            r_f = tk.Frame(card_humi_sp, bg="#ffffff")
+            r_f.pack(fill="x", pady=4, padx=6)
+            tk.Label(r_f, text=r_lbl, font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", width=10, anchor="w").pack(side="left", padx=2)
+
+            c_day = tk.Frame(r_f, bg="#ffffff")
+            c_day.pack(side="left", expand=True, fill="x")
+            v_d = tk.Label(c_day, text=str(setpoints.get(d_k, "")), font=("Arial", 10, "bold"), fg="#e65100", bg="#f8fafc", width=6, anchor="center", relief="sunken", bd=1)
+            v_d.pack(side="left", expand=True, padx=2)
+            tk.Button(c_day, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
+                      command=lambda k=d_k: open_keypad_sp(k)).pack(side="right", padx=2)
+            sp_labels[d_k] = v_d
+
+            c_night = tk.Frame(r_f, bg="#ffffff")
+            c_night.pack(side="left", expand=True, fill="x")
+            v_n = tk.Label(c_night, text=str(setpoints.get(n_k, "")), font=("Arial", 10, "bold"), fg="#e65100", bg="#f8fafc", width=6, anchor="center", relief="sunken", bd=1)
+            v_n.pack(side="left", expand=True, padx=2)
+            tk.Button(c_night, text="EDIT", font=("Arial", 10, "bold"), width=6, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=2, padx=4,
+                      command=lambda k=n_k: open_keypad_sp(k)).pack(side="right", padx=2)
+            sp_labels[n_k] = v_n
+
+    if not water_assigned and not room_assigned:
+        sp_top_container.pack_forget()
+
+    sp_bottom_container = tk.Frame(sp_container, bg="#ffffff")
+    sp_bottom_container.pack(fill="x", side="top", pady=(4, 6), padx=4)
+
+    all_timer_cols = []
+    if room_assigned:
+        all_timer_cols.append({"name": "Pad Pump", "keys": {"Name": "PAD Name", "Start": "PAD Start", "Stop": "PAD Stop", "ON Min": "PAD ON Min", "OFF Min": "PAD OFF Min"}})
+
+    all_timer_cols.extend([
+        {"name": "ACF Fan",    "keys": {"Name": "ACF Name", "Start": "ACF Start", "Stop": "ACF Stop", "ON Min": "ACF ON Min", "OFF Min": "ACF OFF Min"}},
+        {"name": "Sprinkler",  "keys": {"Name": "Sprinkler Name", "Start": "Sprinkler Start", "Stop": "Sprinkler Stop", "ON Min": "Sprinkler ON Min", "OFF Min": "Sprinkler OFF Min"}},
+        {"name": "Irrigation", "keys": {"Name": "Irrigation Name", "Start": "Irrigation Start", "Stop": "Irrigation Stop", "ON Min": "Irrigation ON Min", "OFF Min": "Irrigation OFF Min"}},
+        {"name": "Timer 1",    "keys": {"Name": "Timer1 Name", "Start": "Timer1 Start", "Stop": "Timer1 Stop", "ON Min": "Timer1 ON Min", "OFF Min": "Timer1 OFF Min"}},
+        {"name": "Timer 2",    "keys": {"Name": "Timer2 Name", "Start": "Timer2 Start", "Stop": "Timer2 Stop", "ON Min": "Timer2 ON Min", "OFF Min": "Timer2 OFF Min"}}
+    ])
+
+    chunk_size = 3
+    for chunk_idx, i in enumerate(range(0, len(all_timer_cols), chunk_size), 1):
+        cols_chunk = all_timer_cols[i:i + chunk_size]
+        card_box = tk.LabelFrame(sp_bottom_container, text=f" CYCLIC TIMERS (GROUP {chunk_idx}) ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
+        card_box.pack(fill="x", pady=(3, 6), padx=4)
+        build_timer_grid_box(card_box, cols_chunk)
+
+rebuild_setpoints_ui()
 
 def open_keypad_sp(key):
     global sp_selected_key, sp_entered_value
@@ -2225,15 +2314,12 @@ def open_keypad_sp(key):
             pop.after(1000, update_pop_clock)
     update_pop_clock()
 
-    def close_pop():
-        pop.destroy()
+    def close_pop(): pop.destroy()
 
     container = tk.Frame(pop, bg="#ffffff")
     container.place(relx=0.5, rely=0.5, anchor="center")
 
-    kp_sp_title = tk.Label(container, text=f"EDIT {key.upper()}", font=("Arial", 16, "bold"), fg="#1565c0", bg="#ffffff")
-    kp_sp_title.pack(pady=8)
-
+    tk.Label(container, text=f"EDIT {key.upper()}", font=("Arial", 16, "bold"), fg="#1565c0", bg="#ffffff").pack(pady=8)
     kp_sp_display = tk.Label(container, text="", font=("Arial", 22, "bold"), fg="#2e7d32", bg="#f1f5f9", width=18, relief="sunken", bd=2)
     kp_sp_display.pack(pady=10)
 
@@ -2293,31 +2379,29 @@ def open_keypad_sp(key):
                              ("CONFIRM", "#0284c7", "white", kp_sp_confirm), ("CANCEL", "#64748b", "white", close_pop)]:
         tk.Button(kp_sp_actions, text=txt, font=("Arial", 12, "bold"), bg=bg, fg=fg, width=w_btn+2, pady=6, command=cmd).pack(side="left", padx=8)
 
-
 def update():
     water_data = cached_water_data
     md02_data  = cached_md02_data
 
     warnings = control_system(water_data, md02_data)
 
-    # 1. Update Water Sensor Labels
-    if water_data:
-        tds = water_data['ec'] * 500
-        lbl_val_ec.config(text=f"{water_data['ec']:.3f} mS/cm ({tds:.0f} ppm)", fg="#0d47a1")
-        lbl_val_ph.config(text=f"{water_data['ph']:.2f}", fg="#0d47a1")
-    else:
-        lbl_val_ec.config(text="ERROR", fg="#c62828")
-        lbl_val_ph.config(text="ERROR", fg="#c62828")
+    if is_sensor_assigned("water") and lbl_val_ec and lbl_val_ph:
+        if water_data:
+            tds = water_data['ec'] * 500
+            lbl_val_ec.config(text=f"{water_data['ec']:.3f} mS/cm ({tds:.0f} ppm)", fg="#0d47a1")
+            lbl_val_ph.config(text=f"{water_data['ph']:.2f}", fg="#0d47a1")
+        else:
+            lbl_val_ec.config(text="ERROR", fg="#c62828")
+            lbl_val_ph.config(text="ERROR", fg="#c62828")
 
-    # 2. Update Room (MD02) Sensor Labels
-    if md02_data:
-        lbl_val_room_temp.config(text=f"{md02_data['room_temp']} °C", fg="#0d47a1")
-        lbl_val_room_humi.config(text=f"{md02_data['room_humi']} %", fg="#0d47a1")
-    else:
-        lbl_val_room_temp.config(text="ERROR", fg="#c62828")
-        lbl_val_room_humi.config(text="ERROR", fg="#c62828")
+    if is_sensor_assigned("room_md02") and lbl_val_room_temp and lbl_val_room_humi:
+        if md02_data:
+            lbl_val_room_temp.config(text=f"{md02_data['room_temp']} °C", fg="#0d47a1")
+            lbl_val_room_humi.config(text=f"{md02_data['room_humi']} %", fg="#0d47a1")
+        else:
+            lbl_val_room_temp.config(text="ERROR", fg="#c62828")
+            lbl_val_room_humi.config(text="ERROR", fg="#c62828")
 
-    # 3. Update Relay Status Labels
     relay_states = {
         "ec1": relay_ec1.is_active,
         "ec2": relay_ec2.is_active,
@@ -2336,12 +2420,9 @@ def update():
     for r_key, is_on in relay_states.items():
         lbl_st = labels_relays.get(r_key)
         if lbl_st:
-            if is_on:
-                lbl_st.config(text="ON", fg="#2e7d32")
-            else:
-                lbl_st.config(text="OFF", fg="#c62828")
+            if is_on: lbl_st.config(text="ON", fg="#2e7d32")
+            else: lbl_st.config(text="OFF", fg="#c62828")
 
-    # 4. Update Equipment Cyclic Timers Widgets on Home Screen (Original 3-Row Format)
     for pfx, name_k, def_title, relay_obj, start_k, stop_k, on_k, off_k in [
         ("PAD",        "PAD Name",        "COOLING PAD PUMP",    relay_pad,        "PAD Start",    "PAD Stop",    "PAD ON Min",    "PAD OFF Min"),
         ("ACF",        "ACF Name",        "AIR CIRCULATION FAN", relay_acf,        "ACF Start",    "ACF Stop",    "ACF ON Min",    "ACF OFF Min"),
@@ -2358,7 +2439,7 @@ def update():
         if t_spec:
             start_t = setpoints.get(start_k, "06:00")
             stop_t = setpoints.get(stop_k, "18:00")
-            window_str = f"{start_t} – {stop_t}"
+            window_str = f"{start_t} - {stop_t}"
 
             try: on_min = int(float(setpoints.get(on_k, 5)))
             except: on_min = 5
@@ -2381,7 +2462,6 @@ def update():
             t_spec["window"].config(text=window_str, fg="#0f172a")
             t_spec["cycle"].config(text=cycle_str, fg="#0f172a")
 
-    # 5. Update Humidifier (Fogger) Day/Night Timer Widget
     lbl_hname = labels_timers.get("tname_humi")
     if lbl_hname:
         lbl_hname.config(text=str(setpoints.get("HUMI Name", "FOGGER TIMER")).upper())
@@ -2406,57 +2486,42 @@ def update():
         h_spec["day_cycle"].config(text=d_str, fg="#0f172a")
         h_spec["night_cycle"].config(text=n_str, fg="#0f172a")
 
-    # Render Warning & Status Messages with Categorized Colors (Label Reuse - Zero Blinking)
     if 'warn_box_frame' in globals():
         existing_labels = list(warn_box_frame.winfo_children())
         num_existing = len(existing_labels)
         num_needed = len(warnings)
 
-        # Update existing labels only if text or color changed
         for i in range(min(num_existing, num_needed)):
             w_text = warnings[i]
             m = w_text.upper()
-            if "ERR" in m or "CUTOFF" in m or "DISABLED" in m:
-                fg_col = "#dc2626"
-            elif "ON" in m or "ACTIVE" in m:
-                fg_col = "#15803d"
-            else:
-                fg_col = "#92400e"
+            if "ERR" in m or "CUTOFF" in m or "DISABLED" in m: fg_col = "#dc2626"
+            elif "ON" in m or "ACTIVE" in m: fg_col = "#15803d"
+            else: fg_col = "#92400e"
 
             lbl = existing_labels[i]
             if lbl.cget("text") != w_text or lbl.cget("fg") != fg_col:
                 lbl.config(text=w_text, fg=fg_col)
 
-        # Create new labels for new messages
         for i in range(num_existing, num_needed):
             w_text = warnings[i]
             m = w_text.upper()
-            if "ERR" in m or "CUTOFF" in m or "DISABLED" in m:
-                fg_col = "#dc2626"
-            elif "ON" in m or "ACTIVE" in m:
-                fg_col = "#15803d"
-            else:
-                fg_col = "#92400e"
+            if "ERR" in m or "CUTOFF" in m or "DISABLED" in m: fg_col = "#dc2626"
+            elif "ON" in m or "ACTIVE" in m: fg_col = "#15803d"
+            else: fg_col = "#92400e"
 
             tk.Label(warn_box_frame, text=w_text, font=("Arial", 9, "bold"), fg=fg_col, bg="#e0e0e0", anchor="w", justify="left").pack(anchor="w")
 
-        # Remove extra labels if count decreased
         for i in range(num_needed, num_existing):
             existing_labels[i].destroy()
 
-    # Update Header Clock (Day, Date, Time)
     if 'lbl_clock' in globals():
         lbl_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y\n%I:%M:%S %p"))
 
-    # Live Telemetry and Offline Sync Logging (1 Second Frequency)
     publish_live_telemetry(water_data, md02_data)
     save_local_telemetry(water_data, md02_data)
 
     root.after(1000, update)
 
-# ==========================================
-# MAIN APPLICATION THREADS & ENTRY POINT
-# ==========================================
 def main():
     try:
         t_trust = threading.Thread(target=auto_trust_devices, daemon=True)
@@ -2483,4 +2548,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
