@@ -1,0 +1,2060 @@
+{
+    "PH-01": {
+        "name": "POLYHOUSE 01",
+        "mode": "AUTO",
+        "temp_high": 28.0,
+        "temp_low": 22.0,
+        "temp_target": 25.0,
+        "temp_hysteresis": 1.0,
+        "humi_high": 80.0,
+        "humi_low": 60.0,
+        "humi_target": 70.0,
+        "humi_hysteresis": 3.0,
+        "fogger_min_on_sec": 60,
+        "fogger_min_off_sec": 120,
+        "sprinkler_duration_sec": 120,
+        "sprinkler_interval_min": 30,
+        "acf_cycle_enabled": true,
+        "acf_on_min": 15,
+        "acf_off_min": 30,
+        "active_setting": "Setting A",
+        "settings": {
+            "Setting A": {
+                "name": "Vegetative Phase",
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "name": "Flowering Phase",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-31",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "name": "Fruiting Phase",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-30",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "name": "Harvest Phase",
+                "start_date": "2026-12-01",
+                "end_date": "2026-12-31",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "name": "Post-Harvest",
+                "start_date": "2027-01-01",
+                "end_date": "2027-01-15",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        },
+        "irrigation_slots": [
+            {
+                "id": 1,
+                "start": "07:00 AM",
+                "duration_sec": 120,
+                "type": "sprinkler",
+                "enabled": true
+            },
+            {
+                "id": 2,
+                "start": "12:30 PM",
+                "duration_sec": 120,
+                "type": "sprinkler",
+                "enabled": true
+            },
+            {
+                "id": 3,
+                "start": "04:30 PM",
+                "duration_sec": 120,
+                "type": "fogger",
+                "enabled": true
+            }
+        ]
+    },
+    "PH-02": {
+        "name": "POLYHOUSE 02",
+        "mode": "AUTO",
+        "temp_high": 28.0,
+        "temp_low": 22.0,
+        "temp_target": 25.0,
+        "temp_hysteresis": 1.0,
+        "humi_high": 80.0,
+        "humi_low": 60.0,
+        "humi_target": 70.0,
+        "humi_hysteresis": 3.0,
+        "fogger_min_on_sec": 60,
+        "fogger_min_off_sec": 120,
+        "sprinkler_duration_sec": 120,
+        "sprinkler_interval_min": 30,
+        "acf_cycle_enabled": true,
+        "acf_on_min": 15,
+        "acf_off_min": 30,
+        "active_setting": "Setting A",
+        "settings": {
+            "Setting A": {
+                "name": "Vegetative Phase",
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "name": "Flowering Phase",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-31",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "name": "Fruiting Phase",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-30",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "name": "Harvest Phase",
+                "start_date": "2026-12-01",
+                "end_date": "2026-12-31",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "name": "Post-Harvest",
+                "start_date": "2027-01-01",
+                "end_date": "2027-01-15",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        },
+        "irrigation_slots": [
+            {
+                "id": 1,
+                "start": "07:00 AM",
+                "duration_sec": 120,
+                "type": "sprinkler",
+                "enabled": true
+            },
+            {
+                "id": 2,
+                "start": "12:30 PM",
+                "duration_sec": 120,
+                "type": "sprinkler",
+                "enabled": true
+            },
+            {
+                "id": 3,
+                "start": "04:30 PM",
+                "duration_sec": 120,
+                "type": "fogger",
+                "enabled": true
+            }
+        ]
+    },
+    "PH-03": {
+        "name": "POLYHOUSE 03",
+        "mode": "AUTO",
+        "temp_high": 28.0,
+        "temp_low": 22.0,
+        "temp_target": 25.0,
+        "temp_hysteresis": 1.0,
+        "humi_high": 80.0,
+        "humi_low": 60.0,
+        "humi_target": 70.0,
+        "humi_hysteresis": 3.0,
+        "fogger_min_on_sec": 60,
+        "fogger_min_off_sec": 120,
+        "sprinkler_duration_sec": 120,
+        "sprinkler_interval_min": 30,
+        "acf_cycle_enabled": true,
+        "acf_on_min": 15,
+        "acf_off_min": 30,
+        "active_setting": "Setting A",
+        "settings": {
+            "Setting A": {
+                "name": "Vegetative Phase",
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "name": "Flowering Phase",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-31",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "name": "Fruiting Phase",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-30",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "name": "Harvest Phase",
+                "start_date": "2026-12-01",
+                "end_date": "2026-12-31",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "name": "Post-Harvest",
+                "start_date": "2027-01-01",
+                "end_date": "2027-01-15",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        },
+        "irrigation_slots": [
+            {
+                "id": 1,
+                "start": "07:00 AM",
+                "duration_sec": 120,
+                "type": "sprinkler",
+                "enabled": true
+            },
+            {
+                "id": 2,
+                "start": "12:30 PM",
+                "duration_sec": 120,
+                "type": "sprinkler",
+                "enabled": true
+            },
+            {
+                "id": 3,
+                "start": "04:30 PM",
+                "duration_sec": 120,
+                "type": "fogger",
+                "enabled": true
+            }
+        ]
+    },
+    "PH-04": {
+        "name": "POLYHOUSE 04",
+        "mode": "AUTO",
+        "temp_high": 28.0,
+        "temp_low": 22.0,
+        "temp_target": 25.0,
+        "temp_hysteresis": 1.0,
+        "humi_high": 80.0,
+        "humi_low": 60.0,
+        "humi_target": 70.0,
+        "humi_hysteresis": 3.0,
+        "fogger_min_on_sec": 60,
+        "fogger_min_off_sec": 120,
+        "sprinkler_duration_sec": 120,
+        "sprinkler_interval_min": 30,
+        "acf_cycle_enabled": true,
+        "acf_on_min": 15,
+        "acf_off_min": 30,
+        "active_setting": "Setting A",
+        "settings": {
+            "Setting A": {
+                "name": "Vegetative Phase",
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "name": "Flowering Phase",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-31",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "name": "Fruiting Phase",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-30",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "name": "Harvest Phase",
+                "start_date": "2026-12-01",
+                "end_date": "2026-12-31",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "name": "Post-Harvest",
+                "start_date": "2027-01-01",
+                "end_date": "2027-01-15",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        },
+        "irrigation_slots": [
+            {
+                "id": 1,
+                "start": "07:00 AM",
+                "duration_sec": 120,
+                "type": "sprinkler",
+                "enabled": true
+            },
+            {
+                "id": 2,
+                "start": "12:30 PM",
+                "duration_sec": 120,
+                "type": "sprinkler",
+                "enabled": true
+            },
+            {
+                "id": 3,
+                "start": "04:30 PM",
+                "duration_sec": 120,
+                "type": "fogger",
+                "enabled": true
+            }
+        ]
+    },
+    "PH-05": {
+        "name": "POLYHOUSE 05",
+        "mode": "AUTO",
+        "temp_high": 28.0,
+        "temp_low": 22.0,
+        "temp_target": 25.0,
+        "temp_hysteresis": 1.0,
+        "humi_high": 80.0,
+        "humi_low": 60.0,
+        "humi_target": 70.0,
+        "humi_hysteresis": 3.0,
+        "fogger_min_on_sec": 60,
+        "fogger_min_off_sec": 120,
+        "sprinkler_duration_sec": 120,
+        "sprinkler_interval_min": 30,
+        "acf_cycle_enabled": true,
+        "acf_on_min": 15,
+        "acf_off_min": 30,
+        "active_setting": "Setting A",
+        "settings": {
+            "Setting A": {
+                "name": "Vegetative Phase",
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-30",
+                "enabled": true,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting B": {
+                "name": "Flowering Phase",
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-31",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting C": {
+                "name": "Fruiting Phase",
+                "start_date": "2026-11-01",
+                "end_date": "2026-11-30",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting D": {
+                "name": "Harvest Phase",
+                "start_date": "2026-12-01",
+                "end_date": "2026-12-31",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            },
+            "Setting E": {
+                "name": "Post-Harvest",
+                "start_date": "2027-01-01",
+                "end_date": "2027-01-15",
+                "enabled": false,
+                "time_slots": [
+                    {
+                        "id": 1,
+                        "name": "Morning",
+                        "start": "06:00 AM",
+                        "stop": "11:00 AM",
+                        "t_set": 24.0,
+                        "t_max": 28.0,
+                        "t_min": 20.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 2,
+                        "name": "Midday",
+                        "start": "11:00 AM",
+                        "stop": "03:00 PM",
+                        "t_set": 26.0,
+                        "t_max": 30.0,
+                        "t_min": 22.0,
+                        "h_set": 65.0,
+                        "h_max": 75.0,
+                        "h_min": 55.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 3,
+                        "name": "Afternoon",
+                        "start": "03:00 PM",
+                        "stop": "07:00 PM",
+                        "t_set": 25.0,
+                        "t_max": 28.0,
+                        "t_min": 21.0,
+                        "h_set": 70.0,
+                        "h_max": 80.0,
+                        "h_min": 60.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 4,
+                        "name": "Evening",
+                        "start": "07:00 PM",
+                        "stop": "11:00 PM",
+                        "t_set": 22.0,
+                        "t_max": 25.0,
+                        "t_min": 18.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    },
+                    {
+                        "id": 5,
+                        "name": "Night",
+                        "start": "11:00 PM",
+                        "stop": "06:00 AM",
+                        "t_set": 20.0,
+                        "t_max": 23.0,
+                        "t_min": 16.0,
+                        "h_set": 75.0,
+                        "h_max": 85.0,
+                        "h_min": 65.0,
+                        "enabled": true
+                    }
+                ]
+            }
+        },
+        "irrigation_slots": [
+            {
+                "id": 1,
+                "start": "07:00 AM",
+                "duration_sec": 120,
+                "type": "sprinkler",
+                "enabled": true
+            },
+            {
+                "id": 2,
+                "start": "12:30 PM",
+                "duration_sec": 120,
+                "type": "sprinkler",
+                "enabled": true
+            },
+            {
+                "id": 3,
+                "start": "04:30 PM",
+                "duration_sec": 120,
+                "type": "fogger",
+                "enabled": true
+            }
+        ]
+    },
+    "PH-06": {
+        "name": "POLYHOUSE 06 (MONITOR)",
+        "mode": "MONITOR",
+        "temp_high_limit": 32.0,
+        "temp_low_limit": 15.0,
+        "humi_high_limit": 85.0,
+        "humi_low_limit": 35.0
+    }
+}

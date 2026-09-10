@@ -1,0 +1,25 @@
+{
+    "date": "2026-09-10",
+    "accumulators": {
+        "PH-01": {
+            "dli": 0.0,
+            "status": "CALCULATED"
+        },
+        "PH-02": {
+            "dli": 0.0,
+            "status": "CALCULATED"
+        },
+        "PH-03": {
+            "dli": 0.0,
+            "status": "CALCULATED"
+        },
+        "PH-04": {
+            "dli": 0.0,
+            "status": "CALCULATED"
+        },
+        "PH-05": {
+            "dli": 0.0,
+            "status": "CALCULATED"
+        }
+    }
+}
