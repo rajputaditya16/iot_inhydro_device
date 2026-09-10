@@ -11,7 +11,7 @@ async function run() {
     const devices = await Device.find({});
     console.log(`Found ${devices.length} devices:`);
     devices.forEach(d => {
-      console.log(`- ID: ${d._id}, Name: ${d.name}, Type: ${d.deviceType}, MQTT ID: ${d.mqttId}, ThingSpeak Channel ID: ${d.thingspeak?.channelId}`);
+      console.log(`- ID: ${d._id}, Name: ${d.name}, Type: ${d.deviceType}, MQTT ID: ${d.mqttId}`);
     });
 
     // Let's also check if testadmin has any assigned devices, and assign them all

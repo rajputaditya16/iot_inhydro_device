@@ -251,6 +251,7 @@ const AnalyticsPage = () => {
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [rawFeeds, setRawFeeds] = useState([]);
+  const [totalDbPoints, setTotalDbPoints] = useState(0);
   const [channelFields, setChannelFields] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -311,9 +312,8 @@ const AnalyticsPage = () => {
       const roomParam = selectedDevice?.deviceType === 'office_control' ? `&room=${selectedRoom}` : '';
       const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics?start=${start.toISOString()}&end=${end.toISOString()}${roomParam}`;
       
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(url, { headers });
       if (res.status === 404) {
         throw new Error("Analytics data not found for this device (404).");
       }
@@ -347,12 +347,13 @@ const AnalyticsPage = () => {
         }
       }
       setChannelFields(cFields);
-
       setRawFeeds(exactFeeds);
+      setTotalDbPoints(result.totalDbPoints || exactFeeds.length);
     } catch (err) {
       console.error('Analytics API error:', err);
       setError(err.message || 'Failed to fetch data');
       setRawFeeds([]);
+      setTotalDbPoints(0);
       setChannelFields([]);
     } finally {
       setLoading(false);
@@ -525,7 +526,7 @@ const AnalyticsPage = () => {
             )}
 
             <span className="text-xs text-slate-400">
-              &bull; {rawFeeds.length} data points loaded ({chartSubtitle})
+              &bull; <strong className="text-slate-200">{rawFeeds.length.toLocaleString()}</strong> data points loaded {totalDbPoints > rawFeeds.length ? `(downsampled from ${totalDbPoints.toLocaleString()} DB records)` : ''} ({chartSubtitle})
             </span>
           </div>
 

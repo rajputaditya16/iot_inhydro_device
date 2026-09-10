@@ -33,28 +33,17 @@ const resolveDeviceId = async (mqttId, topic) => {
     typeCriteria = { deviceType: { $nin: ['controlling', 'office_control', 'system2'] } };
   }
 
-  // Look up device in database using both MQTT ID and topic device type criteria
-  let device = await Device.findOne({
-    $and: [
-      {
-        $or: [
-          { mqttId: mqttId },
-          { _id: mongoose.Types.ObjectId.isValid(mqttId) ? mqttId : null }
-        ]
-      },
-      typeCriteria
-    ]
-  });
-
-  // Fallback to match by ID/mqttId only if no matching type found
-  if (!device) {
+  // Look up device in database using MQTT ID, device name, or ObjectId
+  let device = null;
+  try {
     device = await Device.findOne({
       $or: [
-        { mqttId: mqttId },
+        { mqttId: { $regex: new RegExp(`^${mqttId}$`, 'i') } },
+        { name: { $regex: new RegExp(`^${mqttId}$`, 'i') } },
         { _id: mongoose.Types.ObjectId.isValid(mqttId) ? mqttId : null }
-      ]
+      ].filter(Boolean)
     });
-  }
+  } catch (e) {}
 
   if (device) {
     deviceCache.set(cacheKey, device._id);
@@ -109,97 +98,85 @@ const startMqttSubscriber = () => {
         payloadData = { raw: payloadString };
       }
 
-      // Broadcast in-memory SSE telemetry event IMMEDIATELY for zero-latency streaming
+      // Stream setpoint updates real-time via SSE to web dashboard
+      if (topic.includes('/setpoints/')) {
+        telemetryEmitter.emit('telemetry', {
+          mqttId,
+          topic,
+          data: payloadData,
+          timestamp: new Date()
+        });
+        return;
+      }
+
+      // Resolve device from DB/cache using mqttId and the topic
+      const deviceId = await resolveDeviceId(mqttId, topic);
+
+      // Broadcast in-memory SSE telemetry event IMMEDIATELY for zero-latency streaming with resolved deviceId
       telemetryEmitter.emit('telemetry', {
+        deviceId: deviceId ? String(deviceId) : null,
         mqttId,
         topic,
         data: payloadData,
         timestamp: new Date()
       });
 
-      // Stream setpoint updates real-time via SSE to web dashboard
-      if (topic.includes('/setpoints/')) {
-        return;
+      if (deviceId) {
+        // Check if device is blocked (cached for 10 seconds to prevent DB saturation)
+        const now = Date.now();
+        let cachedStatus = deviceStatusCache.get(String(deviceId));
+        if (!cachedStatus || now - cachedStatus.lastCheck > 10000) {
+          const deviceCheck = await Device.findById(deviceId).select('status');
+          cachedStatus = {
+            status: deviceCheck ? deviceCheck.status : 'active',
+            lastCheck: now,
+            lastUpdate: cachedStatus ? cachedStatus.lastUpdate : 0
+          };
+          deviceStatusCache.set(String(deviceId), cachedStatus);
+        }
+
+        if (cachedStatus.status === 'blocked') {
+          return; // Device is blocked, ignore telemetry
+        }
+
+        // Throttle DB online status update to at most once per 15 seconds per device
+        if (now - cachedStatus.lastUpdate > 15000) {
+          cachedStatus.lastUpdate = now;
+          Device.findByIdAndUpdate(deviceId, {
+            status: 'online',
+            lastUpdated: new Date()
+          }).catch(err => {
+            console.error(`[MQTT Subscriber] Failed to update device online status: ${err.message}`);
+          });
+        }
       }
 
-      // Resolve device from DB/cache using mqttId and the topic
-      const deviceId = await resolveDeviceId(mqttId, topic);
-      if (!deviceId) {
-        // Device not registered in our dashboard, skip saving to DB
-        return;
-      }
-
-      // Check if device is blocked (cached for 10 seconds to prevent DB saturation)
-      const now = Date.now();
-      let cachedStatus = deviceStatusCache.get(String(deviceId));
-      if (!cachedStatus || now - cachedStatus.lastCheck > 10000) {
-        const deviceCheck = await Device.findById(deviceId).select('status');
-        cachedStatus = {
-          status: deviceCheck ? deviceCheck.status : 'active',
-          lastCheck: now,
-          lastUpdate: cachedStatus ? cachedStatus.lastUpdate : 0
-        };
-        deviceStatusCache.set(String(deviceId), cachedStatus);
-      }
-
-      if (cachedStatus.status === 'blocked') {
-        return; // Device is blocked, ignore telemetry
-      }
-
-      // Throttle DB online status update to at most once per 15 seconds per device
-      if (now - cachedStatus.lastUpdate > 15000) {
-        cachedStatus.lastUpdate = now;
-        Device.findByIdAndUpdate(deviceId, {
-          status: 'online',
-          lastUpdated: new Date()
-        }).catch(err => {
-          console.error(`[MQTT Subscriber] Failed to update device online status: ${err.message}`);
-        });
-      }
-
-      // Get the correct dynamic model for this device's collection
-
-      const TelemetryModel = getTelemetryModel(mqttId);
+      // ── High-Throughput Bulk Write Queue (P3 Optimization) ──
+      const packetTimestamp = (payloadData && payloadData.timestamp && !isNaN(new Date(payloadData.timestamp).getTime()))
+        ? new Date(payloadData.timestamp)
+        : new Date();
 
       if (Array.isArray(payloadData)) {
-        // Bulk insertion for synced offline array
-        const documents = payloadData.map(item => {
-          let packetTimestamp = new Date();
-          if (item && item.timestamp) {
-            const parsedDate = new Date(item.timestamp);
-            if (!isNaN(parsedDate.getTime())) {
-              packetTimestamp = parsedDate;
-            }
-          }
-          return {
-            deviceId,
+        payloadData.forEach(item => {
+          const itemTime = (item && item.timestamp && !isNaN(new Date(item.timestamp).getTime()))
+            ? new Date(item.timestamp)
+            : new Date();
+          queueTelemetryDoc(mqttId, {
+            deviceId: deviceId || null,
             mqttId,
             topic,
             data: item,
-            timestamp: packetTimestamp
-          };
+            timestamp: itemTime
+          });
         });
-
-        await TelemetryModel.insertMany(documents);
-        console.log(`[MQTT Subscriber] Saved ${documents.length} bulk telemetry packets for "${mqttId}" on topic "${topic}" in collection ${TelemetryModel.collection.name}`);
       } else {
-        // Single packet insertion
-        let packetTimestamp = new Date();
-        if (payloadData && payloadData.timestamp) {
-          const parsedDate = new Date(payloadData.timestamp);
-          if (!isNaN(parsedDate.getTime())) {
-            packetTimestamp = parsedDate;
-          }
-        }
-
-        await TelemetryModel.create({
-          deviceId,
+        queueTelemetryDoc(mqttId, {
+          deviceId: deviceId || null,
           mqttId,
           topic,
           data: payloadData,
           timestamp: packetTimestamp
         });
-        console.log(`[MQTT Subscriber] Saved live telemetry for "${mqttId}" on topic "${topic}" in collection ${TelemetryModel.collection.name}`);
       }
     } catch (err) {
       console.error(`[MQTT Subscriber] Error processing incoming MQTT packet on "${topic}":`, err.message);
@@ -217,5 +194,60 @@ const startMqttSubscriber = () => {
   return client;
 };
 
-module.exports = { startMqttSubscriber, telemetryEmitter };
+// ── In-Memory Write Queue & Batch Flush Engine ────────────────────────────────
+const writeBuffer = new Map(); // mqttId -> Array of docs
+let flushTimer = null;
+
+const queueTelemetryDoc = (mqttId, doc) => {
+  const cleanId = String(mqttId).toLowerCase();
+  if (!writeBuffer.has(cleanId)) {
+    writeBuffer.set(cleanId, []);
+  }
+  const queue = writeBuffer.get(cleanId);
+  queue.push(doc);
+
+  // If buffer for this device exceeds 100 items, trigger immediate flush
+  if (queue.length >= 100) {
+    flushDeviceQueue(cleanId);
+  }
+};
+
+const flushDeviceQueue = async (cleanId) => {
+  const docs = writeBuffer.get(cleanId);
+  if (!docs || docs.length === 0) return;
+
+  writeBuffer.set(cleanId, []); // Drain the queue immediately
+
+  try {
+    const TelemetryModel = getTelemetryModel(cleanId);
+    await TelemetryModel.insertMany(docs, { ordered: false });
+    // console.log(`[MQTT Buffer Flush] Batch saved ${docs.length} packets for "${cleanId}" in ${TelemetryModel.collection.name}`);
+  } catch (err) {
+    console.error(`[MQTT Buffer Flush] Error saving batch for "${cleanId}":`, err.message);
+  }
+};
+
+const flushAllQueues = async () => {
+  const keys = Array.from(writeBuffer.keys());
+  for (const key of keys) {
+    await flushDeviceQueue(key);
+  }
+};
+
+// Start 2-second background flush loop
+if (!flushTimer) {
+  flushTimer = setInterval(flushAllQueues, 2000);
+}
+
+// Graceful process exit cleanup
+process.on('SIGINT', async () => {
+  if (flushTimer) clearInterval(flushTimer);
+  await flushAllQueues();
+});
+process.on('SIGTERM', async () => {
+  if (flushTimer) clearInterval(flushTimer);
+  await flushAllQueues();
+});
+
+module.exports = { startMqttSubscriber, telemetryEmitter, flushAllQueues };
 

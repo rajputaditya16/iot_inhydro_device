@@ -29,7 +29,7 @@ const areEqual = (prevProps, nextProps) => {
   if (prevProps.title !== nextProps.title) return false;
   if (prevProps.unit !== nextProps.unit) return false;
   if (prevProps.data === nextProps.data) return true;
-  if (!prevProps.data || !nextProps.data) return false;
+  if (!Array.isArray(prevProps.data) || !Array.isArray(nextProps.data)) return false;
   if (prevProps.data.length !== nextProps.data.length) return false;
   if (prevProps.data.length === 0) return true;
 
@@ -38,11 +38,12 @@ const areEqual = (prevProps, nextProps) => {
   return prevLast?.time === nextLast?.time && prevLast?.value === nextLast?.value && prevLast?.room1Value === nextLast?.room1Value;
 };
 
-const LiveChart = memo(({ data, type = 'temperature', title, unit, subtitle = 'Last 24 hours' }) => {
+const LiveChart = memo(({ data = [], type = 'temperature', title, unit, subtitle = 'Last 24 hours' }) => {
   const uniqueId = useId();
   const colors = colorSchemes[type] || colorSchemes.temperature;
   const gradientId = `gradient-${type}-${uniqueId.replace(/:/g, '')}`;
-  const isBoth = data && data[0]?.isBoth;
+  const safeData = Array.isArray(data) ? data : [];
+  const isBoth = safeData && safeData[0]?.isBoth;
 
   return (
     <div className="rounded-2xl border border-slate-700/50 bg-slate-800/50 p-4 backdrop-blur-sm">
@@ -56,7 +57,7 @@ const LiveChart = memo(({ data, type = 'temperature', title, unit, subtitle = 'L
       <div className="h-48">
         <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={100} debounce={100}>
           {isBoth ? (
-            <LineChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+            <LineChart data={safeData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
               <XAxis
                 dataKey="time"
