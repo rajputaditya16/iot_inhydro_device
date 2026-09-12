@@ -1,435 +1,1411 @@
-import { useState, useEffect } from 'react';
-import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Radio, Thermometer, Droplets, Activity } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  Save, RefreshCw, ChevronDown, Server, Thermometer, Droplets, Activity,
+  Wind, Sun, Clock, Calendar, Plus, Trash2, Edit3, Sliders, Power, Zap,
+  CheckCircle2, X, Bell, Bookmark, RotateCcw, AlertTriangle, ChevronRight,
+  ChevronLeft, Sparkles, Check
+} from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
-const defaultSetpoints = {
-  "T MIN": 10.0,
-  "T MAX": 30.0,
-  "H MIN": 30.0,
-  "H MAX": 80.0
+// --- TIME FORMATTING HELPERS ---
+export const formatTime12h = (tStr) => {
+  if (!tStr) return '12:00 AM';
+  const s = String(tStr).trim();
+  if (s.toUpperCase().includes('AM') || s.toUpperCase().includes('PM')) {
+    return s.toUpperCase();
+  }
+  try {
+    const parts = s.split(':');
+    let hh = parseInt(parts[0], 10);
+    const mm = parseInt(parts[1] || '0', 10);
+    const meridiem = hh >= 12 ? 'PM' : 'AM';
+    hh = hh % 12;
+    if (hh === 0) hh = 12;
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')} ${meridiem}`;
+  } catch {
+    return s;
+  }
 };
 
-const InputRow = ({ label, objKey, type = "number", data, onChange }) => (
-  <div className="flex flex-col gap-1">
-    <label className="text-xs font-medium text-slate-400">{label}</label>
-    <input
-      type={type}
-      value={data[objKey] ?? ""}
-      onChange={(e) => onChange(objKey, e.target.value)}
-      className="w-full rounded-lg border border-slate-700 bg-slate-900/50 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
-    />
-  </div>
-);
+export const formatTime24h = (tStr) => {
+  if (!tStr) return '00:00';
+  const s = String(tStr).trim();
+  if (!s.toUpperCase().includes('AM') && !s.toUpperCase().includes('PM')) {
+    return s;
+  }
+  try {
+    const match = s.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (match) {
+      let hh = parseInt(match[1], 10);
+      const mm = parseInt(match[2], 10);
+      const meridiem = match[3].toUpperCase();
+      if (meridiem === 'PM' && hh < 12) hh += 12;
+      else if (meridiem === 'AM' && hh === 12) hh = 0;
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    }
+  } catch {}
+  return s;
+};
 
-const ColdStorageSettings = () => {
-  const [multiSensorDevices, setMultiSensorDevices] = useState([]);
-  const [deviceRoot, setDeviceRoot] = useState('');
-  const [allSetpoints, setAllSetpoints] = useState({});
-  const [selectedPort, setSelectedPort] = useState('default');
-  const [status, setStatus] = useState('disconnected');
-  const [loading, setLoading] = useState(true);
-  const [client, setClient] = useState(null);
-  const [liveData, setLiveData] = useState({});
-  const [chartData, setChartData] = useState([]); // Array of { time: '12:00', S1_T: 25, S1_H: 60, ... }
-  const [systemConfig, setSystemConfig] = useState({
-    "TS CLIENT ID": '',
-    "TS USERNAME": '',
-    "TS PASSWORD": '',
-    "TS CHANNEL ID": '',
-    "TS READ KEY": '',
-    "TS WRITE KEY": '',
-    "PORT": 1883
+export const timeToMinutes = (tStr) => {
+  const t24 = formatTime24h(tStr);
+  const parts = t24.split(':');
+  const h = parseInt(parts[0] || '0', 10);
+  const m = parseInt(parts[1] || '0', 10);
+  return h * 60 + m;
+};
+
+export const checkTimeSlotOverlaps = (slots) => {
+  const enabledSlots = (slots || []).filter(s => s.enabled !== false);
+  const warnings = [];
+  const parsed = [];
+
+  enabledSlots.forEach((slot, idx) => {
+    let sMin = timeToMinutes(slot.start || '00:00');
+    let eMin = timeToMinutes(slot.stop || '23:59');
+    if (eMin <= sMin) eMin += 1440;
+    parsed.push({ idx: idx + 1, name: slot.name || `Slot ${idx + 1}`, sMin, eMin });
   });
 
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  for (let i = 0; i < parsed.length; i++) {
+    for (let j = i + 1; j < parsed.length; j++) {
+      const a = parsed[i];
+      const b = parsed[j];
+      if (Math.max(a.sMin, b.sMin) < Math.min(a.eMin, b.eMin)) {
+        warnings.push(`Slot "${a.name}" & "${b.name}" overlap in time window.`);
+      }
+    }
+  }
+  return warnings;
+};
+
+// --- ALMORA DEFAULTS ---
+export const ALL_SETTING_KEYS = [
+  'Setting A', 'Setting B', 'Setting C', 'Setting D', 'Setting E',
+  'Setting F', 'Setting G', 'Setting H', 'Setting I', 'Setting J'
+];
+
+export const SENSOR_KEYS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'];
+
+export const DEFAULT_ROOM_NAMES = {
+  S1: 'Cold Room 1',
+  S2: 'Cold Room 2',
+  S3: 'Cold Room 3',
+  S4: 'Cold Room 4',
+  S5: 'Cold Room 5',
+  S6: 'Cold Room 6',
+  S7: 'Greenhouse'
+};
+
+export const generateDefaultAlmoraSchedule = () => {
+  const stages = {};
+  const stageDefs = [
+    { key: 'Setting A', name: 'Crop Stage 1', start: '2026-07-01', end: '2026-07-15' },
+    { key: 'Setting B', name: 'Crop Stage 2', start: '2026-07-16', end: '2026-07-31' },
+    { key: 'Setting C', name: 'Crop Stage 3', start: '2026-08-01', end: '2026-08-15' },
+    { key: 'Setting D', name: 'Crop Stage 4', start: '2026-08-16', end: '2026-08-31' },
+    { key: 'Setting E', name: 'Crop Stage 5', start: '2026-09-01', end: '2026-09-15' },
+    { key: 'Setting F', name: 'Crop Stage 6', start: '2026-09-16', end: '2026-09-30' },
+    { key: 'Setting G', name: 'Crop Stage 7', start: '2026-10-01', end: '2026-10-15' },
+    { key: 'Setting H', name: 'Crop Stage 8', start: '2026-10-16', end: '2026-10-31' },
+    { key: 'Setting I', name: 'Crop Stage 9', start: '2026-11-01', end: '2026-11-15' },
+    { key: 'Setting J', name: 'Crop Stage 10', start: '2026-11-16', end: '2026-11-30' }
+  ];
+
+  stageDefs.forEach((def, index) => {
+    stages[def.key] = {
+      name: def.name,
+      start_date: def.start,
+      end_date: def.end,
+      enabled: index < 5,
+      photoperiod_on: '06:00 AM',
+      photoperiod_off: '08:00 PM',
+      lighting_enabled: true,
+      time_slots: [
+        { id: 1, name: 'Early Morning', start: '12:00 AM', stop: '05:00 AM', t_set: 24.0, t_max: 25.0, t_min: 20.0, h_set: 60.0, h_max: 70.0, h_min: 55.0, enabled: true },
+        { id: 2, name: 'Morning Light', start: '05:00 AM', stop: '10:00 AM', t_set: 25.0, t_max: 26.0, t_min: 21.0, h_set: 65.0, h_max: 70.0, h_min: 60.0, enabled: true },
+        { id: 3, name: 'Midday Peak', start: '10:00 AM', stop: '03:00 PM', t_set: 27.0, t_max: 28.0, t_min: 23.0, h_set: 70.0, h_max: 75.0, h_min: 60.0, enabled: true },
+        { id: 4, name: 'Late Afternoon', start: '03:00 PM', stop: '08:00 PM', t_set: 26.0, t_max: 27.0, t_min: 22.0, h_set: 68.0, h_max: 72.0, h_min: 60.0, enabled: true },
+        { id: 5, name: 'Night Cooling', start: '08:00 PM', stop: '12:00 AM', t_set: 24.0, t_max: 25.0, t_min: 20.0, h_set: 62.0, h_max: 68.0, h_min: 55.0, enabled: true }
+      ]
+    };
+  });
+
+  return {
+    mode: 'SCHEDULED',
+    active_setting: 'Setting A',
+    'T MIN': 10.0,
+    'T MAX': 30.0,
+    'H MIN': 30.0,
+    'H MAX': 80.0,
+    settings: stages
+  };
+};
+
+export const autoChainDates = (settingsDict, changedKey) => {
+  const newSettings = JSON.parse(JSON.stringify(settingsDict || {}));
+  const stages = ALL_SETTING_KEYS.filter(k => k in newSettings);
+  const startIdx = stages.indexOf(changedKey);
+  if (startIdx === -1) return newSettings;
+
+  const cur = newSettings[changedKey];
+  let curStart = new Date(cur.start_date);
+  let curEnd = new Date(cur.end_date);
+  if (isNaN(curStart.getTime()) || isNaN(curEnd.getTime())) return newSettings;
+  if (curEnd < curStart) {
+    curEnd = new Date(curStart);
+    cur.end_date = curEnd.toISOString().split('T')[0];
+  }
+
+  for (let i = startIdx; i < stages.length - 1; i++) {
+    const cKey = stages[i];
+    const nKey = stages[i + 1];
+    const cObj = newSettings[cKey];
+    const nObj = newSettings[nKey];
+    if (!cObj || !nObj) continue;
+
+    const cEndD = new Date(cObj.end_date);
+    const nStartOrig = new Date(nObj.start_date);
+    const nEndOrig = new Date(nObj.end_date);
+
+    let durationDays = 14;
+    if (!isNaN(nStartOrig.getTime()) && !isNaN(nEndOrig.getTime()) && nEndOrig >= nStartOrig) {
+      durationDays = Math.max(1, Math.round((nEndOrig - nStartOrig) / (1000 * 60 * 60 * 24)) + 1);
+    }
+
+    const nextStart = new Date(cEndD);
+    nextStart.setDate(nextStart.getDate() + 1);
+
+    const nextEnd = new Date(nextStart);
+    nextEnd.setDate(nextEnd.getDate() + durationDays - 1);
+
+    nObj.start_date = nextStart.toISOString().split('T')[0];
+    nObj.end_date = nextEnd.toISOString().split('T')[0];
+  }
+
+  return newSettings;
+};
+
+// --- DEFAULT RECIPES ---
+const BUILTIN_PRESETS = [
+  {
+    name: 'Strawberry Cycle',
+    desc: 'Cool climate, 14-hour photoperiod, staged vegetative to fruiting',
+    settings: generateDefaultAlmoraSchedule().settings
+  },
+  {
+    name: 'Leafy Greens & Lettuce',
+    desc: '18-22°C, 65-75% RH, 16-hour light cycle',
+    settings: generateDefaultAlmoraSchedule().settings
+  }
+];
+
+const ColdStorageSettings = () => {
+  // Device & API State
+  const [devices, setDevices] = useState([]);
+  const [selectedMqttId, setSelectedMqttId] = useState('control122');
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState('disconnected');
+  const [statusMsg, setStatusMsg] = useState('');
+  const [client, setClient] = useState(null);
+
+  // Setpoints & System Configuration
+  const [allSetpoints, setAllSetpoints] = useState({});
+  const [activeRoom, setActiveRoom] = useState('S1');
+  const [activeStageKey, setActiveStageKey] = useState('Setting A');
+  const [systemConfig, setSystemConfig] = useState({
+    upload_frequency_min: 0,
+    temp_alarm_offset: 5.0,
+    humi_alarm_offset: 5.0,
+    relay_port: '/dev/serial/by-path/usb-0:1:2:1:0-port0',
+    sensor_names: { ...DEFAULT_ROOM_NAMES }
+  });
+
+  // Telemetry & Hardware Matrix
+  const [liveData, setLiveData] = useState({});
+  const [relayStates, setRelayStates] = useState({});
+  const [activeWarnings, setActiveWarnings] = useState([]);
+  const [chartData, setChartData] = useState([]);
+
+  // Modals & Navigation
+  const [activeTab, setActiveTab] = useState('control'); // 'control' | 'relays' | 'trends'
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [showSlotModal, setShowSlotModal] = useState(false);
+  const [editingSlotIdx, setEditingSlotIdx] = useState(null);
+  const [slotForm, setSlotForm] = useState(null);
+  const [savedPresets, setSavedPresets] = useState([]);
+  const [showPresetModal, setShowPresetModal] = useState(false);
+  const [presetNameInput, setPresetNameInput] = useState('');
 
   const token = localStorage.getItem('token');
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const role = user.role === 'superadmin' ? 'superadmin' : (user.accountType || user.role || 'user');
-  const isSuperadmin = role === 'superadmin';
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
+  // Get or initialize room setpoints
+  const getRoomSetpoints = useCallback((sKey) => {
+    if (allSetpoints[sKey]) return allSetpoints[sKey];
+    return generateDefaultAlmoraSchedule();
+  }, [allSetpoints]);
+
+  const currentRoomSetpoints = getRoomSetpoints(activeRoom);
+  const currentStage = (currentRoomSetpoints.settings && currentRoomSetpoints.settings[activeStageKey]) ||
+    generateDefaultAlmoraSchedule().settings[activeStageKey] || {};
+
+  // Fetch registered devices
   useEffect(() => {
-    const fetchMultiSensorDevices = async () => {
+    const fetchDevices = async () => {
       try {
         setLoading(true);
         const res = await fetch(`${API_BASE}/api/devices`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { Authorization: `Bearer ${token}` }
         });
         const data = await res.json();
-        if (data.success) {
-          const filtered = data.data.filter(d => d.deviceType === 'multi_sensor');
-          setMultiSensorDevices(filtered);
-          if (filtered.length > 0 && !deviceRoot) {
-            const first = filtered[0];
-            setDeviceRoot(first.mqttId || 'sensor1');
-
-            const ts = first.thingspeak || {};
-            setSystemConfig({
-              "TS CLIENT ID": ts.clientId || '',
-              "TS USERNAME": ts.username || '',
-              "TS PASSWORD": ts.password || '',
-              "TS CHANNEL ID": ts.channelId || '',
-              "TS READ KEY": ts.readApiKey || '',
-              "TS WRITE KEY": ts.writeApiKey || '',
-              "PORT": ts.port || 1883
-            });
+        if (data.success && Array.isArray(data.data)) {
+          let list = data.data;
+          // Ensure control122 is selectable if from hardware
+          const hasControl122 = list.some(d => (d.mqttId || d._id) === 'control122');
+          if (!hasControl122) {
+            list = [{ _id: 'control122', name: 'Almora Controller (control122)', mqttId: 'control122' }, ...list];
+          }
+          setDevices(list);
+          if (!selectedMqttId && list.length > 0) {
+            setSelectedMqttId(list[0].mqttId || list[0]._id);
           }
         }
       } catch (err) {
-        console.error('Failed to fetch Multi Sensor devices', err);
+        console.error('Failed to fetch devices', err);
       } finally {
         setLoading(false);
       }
     };
-    fetchMultiSensorDevices();
-  }, [token]);
+    fetchDevices();
+  }, [token, API_BASE]);
 
-  const selectedDevice = multiSensorDevices.find(d => (d.mqttId || 'sensor1') === deviceRoot);
+  const selectedDevice = devices.find(d => (d.mqttId || d._id) === selectedMqttId);
 
-  // AUTO-FILL CREDENTIALS WHEN HUB CHANGES
+  // Load Presets
   useEffect(() => {
-    if (selectedDevice) {
-      const ts = selectedDevice.thingspeak || {};
-      setSystemConfig({
-        "TS CLIENT ID": ts.clientId || ts.tempReadApiKey || '',
-        "TS USERNAME": ts.username || ts.tempWriteApiKey || '',
-        "TS PASSWORD": ts.password || ts.tempChannelId || '',
-        "TS CHANNEL ID": ts.channelId || '',
-        "TS READ KEY": ts.readApiKey || '',
-        "TS WRITE KEY": ts.writeApiKey || '',
-        "PORT": ts.port || 1883
+    try {
+      const stored = localStorage.getItem(`almora_presets_${selectedMqttId}`);
+      if (stored) setSavedPresets(JSON.parse(stored));
+      else setSavedPresets(BUILTIN_PRESETS);
+    } catch {
+      setSavedPresets(BUILTIN_PRESETS);
+    }
+  }, [selectedMqttId]);
+
+  // Robust Telemetry Normalizer (Extracts S1..S7 from any packet structure)
+  const processIncomingTelemetry = useCallback((payload) => {
+    if (!payload) return;
+
+    // 1. Process Setpoints & Config if present
+    if (payload.sensor_setpoints) {
+      setAllSetpoints(prev => ({ ...prev, ...payload.sensor_setpoints }));
+    }
+    if (payload.system_config) {
+      setSystemConfig(prev => ({
+        ...prev,
+        ...payload.system_config,
+        sensor_names: {
+          ...DEFAULT_ROOM_NAMES,
+          ...(payload.system_config.sensor_names || {})
+        }
+      }));
+    }
+    if (payload.relay_states) {
+      setRelayStates(payload.relay_states);
+    }
+    if (Array.isArray(payload.active_warnings)) {
+      setActiveWarnings(payload.active_warnings);
+    }
+
+    // 2. Normalize sensor readings to S1..S7
+    const normalized = {};
+
+    // Check payload.sensor_data (standard from sensor_monitor2_almora.py)
+    const rawSensors = payload.sensor_data || (payload.S1 ? payload : null);
+
+    if (rawSensors && typeof rawSensors === 'object') {
+      Object.entries(rawSensors).forEach(([key, val]) => {
+        if (!val || typeof val !== 'object') return;
+
+        let sKey = null;
+        if (val.id !== undefined) {
+          sKey = `S${val.id}`;
+        } else if (key.startsWith('S') && key.length <= 3) {
+          sKey = key.toUpperCase();
+        } else {
+          const m = key.match(/S(\d+)/i) || key.match(/port(\d+)/i);
+          if (m) sKey = `S${m[1]}`;
+        }
+
+        if (sKey && SENSOR_KEYS.includes(sKey)) {
+          const tempVal = val.temp ?? val.t ?? null;
+          const humiVal = val.humi ?? val.h ?? null;
+          normalized[sKey] = {
+            id: val.id,
+            temp: typeof tempVal === 'number' ? tempVal : (tempVal ? parseFloat(tempVal) : null),
+            humi: typeof humiVal === 'number' ? humiVal : (humiVal ? parseFloat(humiVal) : null),
+            co2: val.co2 ?? null,
+            status: val.status || (tempVal !== null ? 'OK' : 'OFFLINE')
+          };
+        }
       });
     }
-  }, [deviceRoot, multiSensorDevices]);
 
+    if (Object.keys(normalized).length > 0) {
+      setLiveData(prev => ({ ...prev, ...normalized }));
+
+      // Append point to trends
+      setChartData(prev => {
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const point = { time: timeStr };
+        SENSOR_KEYS.forEach(k => {
+          if (normalized[k] && normalized[k].temp !== null) {
+            point[`${k}_T`] = normalized[k].temp;
+            point[`${k}_H`] = normalized[k].humi;
+          }
+        });
+        const next = [...prev, point];
+        if (next.length > 30) next.shift();
+        return next;
+      });
+    }
+  }, []);
+
+  // --- DUAL-CHANNEL REAL-TIME SYNC (MQTT WEBSOCKET + SSE FALLBACK) ---
   useEffect(() => {
-    if (!deviceRoot) return;
+    if (!selectedMqttId) return;
     setStatus('disconnected');
+
+    // 1. MQTT WebSocket Connection
     const mqttClient = createMqttClient();
 
     mqttClient.on('connect', () => {
       setStatus('connected');
-      mqttClient.subscribe(`inhydro/${deviceRoot}/setpoints/current`);
-      mqttClient.subscribe(`inhydro/${deviceRoot}/telemetry/live`);
-      mqttClient.publish(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
+      mqttClient.subscribe(`inhydro/${selectedMqttId}/setpoints/current`);
+      mqttClient.subscribe(`inhydro/${selectedMqttId}/telemetry/live`);
+      mqttClient.publish(`inhydro/${selectedMqttId}/setpoints/request_sync`, '1');
     });
 
     mqttClient.on('message', (topic, message) => {
-      const topicTail = topic.split('/').pop();
       try {
-        const data = JSON.parse(message.toString());
-        if (topicTail === 'live') {
-          setLiveData(data);
+        const payload = JSON.parse(message.toString());
+        processIncomingTelemetry(payload);
+      } catch (err) {
+        console.debug('MQTT parse error', err);
+      }
+    });
 
-          setChartData(prev => {
-            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            const newPoint = { time: timeStr };
-            Object.entries(data).forEach(([sKey, d]) => {
-              if (d.status === 'OK') {
-                newPoint[`${sKey}_T`] = d.t;
-                newPoint[`${sKey}_H`] = d.h;
-              }
-            });
-            const next = [...prev, newPoint];
-            if (next.length > 25) next.shift(); // Keep last 25 readings for analysis
-            return next;
-          });
-
-        } else if (topicTail === 'current') {
-          if (data.sensor_setpoints) {
-            setAllSetpoints(prev => {
-              const next = { ...prev };
-              Object.keys(data.sensor_setpoints).forEach(port => {
-                next[port] = data.sensor_setpoints[port];
-              });
-              return next;
-            });
-          }
-          if (data.system_config) {
-            setSystemConfig(prev => {
-              const next = { ...prev };
-              Object.keys(data.system_config).forEach(k => {
-                if (data.system_config[k] || !prev[k]) next[k] = data.system_config[k];
-              });
-              return next;
-            });
-          }
-        }
-      } catch (e) { }
+    mqttClient.on('error', () => {
+      setStatus('error');
     });
 
     setClient(mqttClient);
-    return () => { if (mqttClient) mqttClient.end(); };
-  }, [deviceRoot]);
 
-  const handleSetpointChange = (key, value) => {
-    setAllSetpoints(prev => ({
-      ...prev,
-      [selectedPort]: {
-        ...(prev[selectedPort] || defaultSetpoints),
-        [key]: value
-      }
-    }));
-  };
+    // 2. Real-time SSE Stream Fallback (Guarantees data flow via Backend even if raw WS is blocked)
+    const sseUrl = `${API_BASE}/api/devices/stream?deviceId=${selectedDevice?._id || ''}&mqttId=${selectedMqttId}`;
+    let eventSource = null;
+    try {
+      eventSource = new EventSource(sseUrl);
+      eventSource.onopen = () => setStatus('connected');
+      eventSource.onmessage = (event) => {
+        try {
+          const packet = JSON.parse(event.data);
+          if (packet.mqttId === selectedMqttId || packet.topic?.includes(selectedMqttId)) {
+            setStatus('connected');
+            processIncomingTelemetry(packet.data);
+          }
+        } catch {}
+      };
+    } catch (e) {}
 
-  const handleConfigChange = (key, value) => {
-    setSystemConfig(prev => ({ ...prev, [key]: value }));
-  };
+    return () => {
+      if (mqttClient) mqttClient.end();
+      if (eventSource) eventSource.close();
+    };
+  }, [selectedMqttId, selectedDevice, API_BASE, processIncomingTelemetry]);
 
-  const handleSave = () => {
-    if (!client || !client.connected) {
-      setStatus('error');
-      return;
+  // Request sync from physical device
+  const handleRequestSync = () => {
+    if (client && client.connected) {
+      client.publish(`inhydro/${selectedMqttId}/setpoints/request_sync`, '1');
     }
+    if (selectedDevice?._id) {
+      fetch(`${API_BASE}/api/devices/${selectedDevice._id}/setpoints?action=sync`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      }).catch(() => {});
+    }
+    setStatusMsg('Sync command sent to hardware...');
+    setTimeout(() => setStatusMsg(''), 2500);
+  };
 
+  // State update helpers
+  const updateRoomState = (updater) => {
+    setAllSetpoints(prev => {
+      const cur = prev[activeRoom] ? JSON.parse(JSON.stringify(prev[activeRoom])) : generateDefaultAlmoraSchedule();
+      const updated = updater(cur);
+      return { ...prev, [activeRoom]: updated };
+    });
+  };
+
+  const updateActiveStage = (field, val) => {
+    updateRoomState(room => {
+      const st = room.settings[activeStageKey] || {};
+      st[field] = val;
+      room.settings[activeStageKey] = st;
+      return room;
+    });
+  };
+
+  const handleStageDateChange = (field, dateStr) => {
+    updateRoomState(room => {
+      const st = room.settings[activeStageKey] || {};
+      st[field] = dateStr;
+      room.settings[activeStageKey] = st;
+      room.settings = autoChainDates(room.settings, activeStageKey);
+      return room;
+    });
+  };
+
+  // Save changes to device
+  const handleSaveToDevice = async () => {
     setStatus('saving');
+    setStatusMsg('Pushing setpoints to hardware...');
+
+    const curRoomData = currentRoomSetpoints;
     const payload = {
-      ...systemConfig,
-      port: selectedPort === 'default' ? null : selectedPort,
-      ...(allSetpoints[selectedPort] || defaultSetpoints)
+      port: activeRoom,
+      mode: curRoomData.mode || 'SCHEDULED',
+      'T MIN': curRoomData['T MIN'] ?? 10.0,
+      'T MAX': curRoomData['T MAX'] ?? 30.0,
+      'H MIN': curRoomData['H MIN'] ?? 30.0,
+      'H MAX': curRoomData['H MAX'] ?? 80.0,
+      settings: curRoomData.settings || {},
+      system_config: systemConfig,
+      upload_frequency_min: systemConfig.upload_frequency_min,
+      temp_alarm_offset: systemConfig.temp_alarm_offset,
+      humi_alarm_offset: systemConfig.humi_alarm_offset,
+      sensor_names: systemConfig.sensor_names
     };
 
-    ['T MIN', 'T MAX', 'H MIN', 'H MAX', 'PORT'].forEach(k => {
-      if (payload[k] !== undefined && payload[k] !== "") {
-        const n = Number(payload[k]);
-        payload[k] = isNaN(n) ? payload[k] : n;
+    if (client && client.connected) {
+      try {
+        client.publish(`inhydro/${selectedMqttId}/setpoints/update`, JSON.stringify(payload), { retain: true });
+      } catch (err) {
+        console.error('MQTT publish err', err);
       }
-    });
-
-    if (isSuperadmin && selectedDevice) {
-      const currentTS = selectedDevice.thingspeak || {};
-      const dbPayload = {
-        thingspeak: {
-          ...currentTS,
-          clientId: systemConfig["TS CLIENT ID"] || currentTS.clientId,
-          username: systemConfig["TS USERNAME"] || currentTS.username,
-          password: systemConfig["TS PASSWORD"] || currentTS.password,
-          channelId: systemConfig["TS CHANNEL ID"] || currentTS.channelId,
-          readApiKey: systemConfig["TS READ KEY"] || currentTS.readApiKey,
-          writeApiKey: systemConfig["TS WRITE KEY"] || currentTS.writeApiKey,
-          port: Number(systemConfig["PORT"] || currentTS.port || 1883)
-        }
-      };
-      fetch(`${API_BASE}/api/devices/${selectedDevice._id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(dbPayload)
-      }).catch(err => console.error("DB Update error:", err));
     }
 
-    client.publish(`inhydro/${deviceRoot}/setpoints/update`, JSON.stringify(payload), { retain: true }, (err) => {
-      if (err) { setStatus('error'); }
-      else {
-        setStatus('saved');
-        setTimeout(() => setStatus('connected'), 2000);
+    if (selectedDevice?._id) {
+      try {
+        await fetch(`${API_BASE}/api/devices/${selectedDevice._id}/setpoints`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload)
+        });
+      } catch (err) {
+        console.error('REST sync err', err);
       }
+    }
+
+    setStatus('saved');
+    setStatusMsg('Setpoints updated successfully!');
+    setTimeout(() => {
+      setStatus('connected');
+      setStatusMsg('');
+    }, 2000);
+  };
+
+  // Slot editor handlers
+  const openEditSlot = (idx) => {
+    const slot = currentStage.time_slots[idx];
+    if (!slot) return;
+    setEditingSlotIdx(idx);
+    setSlotForm({ ...slot });
+    setShowSlotModal(true);
+  };
+
+  const handleSaveSlotForm = () => {
+    if (editingSlotIdx === null || !slotForm) return;
+    updateRoomState(room => {
+      const st = room.settings[activeStageKey];
+      if (st && st.time_slots && st.time_slots[editingSlotIdx]) {
+        st.time_slots[editingSlotIdx] = {
+          ...slotForm,
+          t_set: Number(slotForm.t_set) || 24.0,
+          t_min: Number(slotForm.t_min) || 20.0,
+          t_max: Number(slotForm.t_max) || 26.0,
+          h_set: Number(slotForm.h_set) || 60.0,
+          h_min: Number(slotForm.h_min) || 55.0,
+          h_max: Number(slotForm.h_max) || 70.0,
+          start: formatTime12h(slotForm.start),
+          stop: formatTime12h(slotForm.stop)
+        };
+      }
+      return room;
+    });
+    setShowSlotModal(false);
+  };
+
+  const handleDeleteSlot = (idx) => {
+    updateRoomState(room => {
+      const st = room.settings[activeStageKey];
+      if (st && st.time_slots && st.time_slots.length > 1) {
+        st.time_slots.splice(idx, 1);
+        st.time_slots.forEach((s, i) => { s.id = i + 1; });
+      }
+      return room;
     });
   };
+
+  const handleAddSlot = () => {
+    updateRoomState(room => {
+      const st = room.settings[activeStageKey];
+      if (!st.time_slots) st.time_slots = [];
+      const newId = st.time_slots.length + 1;
+      st.time_slots.push({
+        id: newId,
+        name: `Slot ${newId}`,
+        start: '12:00 PM',
+        stop: '04:00 PM',
+        t_set: 25.0,
+        t_min: 21.0,
+        t_max: 27.0,
+        h_set: 65.0,
+        h_min: 60.0,
+        h_max: 70.0,
+        enabled: true
+      });
+      return room;
+    });
+  };
+
+  // Overlap warnings
+  const slotWarnings = useMemo(() => {
+    return checkTimeSlotOverlaps(currentStage.time_slots);
+  }, [currentStage.time_slots]);
+
+  // Current active room live telemetry
+  const activeRoomLive = liveData[activeRoom] || {};
+  const currentRoomIdx = SENSOR_KEYS.indexOf(activeRoom);
+  const chCool = (currentRoomIdx * 3) + 1;
+  const chHumi = (currentRoomIdx * 3) + 2;
+  const chLight = (currentRoomIdx * 3) + 3;
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center rounded-2xl border border-slate-700 bg-slate-800/20">
-        <RefreshCw className="h-8 w-8 animate-spin text-green-500" />
-      </div>
-    );
-  }
-
-  if (multiSensorDevices.length === 0) {
-    return (
-      <div className="flex h-64 flex-col items-center justify-center rounded-2xl border border-slate-700 bg-slate-800/20 p-8 text-center">
-        <Server className="mb-4 h-12 w-12 text-slate-600" />
-        <h3 className="text-lg font-semibold text-white">No Cold Storage Devices Found</h3>
+      <div className="flex h-80 items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/30">
+        <div className="flex items-center gap-3 text-slate-400">
+          <RefreshCw className="h-5 w-5 animate-spin text-emerald-500" />
+          <span className="text-sm font-medium">Connecting to Almora Hardware...</span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h3 className="text-base font-semibold text-white flex items-center gap-2">
-            {selectedDevice?.name || 'Cold Storage Management Hub'}
-          </h3>
-          <p className="text-[11px] text-slate-400">Universal Two-Way Sync: Control settings globally</p>
+    <div className="max-w-7xl mx-auto space-y-5 pb-16 text-slate-100 font-sans">
+      {/* ── 1. CLEAN TOP HEADER & CONTROLS ── */}
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/80 border border-slate-800/80 backdrop-blur-sm">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+            <Wind className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="text-base font-bold text-white tracking-tight">
+              Almora Cold Storage & Greenhouse Manager
+            </h1>
+            <p className="text-xs text-slate-400">
+              Multi-Zone Modbus Telemetry & Agronomic Crop Scheduling
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        {/* Action Controls */}
+        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
+          {/* Device Selector */}
           <div className="relative">
-            <button
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-xs font-medium text-white hover:border-green-500 transition-all"
+            <select
+              value={selectedMqttId}
+              onChange={(e) => setSelectedMqttId(e.target.value)}
+              className="appearance-none bg-slate-950 border border-slate-700/80 text-white text-xs font-semibold rounded-lg pl-8 pr-7 py-2 outline-none hover:border-slate-600 cursor-pointer"
             >
-              <Server className="h-3.5 w-3.5 text-green-400" />
-              <span className="max-w-[120px] truncate">{selectedDevice?.name || 'Select Hub'}</span>
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
+              {devices.map(d => (
+                <option key={d._id} value={d.mqttId || d._id}>
+                  {d.name} ({d.mqttId || 'No ID'})
+                </option>
+              ))}
+            </select>
+            <Server className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-emerald-400 pointer-events-none" />
+            <ChevronDown className="absolute right-2 top-2.5 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+          </div>
 
-            {isDropdownOpen && (
-              <div className="absolute right-0 top-full z-50 mt-1 flex w-48 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
-                {multiSensorDevices.map((dev) => (
-                  <button
-                    key={dev._id}
-                    onClick={() => { setDeviceRoot(dev.mqttId || dev._id); setIsDropdownOpen(false); }}
-                    className="flex items-center justify-between px-4 py-2.5 text-left text-xs text-slate-300 hover:bg-slate-800 transition-colors"
-                  >
-                    <span className="truncate">{dev.name}</span>
-                    <span className={`h-1.5 w-1.5 rounded-full ${dev.status === 'online' ? 'bg-emerald-400' : 'bg-slate-500'}`} title={dev.status} />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="min-w-[120px] flex justify-end">
-            {status === 'connected' && selectedDevice?.status === 'online' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
-              </span>
-            )}
-            {(status !== 'connected' || selectedDevice?.status !== 'online') && status !== 'saving' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
-              </span>
-            )}
-            {status === 'saving' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400">
-                <RefreshCw className="h-4 w-4 animate-spin" /> Pushing...
-              </span>
-            )}
-          </div>
+          {/* Sync Hardware Button */}
+          <button
+            onClick={handleRequestSync}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition-colors"
+            title="Request Instant Sync from Device"
+          >
+            <RotateCcw className="h-3.5 w-3.5 text-sky-400" />
+            <span>Sync Hardware</span>
+          </button>
+
+          {/* Presets */}
+          <button
+            onClick={() => setShowPresetModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition-colors"
+          >
+            <Bookmark className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Presets</span>
+          </button>
+
+          {/* Config */}
+          <button
+            onClick={() => setShowConfigModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition-colors"
+          >
+            <Sliders className="h-3.5 w-3.5 text-amber-400" />
+            <span>Config</span>
+          </button>
+
+          {/* Save Button */}
+          <button
+            onClick={handleSaveToDevice}
+            disabled={status === 'saving'}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-bold text-xs transition-all shadow-sm disabled:opacity-50"
+          >
+            {status === 'saving' ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            <span>Save Changes</span>
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* SENSOR SPECIFIC CONTROL (Full Width) */}
-        <div className="lg:col-span-3">
-          <div className="rounded-2xl border border-slate-700 bg-slate-800/30 p-6 backdrop-blur-sm shadow-xl">
-            <div className="flex items-center justify-between mb-6">
-              <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-                <Thermometer className="h-4 w-4 text-blue-400" />
-                Individual Sensor Setpoints
-              </h4>
+      {/* ── 2. COMPACT NOTIFICATION BAR ── */}
+      {statusMsg && (
+        <div className="flex items-center gap-2 p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium animate-in fade-in">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{statusMsg}</span>
+        </div>
+      )}
 
-              <select
-                value={selectedPort}
-                onChange={(e) => setSelectedPort(e.target.value)}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white outline-none"
-              >
-                <option value="default">Default (All Sensors)</option>
-                {['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'].map(s => (
-                  <option key={s} value={s}>Sensor {s}</option>
-                ))}
-              </select>
-            </div>
+      {activeWarnings.length > 0 ? (
+        <div className="flex items-center justify-between p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold">
+          <div className="flex items-center gap-2">
+            <Bell className="h-4 w-4 text-rose-400 animate-pulse" />
+            <span>Warning: {activeWarnings.join(' | ')}</span>
+          </div>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300">
+            Alarm Active
+          </span>
+        </div>
+      ) : (
+       <>
+       </>
+      )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-              <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-700/50">
-                <h5 className="text-[11px] font-bold text-slate-500 mb-4 flex items-center gap-2 uppercase tracking-widest"><Thermometer className="h-3 w-3" /> Temperature Control</h5>
-                <div className="grid grid-cols-2 gap-4">
-                  <InputRow label="Min Temp (°C)" objKey="T MIN" data={allSetpoints[selectedPort] || defaultSetpoints} onChange={handleSetpointChange} />
-                  <InputRow label="Max Temp (°C)" objKey="T MAX" data={allSetpoints[selectedPort] || defaultSetpoints} onChange={handleSetpointChange} />
+      {/* ── 3. ELEGANT ROOM SELECTOR PILLS (S1 - S7) ── */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+        {SENSOR_KEYS.map((sKey) => {
+          const isSelected = activeRoom === sKey;
+          const name = systemConfig.sensor_names[sKey] || DEFAULT_ROOM_NAMES[sKey];
+          const data = liveData[sKey] || {};
+          const isOnline = data.status === 'OK' || data.temp !== undefined;
+
+          return (
+            <button
+              key={sKey}
+              onClick={() => setActiveRoom(sKey)}
+              className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl border text-xs whitespace-nowrap transition-all ${
+                isSelected
+                  ? 'bg-slate-900 border-emerald-500/70 text-white shadow-sm ring-1 ring-emerald-500/30'
+                  : 'bg-slate-900/40 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className={`h-2 w-2 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                <span className="font-bold">{name}</span>
+              </div>
+
+              {/* Telemetry pill */}
+              <div className="flex items-center gap-2 font-mono text-[11px] text-slate-400 border-l border-slate-800 pl-2">
+                <span>{data.temp !== null && data.temp !== undefined ? `${data.temp.toFixed(1)}°C` : '--'}</span>
+                <span>{data.humi !== null && data.humi !== undefined ? `${data.humi.toFixed(1)}%` : '--'}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── 4. MAIN WORKSPACE WITH VIEW TABS ── */}
+      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-white">
+            {systemConfig.sensor_names[activeRoom] || DEFAULT_ROOM_NAMES[activeRoom]}
+          </span>
+          <button
+            onClick={() => {
+              setRenameValue(systemConfig.sensor_names[activeRoom] || DEFAULT_ROOM_NAMES[activeRoom]);
+              setShowRenameModal(true);
+            }}
+            className="p-1 rounded text-slate-400 hover:text-white"
+            title="Rename Room"
+          >
+            <Edit3 className="h-3 w-3" />
+          </button>
+        </div>
+
+        {/* Tab Switcher */}
+        <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 text-xs">
+          <button
+            onClick={() => setActiveTab('control')}
+            className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
+              activeTab === 'control' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Schedule & Setpoints
+          </button>
+          <button
+            onClick={() => setActiveTab('relays')}
+            className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
+              activeTab === 'relays' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Relay Board (22-Ch)
+          </button>
+          <button
+            onClick={() => setActiveTab('trends')}
+            className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
+              activeTab === 'trends' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Live Trends
+          </button>
+        </div>
+      </div>
+
+      {/* ── VIEW 1: SCHEDULE & SETPOINTS (PRIMARY VIEW) ── */}
+      {activeTab === 'control' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {/* LEFT 8-COLS: Stage Stepper & Diurnal Slots Table */}
+          <div className="lg:col-span-8 space-y-4">
+            {/* Stage Bar */}
+            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                {/* Stage Stepper Dropdown */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-400">Crop Stage:</span>
+                  <select
+                    value={activeStageKey}
+                    onChange={(e) => setActiveStageKey(e.target.value)}
+                    className="bg-slate-950 border border-slate-700 text-white font-bold text-xs rounded-lg px-2.5 py-1.5 outline-none"
+                  >
+                    {ALL_SETTING_KEYS.map(k => (
+                      <option key={k} value={k}>
+                        {currentRoomSetpoints.settings?.[k]?.name || k} {!currentRoomSetpoints.settings?.[k]?.enabled ? '(Disabled)' : ''}
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    onClick={() => updateActiveStage('enabled', !currentStage.enabled)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                      currentStage.enabled
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }`}
+                  >
+                    {currentStage.enabled ? 'Enabled' : 'Disabled'}
+                  </button>
+                </div>
+
+                {/* Mode Selector */}
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-slate-400">Mode:</span>
+                  <select
+                    value={currentRoomSetpoints.mode || 'SCHEDULED'}
+                    onChange={(e) => updateRoomState(r => ({ ...r, mode: e.target.value }))}
+                    className="bg-slate-950 border border-slate-700 text-emerald-400 font-bold text-xs rounded-lg px-2 py-1 outline-none"
+                  >
+                    <option value="SCHEDULED">Scheduled (10-Stage)</option>
+                    <option value="STATIC">Static (Fixed Limits)</option>
+                  </select>
                 </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-700/50">
-                <h5 className="text-[11px] font-bold text-slate-500 mb-4 flex items-center gap-2 uppercase tracking-widest"><Droplets className="h-3 w-3" /> Humidity Control</h5>
-                <div className="grid grid-cols-2 gap-4">
-                  <InputRow label="Min Humid (%)" objKey="H MIN" data={allSetpoints[selectedPort] || defaultSetpoints} onChange={handleSetpointChange} />
-                  <InputRow label="Max Humid (%)" objKey="H MAX" data={allSetpoints[selectedPort] || defaultSetpoints} onChange={handleSetpointChange} />
+              {/* Stage Date Range & Lighting */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-800/80 text-xs">
+                <div>
+                  <span className="text-[11px] text-slate-400 block mb-1">Start Date</span>
+                  <input
+                    type="date"
+                    value={currentStage.start_date || ''}
+                    onChange={(e) => handleStageDateChange('start_date', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <span className="text-[11px] text-slate-400 block mb-1">End Date</span>
+                  <input
+                    type="date"
+                    value={currentStage.end_date || ''}
+                    onChange={(e) => handleStageDateChange('end_date', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <span className="text-[11px] text-slate-400 block mb-1 flex items-center gap-1">
+                    <Sun className="h-3 w-3 text-amber-400" /> Photoperiod Lights
+                  </span>
+                  <div className="flex items-center gap-2 font-mono">
+                    <input
+                      type="text"
+                      value={currentStage.photoperiod_on || '06:00 AM'}
+                      onChange={(e) => updateActiveStage('photoperiod_on', e.target.value)}
+                      className="w-1/2 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-[11px]"
+                      placeholder="06:00 AM"
+                    />
+                    <span className="text-slate-500">-</span>
+                    <input
+                      type="text"
+                      value={currentStage.photoperiod_off || '08:00 PM'}
+                      onChange={(e) => updateActiveStage('photoperiod_off', e.target.value)}
+                      className="w-1/2 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-[11px]"
+                      placeholder="08:00 PM"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="mt-8 flex justify-end">
+            {/* Overlap Alert */}
+            {slotWarnings.length > 0 && (
+              <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>Slot Overlap: {slotWarnings.join(' • ')}</span>
+              </div>
+            )}
+
+            {/* Diurnal Time Slots Table */}
+            <div className="rounded-xl border border-slate-800 bg-slate-900/40 overflow-hidden">
+              <div className="flex items-center justify-between p-3.5 border-b border-slate-800 bg-slate-900/80">
+                <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5 text-sky-400" />
+                  Diurnal Setpoints ({currentStage.time_slots?.length || 0} Frames)
+                </span>
+                <button
+                  onClick={handleAddSlot}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-semibold transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Add Slot</span>
+                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950/60 text-[11px] text-slate-400 font-semibold border-b border-slate-800/80">
+                    <tr>
+                      <th className="p-3">Time Window</th>
+                      <th className="p-3">Slot Name</th>
+                      <th className="p-3">Temperature</th>
+                      <th className="p-3">Humidity</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {(currentStage.time_slots || []).map((slot, idx) => (
+                      <tr key={slot.id || idx} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="p-3 text-slate-300 font-bold whitespace-nowrap">
+                          {formatTime12h(slot.start)} → {formatTime12h(slot.stop)}
+                        </td>
+                        <td className="p-3 font-sans text-slate-200">
+                          {slot.name}
+                        </td>
+                        <td className="p-3 whitespace-nowrap">
+                          <span className="font-bold text-white">{slot.t_set?.toFixed(1)}°C</span>
+                          <span className="text-[10px] text-slate-500 ml-1.5">
+                            ({slot.t_min?.toFixed(1)} - {slot.t_max?.toFixed(1)})
+                          </span>
+                        </td>
+                        <td className="p-3 whitespace-nowrap">
+                          <span className="font-bold text-white">{slot.h_set?.toFixed(1)}%</span>
+                          <span className="text-[10px] text-slate-500 ml-1.5">
+                            ({slot.h_min?.toFixed(1)} - {slot.h_max?.toFixed(1)})
+                          </span>
+                        </td>
+                        <td className="p-3 text-right whitespace-nowrap">
+                          <button
+                            onClick={() => openEditSlot(idx)}
+                            className="p-1 rounded text-slate-400 hover:text-white mr-1"
+                            title="Edit Slot"
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSlot(idx)}
+                            disabled={(currentStage.time_slots || []).length <= 1}
+                            className="p-1 rounded text-slate-400 hover:text-rose-400 disabled:opacity-30"
+                            title="Delete Slot"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT 4-COLS: Live Telemetry & Relay Monitor for Active Room */}
+          <div className="lg:col-span-4 space-y-4">
+            {/* Live Readings Card */}
+            <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <span className="text-xs font-bold text-white">Live Room Telemetry</span>
+                <span className="text-[11px] font-mono text-slate-400">{activeRoom}</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {/* Temp */}
+                <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
+                  <span className="text-[10px] font-semibold text-slate-400 flex items-center gap-1 mb-1">
+                    <Thermometer className="h-3 w-3 text-amber-400" /> Temperature
+                  </span>
+                  <div className="text-xl font-bold font-mono text-white">
+                    {activeRoomLive.temp !== undefined && activeRoomLive.temp !== null ? `${activeRoomLive.temp.toFixed(1)}°C` : '--'}
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    Target: {currentStage.time_slots?.[0]?.t_set?.toFixed(1) || '24.0'}°C
+                  </span>
+                </div>
+
+                {/* Humidity */}
+                <div className="p-3 rounded-lg bg-slate-950 border border-slate-800">
+                  <span className="text-[10px] font-semibold text-slate-400 flex items-center gap-1 mb-1">
+                    <Droplets className="h-3 w-3 text-sky-400" /> Humidity
+                  </span>
+                  <div className="text-xl font-bold font-mono text-white">
+                    {activeRoomLive.humi !== undefined && activeRoomLive.humi !== null ? `${activeRoomLive.humi.toFixed(1)}%` : '--'}
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    Target: {currentStage.time_slots?.[0]?.h_set?.toFixed(1) || '60.0'}%
+                  </span>
+                </div>
+              </div>
+
+              {/* CO2 if available */}
+              {activeRoomLive.co2 !== undefined && activeRoomLive.co2 !== null && (
+                <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Carbon Dioxide (CO2)</span>
+                  <span className="font-bold font-mono text-emerald-400">{activeRoomLive.co2.toFixed(0)} ppm</span>
+                </div>
+              )}
+            </div>
+
+            {/* Room Relays Status */}
+            <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 space-y-2.5">
+              <span className="text-xs font-bold text-white block">Dedicated Relay Channels</span>
+
+              <div className="space-y-1.5 text-xs">
+                <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800">
+                  <span className="text-slate-300">{activeRoom === 'S7' ? 'Fanpad' : 'Cooling / AC'} (CH {chCool})</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    relayStates[chCool] ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'
+                  }`}>
+                    {relayStates[chCool] ? 'ACTIVE ON' : 'OFF'}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800">
+                  <span className="text-slate-300">Humidifier (CH {chHumi})</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    relayStates[chHumi] ? 'bg-sky-500/20 text-sky-400' : 'bg-slate-800 text-slate-500'
+                  }`}>
+                    {relayStates[chHumi] ? 'ACTIVE ON' : 'OFF'}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800">
+                  <span className="text-slate-300">Grow Lights (CH {chLight})</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    relayStates[chLight] ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-500'
+                  }`}>
+                    {relayStates[chLight] ? 'ACTIVE ON' : 'OFF'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── VIEW 2: FULL 22-CHANNEL RELAY MATRIX ── */}
+      {activeTab === 'relays' && (
+        <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-xs">
+            <div>
+              <span className="font-bold text-white block">Modbus RTU 22-Channel Relay Board</span>
+              <span className="text-slate-400">Fixed port: {systemConfig.relay_port}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                <span className="h-2 w-2 rounded-full bg-emerald-400" /> ON
+              </span>
+              <span className="flex items-center gap-1.5 text-slate-500 font-semibold">
+                <span className="h-2 w-2 rounded-full bg-slate-600" /> OFF
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 text-xs font-mono">
+            {Array.from({ length: 22 }).map((_, i) => {
+              const ch = i + 1;
+              const isOn = !!relayStates[ch];
+              let label = `CH ${ch}`;
+              if (ch === 22) label = 'Siren Buzzer';
+              else {
+                const rIdx = Math.floor((ch - 1) / 3);
+                const sub = (ch - 1) % 3;
+                const rName = `S${rIdx + 1}`;
+                label = `${rName} ${sub === 0 ? 'AC' : sub === 1 ? 'HUM' : 'LGT'}`;
+              }
+
+              return (
+                <div
+                  key={ch}
+                  className={`p-2.5 rounded-lg border text-center transition-all ${
+                    isOn
+                      ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400 font-bold'
+                      : 'bg-slate-950 border-slate-800 text-slate-500'
+                  }`}
+                >
+                  <div className="text-[10px] text-slate-400 mb-0.5">{`CH ${ch}`}</div>
+                  <div className="text-xs truncate">{label}</div>
+                  <div className={`text-[9px] mt-1 font-bold uppercase ${isOn ? 'text-emerald-400' : 'text-slate-600'}`}>
+                    {isOn ? 'ON' : 'OFF'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── VIEW 3: LIVE TRENDS CHART ── */}
+      {activeTab === 'trends' && (
+        <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-xs">
+            <span className="font-bold text-white">Live Multi-Zone Sensor Trends</span>
+            <span className="text-slate-400 font-mono">Rolling 30 Samples</span>
+          </div>
+
+          <div className="h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis dataKey="time" stroke="#64748b" fontSize={10} />
+                <YAxis stroke="#64748b" fontSize={10} domain={['dataMin - 1', 'dataMax + 1']} />
+                <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '11px' }} />
+                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                <Line type="monotone" dataKey="S1_T" name="S1 (Room 1)" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="S2_T" name="S2 (Room 2)" stroke="#f97316" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="S3_T" name="S3 (Room 3)" stroke="#eab308" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="S4_T" name="S4 (Room 4)" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="S7_T" name="S7 (Greenhouse)" stroke="#a855f7" strokeWidth={2} dot={false} isAnimationActive={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: EDIT TIME SLOT ── */}
+      {showSlotModal && slotForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-xl bg-slate-900 border border-slate-700 shadow-2xl p-5 space-y-4 text-xs">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <span className="font-bold text-white">Edit Diurnal Time Slot</span>
+              <button onClick={() => setShowSlotModal(false)} className="text-slate-400 hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-slate-400 block mb-1">Slot Name</label>
+                <input
+                  type="text"
+                  value={slotForm.name || ''}
+                  onChange={(e) => setSlotForm({ ...slotForm, name: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-slate-400 block mb-1">Start Time</label>
+                  <input
+                    type="text"
+                    value={slotForm.start || ''}
+                    onChange={(e) => setSlotForm({ ...slotForm, start: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
+                    placeholder="06:00 AM"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 block mb-1">Stop Time</label>
+                  <input
+                    type="text"
+                    value={slotForm.stop || ''}
+                    onChange={(e) => setSlotForm({ ...slotForm, stop: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
+                    placeholder="12:00 PM"
+                  />
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5">
+                <span className="text-[11px] font-bold text-amber-400">Temperature Targets (°C)</span>
+                <div className="grid grid-cols-3 gap-2 font-mono">
+                  <div>
+                    <label className="text-[9px] text-slate-400 block">Target</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={slotForm.t_set ?? 24.0}
+                      onChange={(e) => setSlotForm({ ...slotForm, t_set: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-400 block">Min</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={slotForm.t_min ?? 20.0}
+                      onChange={(e) => setSlotForm({ ...slotForm, t_min: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-400 block">Max</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={slotForm.t_max ?? 26.0}
+                      onChange={(e) => setSlotForm({ ...slotForm, t_max: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5">
+                <span className="text-[11px] font-bold text-sky-400">Humidity Targets (%)</span>
+                <div className="grid grid-cols-3 gap-2 font-mono">
+                  <div>
+                    <label className="text-[9px] text-slate-400 block">Target</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={slotForm.h_set ?? 60.0}
+                      onChange={(e) => setSlotForm({ ...slotForm, h_set: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-400 block">Min</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={slotForm.h_min ?? 55.0}
+                      onChange={(e) => setSlotForm({ ...slotForm, h_min: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-slate-400 block">Max</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={slotForm.h_max ?? 70.0}
+                      onChange={(e) => setSlotForm({ ...slotForm, h_max: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
               <button
-                onClick={handleSave}
-                disabled={status === 'saving'}
-                className="flex items-center gap-2 rounded-xl bg-blue-600 px-8 py-3 text-sm font-semibold text-white hover:bg-blue-500 transition-all disabled:opacity-50"
+                onClick={() => setShowSlotModal(false)}
+                className="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white"
               >
-                {status === 'saving' ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                Save Sensor Settings
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveSlotForm}
+                className="px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
+              >
+                Apply
               </button>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Live Preview */}
-          <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {Object.entries(liveData || {}).map(([s, d]) => (
-              <div key={s} className={`p-4 rounded-2xl border ${d.status === 'OK' ? 'border-green-500/20 bg-green-500/5' : 'border-slate-700 bg-slate-800/10'}`}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[9px] font-bold text-slate-500 uppercase truncate max-w-[60px]">{s.split('/').pop()}</span>
-                  <div className={`h-1.5 w-1.5 rounded-full ${d.status === 'OK' ? 'bg-green-500' : 'bg-slate-600'}`} />
-                </div>
-                <div className="text-sm font-semibold text-white">{d.t?.toFixed(1)}°C</div>
-                <div className="text-[10px] text-slate-400">{d.h?.toFixed(1)}% RH</div>
+      {/* ── MODAL: SYSTEM CONFIG & ALARMS ── */}
+      {showConfigModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-sm rounded-xl bg-slate-900 border border-slate-700 shadow-2xl p-5 space-y-4 text-xs">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <span className="font-bold text-white">System Configuration</span>
+              <button onClick={() => setShowConfigModal(false)} className="text-slate-400 hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-slate-400 block mb-1">Cloud Telemetry Upload Frequency</label>
+                <select
+                  value={systemConfig.upload_frequency_min ?? 0}
+                  onChange={(e) => setSystemConfig({ ...systemConfig, upload_frequency_min: Number(e.target.value) })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white outline-none"
+                >
+                  <option value={0}>0 - Real-time Streaming (1 Sec)</option>
+                  <option value={1}>1 Minute</option>
+                  <option value={5}>5 Minutes</option>
+                  <option value={15}>15 Minutes</option>
+                  <option value={60}>1 Hour</option>
+                </select>
               </div>
-            ))}
+
+              <div>
+                <label className="text-slate-400 block mb-1">Temp Alarm Deviation Limit (± °C)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={systemConfig.temp_alarm_offset ?? 5.0}
+                  onChange={(e) => setSystemConfig({ ...systemConfig, temp_alarm_offset: parseFloat(e.target.value) || 5.0 })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-400 block mb-1">Humidity Alarm Deviation Limit (± %)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={systemConfig.humi_alarm_offset ?? 5.0}
+                  onChange={(e) => setSystemConfig({ ...systemConfig, humi_alarm_offset: parseFloat(e.target.value) || 5.0 })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setShowConfigModal(false)}
+                className="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => {
+                  setShowConfigModal(false);
+                  handleSaveToDevice();
+                }}
+                className="px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold"
+              >
+                Save
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* REAL TIME ANALYSIS GRAPHS */}
-      <div className="mt-6 grid grid-cols-1 xl:grid-cols-2 gap-6 w-full max-w-7xl mx-auto px-4 md:px-8 mb-12">
-
-
-        <div className="rounded-2xl border border-slate-700 bg-slate-800/30 p-6 backdrop-blur-sm shadow-xl">
-          <h4 className="text-sm font-semibold text-white mb-6 flex items-center gap-2">
-            <Activity className="h-4 w-4 text-orange-400" />
-            Live Temperature Analysis (°C)
-          </h4>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                <XAxis dataKey="time" stroke="#94a3b8" fontSize={11} tickMargin={10} />
-                <YAxis stroke="#94a3b8" fontSize={11} domain={['dataMin - 2', 'dataMax + 2']} />
-                <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }} itemStyle={{ color: '#fff' }} />
-                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-
-                <Line type="monotone" dataKey="S1_T" name="S1" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S2_T" name="S2" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S3_T" name="S3" stroke="#eab308" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S4_T" name="S4" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S5_T" name="S5" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S6_T" name="S6" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S7_T" name="S7" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-              </LineChart>
-            </ResponsiveContainer>
+      {/* ── MODAL: RENAME ROOM ── */}
+      {showRenameModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-xs rounded-xl bg-slate-900 border border-slate-700 shadow-2xl p-4 space-y-3 text-xs">
+            <span className="font-bold text-white block">Rename Room ({activeRoom})</span>
+            <input
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-bold outline-none"
+            />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowRenameModal(false)} className="px-3 py-1 rounded text-slate-400">
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (renameValue.trim()) {
+                    setSystemConfig(prev => ({
+                      ...prev,
+                      sensor_names: { ...prev.sensor_names, [activeRoom]: renameValue.trim() }
+                    }));
+                  }
+                  setShowRenameModal(false);
+                }}
+                className="px-3 py-1 rounded bg-emerald-500 text-slate-950 font-bold"
+              >
+                Save
+              </button>
+            </div>
           </div>
         </div>
+      )}
 
+      {/* ── MODAL: PRESETS ── */}
+      {showPresetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-xl bg-slate-900 border border-slate-700 shadow-2xl p-5 space-y-4 text-xs">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <span className="font-bold text-white">Crop Presets & Recipes</span>
+              <button onClick={() => setShowPresetModal(false)} className="text-slate-400 hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
-        <div className="rounded-2xl border border-slate-700 bg-slate-800/30 p-6 backdrop-blur-sm shadow-xl">
-          <h4 className="text-sm font-semibold text-white mb-6 flex items-center gap-2">
-            <Activity className="h-4 w-4 text-blue-400" />
-            Live Humidity Analysis (%)
-          </h4>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                <XAxis dataKey="time" stroke="#94a3b8" fontSize={11} tickMargin={10} />
-                <YAxis stroke="#94a3b8" fontSize={11} domain={['dataMin - 5', 'dataMax + 5']} />
-                <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }} itemStyle={{ color: '#fff' }} />
-                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+            <div className="space-y-2">
+              {savedPresets.map(preset => (
+                <div key={preset.name} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800">
+                  <span className="font-medium text-white">{preset.name}</span>
+                  <button
+                    onClick={() => {
+                      updateRoomState(r => ({ ...r, settings: JSON.parse(JSON.stringify(preset.settings)) }));
+                      setShowPresetModal(false);
+                      setStatusMsg(`Applied preset "${preset.name}"!`);
+                      setTimeout(() => setStatusMsg(''), 2000);
+                    }}
+                    className="px-2.5 py-1 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 text-[11px] font-semibold"
+                  >
+                    Apply
+                  </button>
+                </div>
+              ))}
+            </div>
 
-                <Line type="monotone" dataKey="S1_H" name="S1" stroke="#ef4444" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S2_H" name="S2" stroke="#f97316" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S3_H" name="S3" stroke="#eab308" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S4_H" name="S4" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S5_H" name="S5" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S6_H" name="S6" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-                <Line type="monotone" dataKey="S7_H" name="S7" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 6 }} isAnimationActive={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button onClick={() => setShowPresetModal(false)} className="px-3 py-1.5 rounded text-slate-400">
+                Close
+              </button>
+            </div>
           </div>
         </div>
-
-      </div>
-
+      )}
     </div>
-
   );
 };
 

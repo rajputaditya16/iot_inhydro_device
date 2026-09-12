@@ -6,6 +6,8 @@ const colorSchemes = {
   moisture: { stroke: '#3b82f6', fill: '#3b82f6', gradient: ['#3b82f6', '#3b82f600'] },
   ec: { stroke: '#a855f7', fill: '#a855f7', gradient: ['#a855f7', '#a855f700'] },
   ph: { stroke: '#22c55e', fill: '#22c55e', gradient: ['#22c55e', '#22c55e00'] },
+  co2: { stroke: '#60bf71', fill: '#60bf71', gradient: ['#60bf71', '#60bf7100'] },
+  emerald: { stroke: '#60bf71', fill: '#60bf71', gradient: ['#60bf71', '#60bf7100'] },
 };
 
 const CustomTooltip = ({ active, payload, label }) => {
@@ -28,6 +30,7 @@ const areEqual = (prevProps, nextProps) => {
   if (prevProps.type !== nextProps.type) return false;
   if (prevProps.title !== nextProps.title) return false;
   if (prevProps.unit !== nextProps.unit) return false;
+  if (prevProps.color !== nextProps.color) return false;
   if (prevProps.data === nextProps.data) return true;
   if (!Array.isArray(prevProps.data) || !Array.isArray(nextProps.data)) return false;
   if (prevProps.data.length !== nextProps.data.length) return false;
@@ -38,15 +41,17 @@ const areEqual = (prevProps, nextProps) => {
   return prevLast?.time === nextLast?.time && prevLast?.value === nextLast?.value && prevLast?.room1Value === nextLast?.room1Value;
 };
 
-const LiveChart = memo(({ data = [], type = 'temperature', title, unit, subtitle = 'Last 24 hours' }) => {
+const LiveChart = memo(({ data = [], type = 'temperature', title, unit, subtitle = 'Last 24 hours', color }) => {
   const uniqueId = useId();
-  const colors = colorSchemes[type] || colorSchemes.temperature;
+  const colors = color
+    ? { stroke: color, fill: color, gradient: [color, `${color}00`] }
+    : (colorSchemes[type] || colorSchemes.temperature);
   const gradientId = `gradient-${type}-${uniqueId.replace(/:/g, '')}`;
   const safeData = Array.isArray(data) ? data : [];
   const isBoth = safeData && safeData[0]?.isBoth;
 
   return (
-    <div className="rounded-2xl border border-slate-700/50 bg-slate-800/50 p-4 backdrop-blur-sm">
+    <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-sm">
       <div className="mb-3 flex items-center justify-between">
         <div>
           <h4 className="text-sm font-semibold text-white">{title}</h4>

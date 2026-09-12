@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, memo, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Thermometer,
   Droplets,
@@ -12,25 +12,127 @@ import {
   Cpu,
   ChevronDown,
   Activity,
+  Layers,
+  LayoutGrid,
+  ChevronRight,
+  ArrowLeft,
+  ArrowUpRight,
+  ShieldCheck,
+  MapPin,
+  Maximize2,
+  X,
+  TrendingUp,
+  AlertTriangle,
+  Sun,
+  Fan,
 } from 'lucide-react';
 import LiveChart from '../../components/LiveChart';
 import { SkeletonCard } from '../../components/Skeleton';
 import { useThrottledStream } from '../../hooks/useThrottledStream';
 import { createMqttClient } from '../../utils/mqtt';
 import {
-  getStatusBg,
-  getStatusDot,
   getMetricStatus,
   getMetricColor,
   formatTimestamp,
 } from '../../utils/helpers';
 
+// ── Cold Storage Constants & Probe Naming ────────────────────────────────────
+const DEFAULT_ROOM_NAMES = {
+  S1: 'Cold Room 1',
+  S2: 'Cold Room 2',
+  S3: 'Cold Room 3',
+  S4: 'Cold Room 4',
+  S5: 'Cold Room 5',
+  S6: 'Cold Room 6',
+  S7: 'Greenhouse',
+};
+
+const DEFAULT_PROBE_PORTS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'];
+
+const getProbeName = (sensorId, deviceMeta, customNames = {}) => {
+  if (!sensorId) return 'Cold Room';
+  const upper = String(sensorId).toUpperCase();
+  const custom =
+    customNames?.[upper] ||
+    customNames?.[sensorId] ||
+    deviceMeta?.sensor_names?.[sensorId] ||
+    deviceMeta?.sensor_names?.[upper] ||
+    deviceMeta?.sensorNames?.[sensorId] ||
+    deviceMeta?.sensorNames?.[upper];
+  if (custom) return custom;
+  return DEFAULT_ROOM_NAMES[upper] || `Cold Room ${upper.replace('S', '')}`;
+};
+
+// ── Smooth SVG Sparkline Component (Theme-Aware) ─────────────────────────────
+const SvgSparkline = memo(({ data = [], color = '#60bf71', height = 36 }) => {
+  if (!data || data.length < 2) {
+    return (
+      <div className="h-9 w-full rounded-lg bg-slate-950/30 flex items-center justify-center border border-slate-800/40 text-[10px] text-slate-500 italic">
+        Awaiting live trend...
+      </div>
+    );
+  }
+
+  const values = data.map((d) => (typeof d === 'object' && d !== null ? d.value ?? 0 : Number(d) || 0));
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max === min ? 1 : max - min;
+  const width = 220;
+  const padding = 3;
+  const usableHeight = height - padding * 2;
+
+  const points = values.map((val, idx) => {
+    const x = (idx / (values.length - 1)) * width;
+    const y = height - padding - ((val - min) / range) * usableHeight;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+
+  const polylinePoints = points.join(' ');
+  const areaPoints = `0,${height} ${polylinePoints} ${width},${height}`;
+  const lastPoint = points[points.length - 1]?.split(',') || [];
+
+  return (
+    <div className="relative w-full overflow-hidden rounded-lg bg-slate-950/50 border border-slate-800/50 py-1 px-1">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full h-9 overflow-visible"
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <linearGradient id={`grad-spark-${color.replace(/[^a-zA-Z0-9]/g, '')}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+        <polygon points={areaPoints} fill={`url(#grad-spark-${color.replace(/[^a-zA-Z0-9]/g, '')})`} />
+        <polyline
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={polylinePoints}
+        />
+        {lastPoint.length === 2 && (
+          <circle
+            cx={lastPoint[0]}
+            cy={lastPoint[1]}
+            r="3"
+            fill={color}
+            className="animate-pulse"
+          />
+        )}
+      </svg>
+    </div>
+  );
+});
+
 // ── Memoized Atomic Metric Card (P2 Optimization) ────────
 const BigMetric = memo(
   ({ label, value, unit, icon: Icon, type }) => {
-    const safeValue = Number.isFinite(value) ? value : 0;
-    const status = getMetricStatus(type, safeValue);
-    const color = getMetricColor(status);
+    const safeValue = Number.isFinite(value) ? value : null;
+    const status = safeValue != null ? getMetricStatus(type, safeValue) : 'normal';
+    const color = safeValue != null ? getMetricColor(status) : 'text-slate-400';
 
     const bgColorMap = {
       'text-emerald-400': 'bg-emerald-500/10 border-emerald-500/20',
@@ -41,7 +143,7 @@ const BigMetric = memo(
 
     return (
       <div
-        className={`rounded-2xl border p-4 ${bgColorMap[color] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm transition-colors duration-200`}
+        className={`rounded-2xl border p-4 ${bgColorMap[color] || 'bg-slate-900/60 border-slate-800/80'} backdrop-blur-sm transition-colors duration-200`}
       >
         <div className="flex items-center gap-2.5">
           <div className={`rounded-lg p-1.5 ${color} bg-white/5`}>
@@ -50,15 +152,17 @@ const BigMetric = memo(
           <span className="text-sm font-medium text-slate-400">{label}</span>
         </div>
         <div className="mt-3 flex items-baseline gap-1.5">
-          <span className={`text-2xl font-bold tabular-nums ${color}`}>
-            {safeValue === 0 ? '--' : type === 'ec' ? safeValue : safeValue.toFixed(1)}
+          <span className={`text-2xl font-bold tabular-nums ${safeValue != null ? color : 'text-slate-400'}`}>
+            {safeValue == null ? '--' : type === 'ec' ? safeValue : safeValue.toFixed(1)}
           </span>
           <span className="text-sm text-slate-500">{unit}</span>
         </div>
         <div className="mt-1.5 flex items-center gap-1.5">
           <div
             className={`h-1.5 w-1.5 rounded-full ${
-              status === 'normal'
+              safeValue == null
+                ? 'bg-slate-500'
+                : status === 'normal'
                 ? 'bg-emerald-400'
                 : status === 'warning'
                 ? 'bg-yellow-400'
@@ -67,7 +171,7 @@ const BigMetric = memo(
                 : 'bg-slate-500'
             }`}
           />
-          <span className="text-xs text-slate-500 capitalize">{status}</span>
+          <span className="text-xs text-slate-500 capitalize">{safeValue != null ? status : 'Standby'}</span>
         </div>
       </div>
     );
@@ -94,7 +198,7 @@ const EcMetricCard = memo(
 
     return (
       <div
-        className={`rounded-2xl border p-4 ${bgMap[ecColor] || 'bg-slate-800/50 border-slate-700/50'} backdrop-blur-sm transition-colors duration-200`}
+        className={`rounded-2xl border p-4 ${bgMap[ecColor] || 'bg-slate-900/60 border-slate-800/80'} backdrop-blur-sm transition-colors duration-200`}
       >
         <div className="flex items-center gap-2.5">
           <div className={`rounded-lg p-1.5 ${ecColor} bg-white/5`}>
@@ -115,15 +219,14 @@ const EcMetricCard = memo(
         </div>
         <div className="mt-1.5 flex items-center gap-1.5">
           <div
-            className={`h-1.5 w-1.5 rounded-full ${
-              ecStatus === 'normal'
-                ? 'bg-emerald-400'
-                : ecStatus === 'warning'
+            className={`h-1.5 w-1.5 rounded-full ${ecStatus === 'normal'
+              ? 'bg-emerald-400'
+              : ecStatus === 'warning'
                 ? 'bg-yellow-400'
                 : ecStatus === 'critical'
-                ? 'bg-red-400'
-                : 'bg-slate-500'
-            }`}
+                  ? 'bg-red-400'
+                  : 'bg-slate-500'
+              }`}
           />
           <span className="text-xs text-slate-500 capitalize">{ecStatus}</span>
         </div>
@@ -133,72 +236,211 @@ const EcMetricCard = memo(
   (prev, next) => prev.ecVal === next.ecVal && prev.label === next.label
 );
 
-// ── Memoized Cold Room Probe Card (P2 Optimization) ──────────────────────────
+// ── Upgraded Cold Room Probe Card (Theme-Consistent & Hardware-Aware) ─────────────
 const ColdRoomProbeCard = memo(
-  ({ sensorId, data, history, onSelect }) => {
+  ({
+    sensorId,
+    roomName,
+    data,
+    history,
+    setpoints,
+    relays,
+    hasAlarm,
+    isDeviceOnline = false,
+    onSelect,
+    onFocus,
+  }) => {
+    const isOnline = Boolean(isDeviceOnline && (data?.status === 'OK' || data?.status === 'online'));
+    const tVal = data?.t != null && data.t > 0 ? Number(data.t).toFixed(1) : '--';
+    const hVal = data?.h != null && data.h > 0 ? Number(data.h).toFixed(1) : '--';
+    const co2Val = data?.co2 != null && Number(data.co2) > 0 ? Number(data.co2).toFixed(0) : null;
+
+    // Calculate min and max from history
+    const tHistoryValues = (history?.t || [])
+      .map((d) => (typeof d === 'object' && d !== null ? d.value : Number(d)))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    const minT = tHistoryValues.length > 0 ? Math.min(...tHistoryValues).toFixed(1) : tVal;
+    const maxT = tHistoryValues.length > 0 ? Math.max(...tHistoryValues).toFixed(1) : tVal;
+
+    const isS7 = sensorId === 'S7';
+    const coolingLabel = isS7 ? 'Fanpad' : 'AC';
+
     return (
-      <div
-        onClick={() => onSelect(sensorId)}
-        className="rounded-2xl border border-slate-700 bg-slate-800/40 p-4 backdrop-blur-md cursor-pointer hover:border-blue-500/50 transition-all hover:bg-slate-800/60"
+      <motion.div
+        whileHover={{ y: -3, transition: { duration: 0.2 } }}
+        className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border p-4 sm:p-5 backdrop-blur-md transition-all duration-300 cursor-pointer ${
+          hasAlarm
+            ? 'border-rose-500/80 bg-rose-950/20 hover:border-rose-400 hover:bg-rose-950/30 shadow-lg shadow-rose-500/10'
+            : 'border-slate-800/80 bg-slate-900/60 hover:border-emerald-500/40 hover:bg-slate-900/90 hover:shadow-xl hover:shadow-emerald-500/5'
+        }`}
+        onClick={() => (onFocus ? onFocus(sensorId) : onSelect(sensorId))}
       >
-        <div className="mb-3 flex items-center justify-between">
-          <span className="rounded-lg bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-400">
-            {`Cold Room ${sensorId.toUpperCase().replace('S', '')}`}
-          </span>
+        {/* Top Glow Accent on Hover */}
+        <div
+          className={`absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent ${
+            hasAlarm ? 'via-rose-500/80' : 'via-emerald-500/0 group-hover:via-emerald-500/60'
+          } to-transparent transition-all duration-500`}
+        />
+
+        {/* Card Header: Port Badge, Room Name, Status */}
+        <div className="mb-3.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="shrink-0 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] font-mono font-bold text-emerald-400">
+              {sensorId}
+            </span>
+            <div className="min-w-0">
+              <h4 className="text-sm font-semibold text-white group-hover:text-emerald-300 transition-colors truncate">
+                {roomName || `Cold Room ${sensorId.toUpperCase().replace('S', '')}`}
+              </h4>
+              {setpoints?.stage_name && (
+                <p className="text-[10px] text-slate-400 font-medium truncate">
+                  {setpoints.stage_name} {setpoints.slot_id ? `• Slot ${setpoints.slot_id}` : ''}
+                </p>
+              )}
+            </div>
+          </div>
           <span
-            className={`h-1.5 w-1.5 rounded-full ${
-              data?.status === 'OK' || data?.t != null ? 'bg-emerald-500' : 'bg-red-500'
+            className={`shrink-0 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+              isOnline
+                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                : 'bg-slate-800 text-slate-400 border border-slate-700'
             }`}
-          />
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                isOnline ? 'bg-emerald-400 animate-pulse-dot' : 'bg-slate-500'
+              }`}
+            />
+            {isOnline ? 'Live' : 'Standby'}
+          </span>
         </div>
 
-        <div className="space-y-4">
-          <div className="flex justify-between items-end">
-            <div className="space-y-1">
-              <p className="text-[10px] text-slate-500 flex items-center gap-1">
-                <Thermometer className="h-3 w-3 " /> Temperature
-              </p>
-              <p className="text-xl font-bold text-white tabular-nums">
-                {data?.t != null ? data.t.toFixed(1) : '--'}
-                <span className="text-xs font-normal text-slate-500 ml-0.5">°C</span>
-              </p>
+        {/* Main Sensor KPI Grid */}
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+            {/* Temperature Tile */}
+            <div className="rounded-xl bg-slate-950/50 border border-slate-800/60 p-3 transition-colors group-hover:border-slate-800">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[10px] font-medium text-slate-400 flex items-center gap-1">
+                  <Thermometer className="h-3 w-3 text-emerald-400" /> Temp
+                </p>
+                {setpoints?.target_temp != null && (
+                  <span className="text-[9px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
+                    Set: {setpoints.target_temp}°
+                  </span>
+                )}
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl sm:text-2xl font-bold tabular-nums text-white group-hover:text-emerald-400 transition-colors">
+                  {tVal}
+                </span>
+                <span className="text-xs font-normal text-slate-500">°C</span>
+              </div>
             </div>
-            <div className="space-y-1 text-right">
-              <p className="text-[10px] text-slate-500 flex items-center gap-1 justify-end">
-                <Droplets className="h-3 w-3 " /> Humidity
-              </p>
-              <p className="text-xl font-bold text-blue-400 tabular-nums">
-                {data?.h != null ? data.h.toFixed(1) : '--'}
-                <span className="text-xs font-normal text-slate-500 ml-0.5">%</span>
-              </p>
+
+            {/* Humidity Tile */}
+            <div className="rounded-xl bg-slate-950/50 border border-slate-800/60 p-3 transition-colors group-hover:border-slate-800">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[10px] font-medium text-slate-400 flex items-center gap-1">
+                  <Droplets className="h-3 w-3 text-emerald-400" /> Humidity
+                </p>
+                {setpoints?.target_humi != null && (
+                  <span className="text-[9px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
+                    Set: {setpoints.target_humi}%
+                  </span>
+                )}
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl sm:text-2xl font-bold tabular-nums text-white group-hover:text-emerald-300 transition-colors">
+                  {hVal}
+                </span>
+                <span className="text-xs font-normal text-slate-500">%</span>
+              </div>
             </div>
           </div>
 
-          {/* Real-time Sparkline */}
-          <div className="h-12 w-full bg-slate-900/40 rounded-lg flex items-end gap-1 px-2 py-1.5 border border-slate-700/30">
-            {(history?.t || [0]).map((val, i) => {
-              const min = 10,
-                max = 45;
-              const h = Math.min(100, Math.max(10, ((val - min) / (max - min)) * 100));
-              return (
-                <div
-                  key={i}
-                  className={`w-full rounded-t transition-all duration-300 ${
-                    val > 30 ? 'bg-red-400' : 'bg-blue-400'
-                  }`}
-                  style={{ height: `${h}%` }}
-                />
-              );
-            })}
+          {/* Chamber CO2 (if present) */}
+          {co2Val != null && (
+            <div className="flex items-center justify-between rounded-xl bg-slate-950/60 border border-slate-800/80 px-3 py-1.5 text-xs">
+              <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1.5">
+                <Activity className="h-3 w-3 text-emerald-400" /> Chamber CO2
+              </span>
+              <span className="font-mono font-bold text-emerald-400">
+                {co2Val} <span className="text-[10px] font-normal text-slate-500">ppm</span>
+              </span>
+            </div>
+          )}
+
+          {/* Hardware Relays Mini Status Bar */}
+          {relays && (
+            <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+              <div
+                className={`rounded-lg px-2 py-1 text-[10px] font-semibold text-center border transition-all ${
+                  relays.cooling
+                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                    : 'bg-slate-950/40 border-slate-800/60 text-slate-500'
+                }`}
+              >
+                {coolingLabel}: <strong className={relays.cooling ? 'text-emerald-400' : 'text-slate-400'}>{relays.cooling ? 'ON' : 'OFF'}</strong>
+              </div>
+              <div
+                className={`rounded-lg px-2 py-1 text-[10px] font-semibold text-center border transition-all ${
+                  relays.humi
+                    ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
+                    : 'bg-slate-950/40 border-slate-800/60 text-slate-500'
+                }`}
+              >
+                Humi: <strong className={relays.humi ? 'text-sky-400' : 'text-slate-400'}>{relays.humi ? 'ON' : 'OFF'}</strong>
+              </div>
+              <div
+                className={`rounded-lg px-2 py-1 text-[10px] font-semibold text-center border transition-all ${
+                  relays.light
+                    ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                    : 'bg-slate-950/40 border-slate-800/60 text-slate-500'
+                }`}
+              >
+                Light: <strong className={relays.light ? 'text-amber-400' : 'text-slate-400'}>{relays.light ? 'ON' : 'OFF'}</strong>
+              </div>
+            </div>
+          )}
+
+          {/* SVG Trend Sparkline */}
+          <div className="pt-1">
+            <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
+              <span>Telemetry Sparkline</span>
+              {minT !== '--' && minT !== maxT && (
+                <span className="font-mono text-slate-400">
+                  {minT}° - {maxT}°C
+                </span>
+              )}
+            </div>
+            <SvgSparkline data={history?.t || []} color={hasAlarm ? '#f43f5e' : '#60bf71'} height={36} />
           </div>
         </div>
-      </div>
+
+        {/* Card Footer: Action Bar */}
+        <div className="mt-3.5 flex items-center justify-between border-t border-slate-800/60 pt-3 text-[11px] text-slate-400">
+          <span className="group-hover:text-emerald-400 transition-colors flex items-center gap-1 font-medium">
+            Inspect Analytics & Charts
+          </span>
+          <ChevronRight className="h-4 w-4 text-slate-500 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all" />
+        </div>
+      </motion.div>
     );
   },
   (prev, next) =>
+    prev.isDeviceOnline === next.isDeviceOnline &&
     prev.data?.t === next.data?.t &&
     prev.data?.h === next.data?.h &&
+    prev.data?.co2 === next.data?.co2 &&
     prev.data?.status === next.data?.status &&
+    prev.roomName === next.roomName &&
+    prev.hasAlarm === next.hasAlarm &&
+    prev.relays?.cooling === next.relays?.cooling &&
+    prev.relays?.humi === next.relays?.humi &&
+    prev.relays?.light === next.relays?.light &&
+    prev.setpoints?.target_temp === next.setpoints?.target_temp &&
+    prev.setpoints?.target_humi === next.setpoints?.target_humi &&
     (prev.history?.t?.length || 0) === (next.history?.t?.length || 0)
 );
 
@@ -230,9 +472,14 @@ const LiveMonitoring = () => {
 
   // ── Multi-Sensor Live States ────────────────────────────────────────────────
   const [multiSensorData, setMultiSensorData] = useState({});
-  const [sensorHistory, setSensorHistory] = useState({}); // { S1: [t1, t2...], S2: [...] }
+  const [sensorHistory, setSensorHistory] = useState({}); // { S1: { t: [...], h: [...], co2: [...] } }
+  const [multiSensorSetpoints, setMultiSensorSetpoints] = useState({});
+  const [multiSensorRelays, setMultiSensorRelays] = useState({});
+  const [activeWarnings, setActiveWarnings] = useState([]);
+  const [customSensorNames, setCustomSensorNames] = useState({});
   const [sortBy, setSortBy] = useState('id'); // 'id', 'temp', 'humi'
   const [selectedSensor, setSelectedSensor] = useState(null);
+  const [activeMultiTab, setActiveMultiTab] = useState('all'); // 'all' or 'S1'..'S7'
 
   // ── Office Control Dual Room Live States ────────────────────────────────────
   const [officeControlData, setOfficeControlData] = useState({ 1: null, 2: null, 3: null });
@@ -287,24 +534,112 @@ const LiveMonitoring = () => {
     return allDevices.find((d) => d._id === selectedDeviceId || d.id === selectedDeviceId);
   }, [allDevices, selectedDeviceId]);
 
+  // ── Device Type Classification (Mutually Exclusive Clean Branches) ─────────
+  const isMultiSensorDevice = useMemo(() => {
+    if (!deviceMeta) return false;
+    const type = String(deviceMeta.deviceType || '').toLowerCase();
+    const name = String(deviceMeta.name || '').toLowerCase();
+    const mqttId = String(deviceMeta.mqttId || '').toLowerCase();
+    return (
+      type === 'multi_sensor' ||
+      type === 'almora' ||
+      type === 'almora2' ||
+      type === 'cold_storage' ||
+      type === 'cold_room' ||
+      type === 'coldroom' ||
+      name.includes('almora') ||
+      name.includes('cold') ||
+      name.includes('storage') ||
+      mqttId.includes('almora') ||
+      mqttId === 'control122'
+    );
+  }, [deviceMeta]);
+
+  const isOfficeControlDevice = deviceMeta?.deviceType === 'office_control';
+  const isControllingDevice = deviceMeta?.deviceType === 'controlling';
+  const isStandardDevice = !isMultiSensorDevice && !isOfficeControlDevice && !isControllingDevice;
+
+  // ── Real-time freshness ticker (ticks every 5 seconds to evaluate device timeout) ──
+  const [nowTime, setNowTime] = useState(Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowTime(Date.now());
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   // ── Determine if the currently selected device is Online or Offline ─────────
   const isDeviceOnline = useMemo(() => {
     if (deviceMeta?.status === 'blocked') return false;
-    // 1. If we have liveDevice with a lastUpdated timestamp, check 5 min threshold
+
+    // Telemetry freshness window: 2 minutes (120,000 ms) with clock tolerance
+    const FRESHNESS_THRESHOLD_MS = 2 * 60 * 1000;
+
+    // 1. If we have liveDevice with a lastUpdated timestamp
     if (liveDevice?.lastUpdated) {
-      const diffMs = Date.now() - new Date(liveDevice.lastUpdated).getTime();
-      return diffMs < 5 * 60 * 1000 && (liveDevice.status === 'online' || !liveDevice.status);
+      const ts = new Date(typeof liveDevice.lastUpdated === 'string' && liveDevice.lastUpdated.includes(' ') && !liveDevice.lastUpdated.includes('T') ? liveDevice.lastUpdated.replace(' ', 'T') : liveDevice.lastUpdated).getTime();
+      if (!isNaN(ts)) {
+        const diffMs = nowTime - ts;
+        return diffMs < FRESHNESS_THRESHOLD_MS && diffMs > -2 * 60 * 1000 && liveDevice.status === 'online';
+      }
     }
-    // 2. If liveDevice has status directly
-    if (liveDevice?.status) {
-      return liveDevice.status === 'online';
+
+    // 2. Fallback: check deviceMeta.lastUpdated
+    if (deviceMeta?.lastUpdated) {
+      const ts = new Date(typeof deviceMeta.lastUpdated === 'string' && deviceMeta.lastUpdated.includes(' ') && !deviceMeta.lastUpdated.includes('T') ? deviceMeta.lastUpdated.replace(' ', 'T') : deviceMeta.lastUpdated).getTime();
+      if (!isNaN(ts)) {
+        const diffMs = nowTime - ts;
+        return diffMs < FRESHNESS_THRESHOLD_MS && diffMs > -2 * 60 * 1000 && deviceMeta.status === 'online';
+      }
     }
-    // 3. Fallback to deviceMeta status from DB
-    if (deviceMeta?.status) {
-      return deviceMeta.status === 'online';
-    }
+
     return false;
-  }, [liveDevice, deviceMeta]);
+  }, [nowTime, liveDevice, deviceMeta]);
+
+  // ── Multi-Sensor Facility Aggregates (Summary KPI Cards) ───────────────────
+  const multiSensorSummary = useMemo(() => {
+    let tempSum = 0, tempCount = 0, minT = Infinity, maxT = -Infinity;
+    let humiSum = 0, humiCount = 0, minH = Infinity, maxH = -Infinity;
+    let co2Val = null;
+    let online = 0;
+
+    DEFAULT_PROBE_PORTS.forEach((sKey) => {
+      const probe = multiSensorData[sKey];
+      if (!probe) return;
+      const isProbeOnline = isDeviceOnline && (probe.status === 'OK' || probe.status === 'online');
+      if (isProbeOnline) online++;
+
+      if (probe.t != null && Number(probe.t) > 0) {
+        const t = Number(probe.t);
+        tempSum += t;
+        tempCount++;
+        if (t < minT) minT = t;
+        if (t > maxT) maxT = t;
+      }
+      if (probe.h != null && Number(probe.h) > 0) {
+        const h = Number(probe.h);
+        humiSum += h;
+        humiCount++;
+        if (h < minH) minH = h;
+        if (h > maxH) maxH = h;
+      }
+      if (probe.co2 != null && Number(probe.co2) > 0) {
+        co2Val = probe.co2;
+      }
+    });
+
+    return {
+      onlineCount: isDeviceOnline ? online : 0,
+      totalProbes: 7,
+      avgTemp: tempCount > 0 ? (tempSum / tempCount).toFixed(1) : '--',
+      minTemp: minT !== Infinity ? minT.toFixed(1) : '--',
+      maxTemp: maxT !== -Infinity ? maxT.toFixed(1) : '--',
+      avgHumi: humiCount > 0 ? (humiSum / humiCount).toFixed(1) : '--',
+      minHumi: minH !== Infinity ? minH.toFixed(1) : '--',
+      maxHumi: maxH !== -Infinity ? maxH.toFixed(1) : '--',
+      co2: co2Val,
+    };
+  }, [multiSensorData, isDeviceOnline]);
 
   // ── Handle device change from dropdown ─────────────────────────────────────
   const handleDeviceChange = (newId) => {
@@ -317,6 +652,13 @@ const LiveMonitoring = () => {
     setChartData({});
     setActiveMetrics({});
     setActiveFields([]);
+    setActiveMultiTab('all');
+    setMultiSensorData({});
+    setSensorHistory({});
+    setMultiSensorSetpoints({});
+    setMultiSensorRelays({});
+    setActiveWarnings([]);
+    setCustomSensorNames({});
     setOfficeControlData({ 1: null, 2: null, 3: null });
     setOfficeControlHistory({
       1: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
@@ -346,7 +688,7 @@ const LiveMonitoring = () => {
     if (!selectedDeviceId) return;
 
     const isOfficeControl = deviceMeta?.deviceType === 'office_control';
-    const isMultiSensor = deviceMeta?.deviceType === 'multi_sensor';
+    const isMultiSensor = deviceMeta?.deviceType === 'multi_sensor' || deviceMeta?.deviceType === 'almora' || deviceMeta?.deviceType === 'almora2' || (deviceMeta?.name && (deviceMeta.name.toLowerCase().includes('almora') || deviceMeta.name.toLowerCase().includes('cold')));
     const isControlling = deviceMeta?.deviceType === 'controlling';
 
     const url = isOfficeControl
@@ -472,7 +814,7 @@ const LiveMonitoring = () => {
           } else if (isAlmoraType) {
             fields = [
               { key: 'field1', label: 'Water Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
-              { key: 'field2', label: 'Soil Moisture', icon: Droplets, unit: '%', type: 'moisture' },
+              { key: 'field2', label: ' Moisture', icon: Droplets, unit: '%', type: 'moisture' },
               { key: 'field3', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
               { key: 'field4', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
               { key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
@@ -506,17 +848,29 @@ const LiveMonitoring = () => {
           return;
         }
 
-        const lastUpdatedTime = new Date(latestFeed.created_at || Date.now());
+        const feedTimestamp = latestFeed.created_at || latestFeed.timestamp || null;
+        const lastUpdatedTime = feedTimestamp ? new Date(typeof feedTimestamp === 'string' && feedTimestamp.includes(' ') && !feedTimestamp.includes('T') ? feedTimestamp.replace(' ', 'T') : feedTimestamp) : new Date(0);
         const diffMs = Date.now() - lastUpdatedTime.getTime();
-        const isOnline = diffMs < 5 * 60 * 1000;
+        const isOnline = Boolean(feedTimestamp && diffMs < 2 * 60 * 1000 && diffMs > -2 * 60 * 1000);
 
         const device = {
           id: selectedDeviceId,
           name: deviceMeta?.name || 'Live Sensor Data',
           location: deviceMeta?.location || 'Private Broker Feed',
           status: isOnline ? 'online' : 'offline',
-          lastUpdated: latestFeed.created_at || new Date().toISOString(),
+          lastUpdated: lastUpdatedTime.getTime() > 0 ? lastUpdatedTime.toISOString() : null,
         };
+
+        setLiveDevice((prev) => {
+          // If prev is already marked online from live streaming and is fresh, preserve it!
+          if (prev && prev.status === 'online' && prev.lastUpdated) {
+            const prevDiff = Date.now() - new Date(prev.lastUpdated).getTime();
+            if (prevDiff < 2 * 60 * 1000 && prevDiff > -2 * 60 * 1000) {
+              return prev;
+            }
+          }
+          return device;
+        });
 
         const currentMetrics = {};
         fields.forEach((f) => {
@@ -526,7 +880,7 @@ const LiveMonitoring = () => {
         const newChartData = {};
         fields.forEach((f) => {
           newChartData[f.key] = feeds.map((feed) => ({
-            time: new Date(feed.created_at || Date.now()).toLocaleTimeString('en-US', {
+            time: new Date(feed.created_at || feed.timestamp || Date.now()).toLocaleTimeString('en-US', {
               hour: '2-digit',
               minute: '2-digit',
             }),
@@ -542,9 +896,125 @@ const LiveMonitoring = () => {
         setHasNewData(changed);
         if (changed) {
           previousMetricsRef.current = currentMetrics;
-          setLiveDevice(device);
           setActiveMetrics(currentMetrics);
           setChartData(newChartData);
+
+          if (isMultiSensor && latestFeed) {
+            const initMulti = {};
+            const multiSource = latestFeed.multi_sensor_data || {};
+            for (let i = 1; i <= 7; i++) {
+              const sKey = `S${i}`;
+              const probe = multiSource[sKey];
+              if (probe && (Number(probe.t) > 0 || Number(probe.h) > 0)) {
+                initMulti[sKey] = {
+                  t: Number(probe.t) || 0,
+                  h: Number(probe.h) || 0,
+                  co2: probe.co2 != null ? Number(probe.co2) : null,
+                  status: isOnline ? (probe.status || 'OK') : 'OFFLINE',
+                };
+              } else {
+                const fVal = latestFeed[`field${i}`];
+                if (fVal !== undefined && fVal !== null && fVal !== '') {
+                  const t = parseFloat(fVal) || 0;
+                  if (t > 0) {
+                    initMulti[sKey] = { t, h: 60.0, status: isOnline ? 'OK' : 'OFFLINE' };
+                  }
+                }
+              }
+            }
+            if (Object.keys(initMulti).length > 0) {
+              setMultiSensorData((prev) => ({ ...initMulti, ...prev }));
+            }
+
+            // Pre-populate sensorHistory so sparklines and charts show real data immediately
+            if (feeds && feeds.length > 0) {
+              const initHist = {};
+              for (let i = 1; i <= 7; i++) {
+                const sKey = `S${i}`;
+                const fKey = `field${i}`;
+                const tPoints = [];
+                const hPoints = [];
+                const co2Points = [];
+
+                feeds.forEach((feed) => {
+                  const time = new Date(feed.created_at || Date.now()).toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  });
+
+                  let t = null;
+                  let h = null;
+                  let co2 = null;
+
+                  if (feed.multi_sensor_data && feed.multi_sensor_data[sKey]) {
+                    const p = feed.multi_sensor_data[sKey];
+                    if (p.t != null && Number(p.t) > 0) t = Number(p.t);
+                    if (p.h != null && Number(p.h) > 0) h = Number(p.h);
+                    if (p.co2 != null && Number(p.co2) > 0) co2 = Number(p.co2);
+                  } else if (feed[fKey] !== undefined && feed[fKey] !== null && feed[fKey] !== '') {
+                    const val = parseFloat(feed[fKey]);
+                    if (val > 0) {
+                      t = val;
+                      h = 60.0;
+                    }
+                  }
+
+                  if (t !== null) tPoints.push({ time, value: t });
+                  if (h !== null) hPoints.push({ time, value: h });
+                  if (co2 !== null) co2Points.push({ time, value: co2 });
+                });
+
+                if (tPoints.length > 0 || hPoints.length > 0) {
+                  initHist[sKey] = {
+                    t: tPoints.slice(-24),
+                    h: hPoints.slice(-24),
+                    co2: co2Points.slice(-24),
+                  };
+                }
+              }
+              if (Object.keys(initHist).length > 0) {
+                setSensorHistory((prev) => ({ ...initHist, ...prev }));
+              }
+            }
+
+            // Extract initial relay states if present in latestFeed
+            const rawRelays = latestFeed.relay_states || latestFeed.relays;
+            if (rawRelays && typeof rawRelays === 'object') {
+              const mappedRelays = {};
+              for (let i = 1; i <= 7; i++) {
+                const sKey = `S${i}`;
+                const idx = i - 1;
+                const chCooling = String((idx * 3) + 1);
+                const chHumi = String((idx * 3) + 2);
+                const chLight = String((idx * 3) + 3);
+                mappedRelays[sKey] = {
+                  cooling: Boolean(rawRelays[chCooling] ?? rawRelays[Number(chCooling)]),
+                  humi: Boolean(rawRelays[chHumi] ?? rawRelays[Number(chHumi)]),
+                  light: Boolean(rawRelays[chLight] ?? rawRelays[Number(chLight)]),
+                };
+              }
+              setMultiSensorRelays((prev) => ({ ...prev, ...mappedRelays }));
+            }
+
+            // Extract initial setpoints if present in latestFeed
+            const rawSp = latestFeed.sensor_setpoints || latestFeed.setpoints;
+            if (rawSp && typeof rawSp === 'object') {
+              const mappedSp = {};
+              Object.entries(rawSp).forEach(([k, sp]) => {
+                const sKey = k.toUpperCase().startsWith('S') ? k.toUpperCase() : `S${k}`;
+                mappedSp[sKey] = sp;
+              });
+              setMultiSensorSetpoints((prev) => ({ ...prev, ...mappedSp }));
+            }
+
+            // Extract active warnings
+            if (Array.isArray(latestFeed.active_warnings)) {
+              setActiveWarnings(latestFeed.active_warnings);
+            }
+            if (latestFeed.system_config?.sensor_names) {
+              setCustomSensorNames(latestFeed.system_config.sensor_names);
+            }
+          }
         }
 
         setLoading(false);
@@ -561,8 +1031,6 @@ const LiveMonitoring = () => {
     if (selectedDeviceId) {
       setLoading(true);
       fetchLiveData();
-      const interval = setInterval(fetchLiveData, 15000);
-      return () => clearInterval(interval);
     }
   }, [fetchLiveData, selectedDeviceId]);
 
@@ -596,63 +1064,214 @@ const LiveMonitoring = () => {
     (packets) => {
       if (!packets || packets.length === 0) return;
 
-      const isMultiSensor = deviceMeta?.deviceType === 'multi_sensor';
+      const isMultiSensor =
+        deviceMeta?.deviceType === 'multi_sensor' ||
+        deviceMeta?.deviceType === 'almora' ||
+        deviceMeta?.deviceType === 'almora2' ||
+        (deviceMeta?.name &&
+          (deviceMeta.name.toLowerCase().includes('almora') ||
+            deviceMeta.name.toLowerCase().includes('cold')));
       const isOfficeControl = deviceMeta?.deviceType === 'office_control';
       const isControlling = deviceMeta?.deviceType === 'controlling';
+
+      let latestTelemetryTimestamp = null;
+      let hasMatchingTelemetry = false;
+
+      const parsePacketTime = (rawTs) => {
+        if (!rawTs) return null;
+        if (rawTs instanceof Date) return isNaN(rawTs.getTime()) ? null : rawTs;
+        if (typeof rawTs === 'string') {
+          const isoStr = rawTs.includes(' ') && !rawTs.includes('T') ? rawTs.replace(' ', 'T') : rawTs;
+          const d = new Date(isoStr);
+          if (!isNaN(d.getTime())) return d;
+        }
+        const d = new Date(rawTs);
+        return isNaN(d.getTime()) ? null : d;
+      };
 
       // Iterate through EVERY packet in the batch so no room or probe is skipped
       packets.forEach((packet) => {
         if (!packet || !packet.data) return;
 
-        const payload = packet.data;
+        // Verify that this packet belongs to the currently selected device or candidate identifiers
+        const packetMqttId = String(packet.mqttId || '').toLowerCase();
+        const packetDevId = String(packet.deviceId || '').toLowerCase();
         const topic = String(packet.topic || '').toLowerCase();
-        const timeStr = packet.timestamp
-          ? new Date(packet.timestamp).toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            })
+
+        const matchesDevice =
+          (selectedDeviceId && packetDevId === String(selectedDeviceId).toLowerCase()) ||
+          candidateIdentifiers.some(
+            (cid) =>
+              cid &&
+              (packetMqttId === String(cid).toLowerCase() ||
+                packetDevId === String(cid).toLowerCase() ||
+                topic.includes(String(cid).toLowerCase()))
+          );
+
+        if (!matchesDevice && candidateIdentifiers.length > 0) {
+          return; // Skip packets belonging to other devices
+        }
+
+        const payload = packet.data;
+        const rawPayload = payload.data || payload;
+
+        // Parse genuine packet timestamp
+        const rawTs =
+          rawPayload.timestamp ||
+          rawPayload.created_at ||
+          rawPayload.time ||
+          payload.timestamp ||
+          payload.created_at ||
+          payload.time ||
+          (packet.isRetain ? null : packet.timestamp);
+
+        const packetDate = parsePacketTime(rawTs);
+        const timeStr = packetDate
+          ? packetDate.toLocaleTimeString('en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          })
           : new Date().toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            });
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          });
 
         if (isMultiSensor) {
+          // 1. Extract Relay States (24 relays total, 3 channels per cold storage room)
+          const rawRelays = rawPayload.relay_states || rawPayload.relays;
+          if (rawRelays && typeof rawRelays === 'object') {
+            const mappedRelays = {};
+            for (let i = 1; i <= 7; i++) {
+              const sKey = `S${i}`;
+              const idx = i - 1;
+              const chCooling = String((idx * 3) + 1);
+              const chHumi = String((idx * 3) + 2);
+              const chLight = String((idx * 3) + 3);
+              mappedRelays[sKey] = {
+                cooling: Boolean(rawRelays[chCooling] ?? rawRelays[Number(chCooling)]),
+                humi: Boolean(rawRelays[chHumi] ?? rawRelays[Number(chHumi)]),
+                light: Boolean(rawRelays[chLight] ?? rawRelays[Number(chLight)]),
+              };
+            }
+            setMultiSensorRelays((prev) => ({ ...prev, ...mappedRelays }));
+          }
+
+          // 2. Extract Active Warnings / Alarms
+          if (Array.isArray(rawPayload.active_warnings)) {
+            setActiveWarnings(rawPayload.active_warnings);
+          } else if (Array.isArray(rawPayload.warnings)) {
+            setActiveWarnings(rawPayload.warnings);
+          }
+
+          // 3. Extract Sensor Setpoints (target temp, target humi, bands, stage)
+          const rawSp = rawPayload.sensor_setpoints || rawPayload.setpoints;
+          if (rawSp && typeof rawSp === 'object') {
+            const mappedSp = {};
+            Object.entries(rawSp).forEach(([k, sp]) => {
+              const sKey = k.toUpperCase().startsWith('S') ? k.toUpperCase() : `S${k}`;
+              mappedSp[sKey] = sp;
+            });
+            setMultiSensorSetpoints((prev) => ({ ...prev, ...mappedSp }));
+          }
+
+          // 4. Extract Custom Sensor Names
+          if (rawPayload.system_config?.sensor_names) {
+            setCustomSensorNames(rawPayload.system_config.sensor_names);
+          }
+
+          // 5. Normalize Probe Telemetry Data (S1..S7)
           let normalizedSensors = {};
-          if (payload.temp !== undefined || payload.hum !== undefined || payload.humi !== undefined) {
+          const rawSensors = rawPayload.sensor_data || (rawPayload.S1 || rawPayload.s1 || rawPayload.S2 || rawPayload.s2 ? rawPayload : null);
+
+          if (rawSensors && typeof rawSensors === 'object') {
+            Object.entries(rawSensors).forEach(([key, probe]) => {
+              if (!probe || typeof probe !== 'object') return;
+              let sKey = null;
+              if (probe.id !== undefined && probe.id !== null) {
+                sKey = `S${probe.id}`;
+              } else if (key.toUpperCase().startsWith('S') && key.length <= 3) {
+                sKey = key.toUpperCase();
+              } else {
+                const m = key.match(/S(\d+)/i) || key.match(/port(\d+)/i);
+                if (m) sKey = `S${m[1]}`;
+              }
+
+              if (sKey) {
+                const tVal = parseFloat(probe.t ?? probe.temp ?? 0);
+                const hVal = parseFloat(probe.h ?? probe.hum ?? probe.humi ?? probe.humidity ?? 0);
+                const isProbeOk = probe.status === 'OK' || (tVal > 0);
+                normalizedSensors[sKey] = {
+                  t: isNaN(tVal) ? 0 : tVal,
+                  h: isNaN(hVal) ? 0 : hVal,
+                  co2: probe.co2 != null ? parseFloat(probe.co2) : null,
+                  status: isProbeOk ? 'OK' : 'OFFLINE',
+                };
+              }
+            });
+          } else if (rawPayload.temp !== undefined || rawPayload.hum !== undefined || rawPayload.humi !== undefined) {
             normalizedSensors = {
               S1: {
-                t: parseFloat(payload.temp ?? payload.t ?? 0) || 0,
-                h: parseFloat(payload.hum ?? payload.humi ?? payload.h ?? 0) || 0,
+                t: parseFloat(rawPayload.temp ?? rawPayload.t ?? 0) || 0,
+                h: parseFloat(rawPayload.hum ?? rawPayload.humi ?? rawPayload.h ?? 0) || 0,
                 status: 'OK',
               },
             };
           } else {
-            Object.keys(payload).forEach((k) => {
+            Object.keys(rawPayload).forEach((k) => {
               const upperKey = k.toUpperCase();
-              const probe = payload[k] || {};
-              normalizedSensors[upperKey] = {
-                t: parseFloat(probe.t ?? probe.temp ?? 0) || 0,
-                h: parseFloat(probe.h ?? probe.hum ?? probe.humidity ?? probe.humi ?? 0) || 0,
-                status: probe.status || 'OK',
-              };
+              if (upperKey.startsWith('S') && upperKey.length <= 3) {
+                const probe = rawPayload[k] || {};
+                const tVal = parseFloat(probe.t ?? probe.temp ?? 0);
+                const hVal = parseFloat(probe.h ?? probe.hum ?? probe.humidity ?? probe.humi ?? 0);
+                const isProbeOk = probe.status === 'OK' || (tVal > 0);
+                normalizedSensors[upperKey] = {
+                  t: isNaN(tVal) ? 0 : tVal,
+                  h: isNaN(hVal) ? 0 : hVal,
+                  co2: probe.co2 != null ? parseFloat(probe.co2) : null,
+                  status: isProbeOk ? 'OK' : 'OFFLINE',
+                };
+              }
             });
           }
 
-          setMultiSensorData((prev) => ({ ...prev, ...normalizedSensors }));
-          setSensorHistory((prev) => {
-            const newHist = { ...prev };
-            Object.keys(normalizedSensors).forEach((sId) => {
-              const prevState =
-                newHist[sId] && !Array.isArray(newHist[sId]) ? newHist[sId] : { t: [], h: [] };
-              newHist[sId] = {
-                t: [...(prevState.t || []), normalizedSensors[sId].t].slice(-24),
-                h: [...(prevState.h || []), normalizedSensors[sId].h].slice(-24),
-              };
+          if (Object.keys(normalizedSensors).length > 0) {
+            hasMatchingTelemetry = true;
+            if (!packet.isRetain) {
+              latestTelemetryTimestamp = new Date();
+            } else if (packetDate) {
+              if (!latestTelemetryTimestamp || packetDate > latestTelemetryTimestamp) {
+                latestTelemetryTimestamp = packetDate;
+              }
+            }
+
+            setMultiSensorData((prev) => ({ ...prev, ...normalizedSensors }));
+            setSensorHistory((prev) => {
+              const newHist = { ...prev };
+              Object.keys(normalizedSensors).forEach((sId) => {
+                const sensor = normalizedSensors[sId];
+                if (sensor.t > 0 || sensor.h > 0) {
+                  const prevState =
+                    newHist[sId] && typeof newHist[sId] === 'object' ? newHist[sId] : { t: [], h: [], co2: [] };
+                  const prevT = Array.isArray(prevState.t) ? prevState.t : [];
+                  const prevH = Array.isArray(prevState.h) ? prevState.h : [];
+                  const prevCo2 = Array.isArray(prevState.co2) ? prevState.co2 : [];
+
+                  const newT = sensor.t > 0 ? [...prevT, { time: timeStr, value: sensor.t }].slice(-24) : prevT;
+                  const newH = sensor.h > 0 ? [...prevH, { time: timeStr, value: sensor.h }].slice(-24) : prevH;
+                  const newCo2 = sensor.co2 != null && sensor.co2 > 0 ? [...prevCo2, { time: timeStr, value: sensor.co2 }].slice(-24) : prevCo2;
+
+                  newHist[sId] = {
+                    t: newT,
+                    h: newH,
+                    co2: newCo2,
+                  };
+                }
+              });
+              return newHist;
             });
-            return newHist;
-          });
+          }
         } else if (isOfficeControl) {
           const updateSingleRoom = (roomNum, roomPayload) => {
             if (!roomPayload) return;
@@ -723,6 +1342,15 @@ const LiveMonitoring = () => {
               };
             }
 
+            hasMatchingTelemetry = true;
+            if (!packet.isRetain) {
+              latestTelemetryTimestamp = new Date();
+            } else if (packetDate) {
+              if (!latestTelemetryTimestamp || packetDate > latestTelemetryTimestamp) {
+                latestTelemetryTimestamp = packetDate;
+              }
+            }
+
             setOfficeControlData((prev) => ({ ...prev, [roomNum]: normalizedRoomData }));
 
             setOfficeControlHistory((prev) => {
@@ -753,6 +1381,15 @@ const LiveMonitoring = () => {
         } else if (isControlling) {
           const tel = payload.telemetry || payload.sensors || payload || {};
           setControllingData(tel);
+
+          hasMatchingTelemetry = true;
+          if (!packet.isRetain) {
+            latestTelemetryTimestamp = new Date();
+          } else if (packetDate) {
+            if (!latestTelemetryTimestamp || packetDate > latestTelemetryTimestamp) {
+              latestTelemetryTimestamp = packetDate;
+            }
+          }
 
           setControllingHistory((prev) => {
             const nextHist = { ...prev };
@@ -788,66 +1425,66 @@ const LiveMonitoring = () => {
             tel.field1 !== undefined
               ? parseFloat(tel.field1)
               : tel.temp !== undefined
-              ? parseFloat(tel.temp)
-              : tel.water_temp !== undefined
-              ? parseFloat(tel.water_temp)
-              : tel.soil_temp !== undefined
-              ? parseFloat(tel.soil_temp)
-              : tel.room_temp !== undefined
-              ? parseFloat(tel.room_temp)
-              : 0;
+                ? parseFloat(tel.temp)
+                : tel.water_temp !== undefined
+                  ? parseFloat(tel.water_temp)
+                  : tel.soil_temp !== undefined
+                    ? parseFloat(tel.soil_temp)
+                    : tel.room_temp !== undefined
+                      ? parseFloat(tel.room_temp)
+                      : 0;
           const moistVal =
             tel.field2 !== undefined
               ? parseFloat(tel.field2)
               : tel.moist !== undefined
-              ? parseFloat(tel.moist)
-              : tel.moisture !== undefined
-              ? parseFloat(tel.moisture)
-              : tel.humidity !== undefined
-              ? parseFloat(tel.humidity)
-              : tel.room_humi !== undefined
-              ? parseFloat(tel.room_humi)
-              : 0;
+                ? parseFloat(tel.moist)
+                : tel.moisture !== undefined
+                  ? parseFloat(tel.moisture)
+                  : tel.humidity !== undefined
+                    ? parseFloat(tel.humidity)
+                    : tel.room_humi !== undefined
+                      ? parseFloat(tel.room_humi)
+                      : 0;
           const phVal =
             tel.field3 !== undefined
               ? parseFloat(tel.field3)
               : tel.ph !== undefined
-              ? parseFloat(tel.ph)
-              : tel.soil_ph !== undefined
-              ? parseFloat(tel.soil_ph)
-              : 0;
+                ? parseFloat(tel.ph)
+                : tel.soil_ph !== undefined
+                  ? parseFloat(tel.soil_ph)
+                  : 0;
           const ecVal =
             tel.field4 !== undefined
               ? parseFloat(tel.field4)
               : tel.ec !== undefined
-              ? parseFloat(tel.ec)
-              : tel.soil_ec !== undefined
-              ? parseFloat(tel.soil_ec)
-              : 0;
+                ? parseFloat(tel.ec)
+                : tel.soil_ec !== undefined
+                  ? parseFloat(tel.soil_ec)
+                  : 0;
           const roomTempVal =
             tel.field5 !== undefined
               ? parseFloat(tel.field5)
               : tel.room_temp !== undefined
-              ? parseFloat(tel.room_temp)
-              : 0;
+                ? parseFloat(tel.room_temp)
+                : 0;
           const roomHumiVal =
             tel.field6 !== undefined
               ? parseFloat(tel.field6)
               : tel.room_humi !== undefined
-              ? parseFloat(tel.room_humi)
-              : 0;
+                ? parseFloat(tel.room_humi)
+                : 0;
           const orpVal =
             tel.field7 !== undefined
               ? parseFloat(tel.field7)
               : tel.orp !== undefined
-              ? parseFloat(tel.orp)
-              : 0;
+                ? parseFloat(tel.orp)
+                : 0;
           const co2Val =
             tel.field8 !== undefined
               ? parseFloat(tel.field8)
               : tel.co2 !== undefined
-              ? parseFloat(tel.co2)
-              : 0;
+                ? parseFloat(tel.co2)
+                : 0;
 
           const isMonitType =
             deviceMeta?.deviceType === 'monit' ||
@@ -913,6 +1550,15 @@ const LiveMonitoring = () => {
             }
           }
 
+          hasMatchingTelemetry = true;
+          if (!packet.isRetain) {
+            latestTelemetryTimestamp = new Date();
+          } else if (packetDate) {
+            if (!latestTelemetryTimestamp || packetDate > latestTelemetryTimestamp) {
+              latestTelemetryTimestamp = packetDate;
+            }
+          }
+
           setActiveFields(fields);
           setActiveMetrics(currentMetrics);
 
@@ -929,23 +1575,28 @@ const LiveMonitoring = () => {
         }
       });
 
-      setLiveDevice({
-        id: selectedDeviceId,
-        name: deviceMeta?.name || 'Live Sensor Data',
-        location: deviceMeta?.location || 'Private Broker Stream',
-        status: 'online',
-        lastUpdated: new Date().toISOString(),
-      });
+      if (hasMatchingTelemetry && latestTelemetryTimestamp) {
+        const diffMs = Date.now() - latestTelemetryTimestamp.getTime();
+        const isFresh = diffMs < 2 * 60 * 1000 && diffMs > -2 * 60 * 1000;
 
-      setLoading(false);
-      setHasNewData(true);
-      if (newDataTimeoutRef.current) clearTimeout(newDataTimeoutRef.current);
-      newDataTimeoutRef.current = setTimeout(() => {
-        setHasNewData(false);
-        newDataTimeoutRef.current = null;
-      }, 2000);
+        setLiveDevice({
+          id: selectedDeviceId,
+          name: deviceMeta?.name || 'Live Sensor Data',
+          location: deviceMeta?.location || 'Private Broker Stream',
+          status: isFresh ? 'online' : 'offline',
+          lastUpdated: latestTelemetryTimestamp.toISOString(),
+        });
+
+        setLoading(false);
+        setHasNewData(true);
+        if (newDataTimeoutRef.current) clearTimeout(newDataTimeoutRef.current);
+        newDataTimeoutRef.current = setTimeout(() => {
+          setHasNewData(false);
+          newDataTimeoutRef.current = null;
+        }, 2000);
+      }
     },
-    [deviceMeta, selectedDeviceId]
+    [candidateIdentifiers, deviceMeta, selectedDeviceId]
   );
 
   // ── Step 3A: Direct Private Broker MQTT Connection (WebSocket fallback/fast-path) ──
@@ -965,18 +1616,20 @@ const LiveMonitoring = () => {
         });
       });
 
-      client.on('message', (topic, message) => {
+      client.on('message', (topic, message, packet) => {
         try {
           const payloadData = JSON.parse(message.toString());
           const parts = topic.split('/');
           const mqttId = parts[1] || '';
+          const isRetain = Boolean(packet && packet.retain);
           handleBatchedPackets([
             {
               deviceId: selectedDeviceId,
               mqttId,
               topic,
               data: payloadData,
-              timestamp: new Date(),
+              isRetain,
+              timestamp: isRetain ? null : new Date(),
             },
           ]);
         } catch (e) {
@@ -994,7 +1647,7 @@ const LiveMonitoring = () => {
       if (client) {
         try {
           client.end(true);
-        } catch (e) {}
+        } catch (e) { }
       }
       setIsMqttConnected(false);
     };
@@ -1048,14 +1701,14 @@ const LiveMonitoring = () => {
   return (
     <div className="space-y-6">
       {/* ── Header with Device Dropdown ────────────────────────────────────── */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col gap-4 rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 sm:p-5 sm:flex-row sm:items-center sm:justify-between backdrop-blur-md">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
           {/* Device Selector Dropdown */}
-          <div className="relative">
+          <div className="relative w-full sm:w-auto flex-1 sm:flex-initial">
             <select
               value={selectedDeviceId}
               onChange={(e) => handleDeviceChange(e.target.value)}
-              className="appearance-none rounded-xl border border-slate-700 bg-slate-800 pl-4 pr-10 py-2.5 text-sm font-medium text-white outline-none focus:border-green-500 focus:ring-2 focus:ring-green-500/20 cursor-pointer transition-all min-w-[220px]"
+              className="w-full sm:w-auto appearance-none rounded-xl border border-slate-700/80 bg-slate-950/80 pl-4 pr-10 py-2.5 text-xs sm:text-sm font-semibold text-white outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 cursor-pointer transition-all min-w-0 sm:min-w-[240px]"
             >
               <option value="" disabled>
                 Select a device...
@@ -1066,56 +1719,81 @@ const LiveMonitoring = () => {
                 </option>
               ))}
             </select>
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500 pointer-events-none" />
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
           </div>
 
-          {/* Status Badge */}
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider ${
-              deviceMeta?.status === 'blocked'
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Status Badge */}
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider ${deviceMeta?.status === 'blocked'
                 ? 'border-red-500/30 bg-red-500/10 text-red-400'
                 : isDeviceOnline
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                : 'border-rose-500/30 bg-rose-500/10 text-rose-400'
-            }`}
-            title={`Device Status: ${deviceMeta?.status === 'blocked' ? 'Blocked' : isDeviceOnline ? 'Online' : 'Offline'}${isMqttConnected ? ' (Broker Live)' : ''}`}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                deviceMeta?.status === 'blocked'
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                  : 'border-rose-500/30 bg-rose-500/10 text-rose-400'
+                }`}
+              title={`Device Status: ${deviceMeta?.status === 'blocked' ? 'Blocked' : isDeviceOnline ? 'Online' : 'Offline'}`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${deviceMeta?.status === 'blocked'
                   ? 'bg-red-400'
                   : isDeviceOnline
-                  ? 'bg-emerald-400 animate-pulse-dot'
-                  : 'bg-rose-400'
-              }`}
-            />
-            {deviceMeta?.status === 'blocked'
-              ? 'Blocked'
-              : isDeviceOnline
-              ? 'Online'
-              : 'Offline'}
-          </span>
+                    ? 'bg-emerald-400 animate-pulse-dot'
+                    : 'bg-rose-400'
+                  }`}
+              />
+              {deviceMeta?.status === 'blocked'
+                ? 'Blocked'
+                : isDeviceOnline
+                  ? 'Online'
+                  : 'Offline'}
+            </span>
+
+            {/* Broker Status Badge */}
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${isMqttConnected
+                ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300'
+                : 'border-slate-800 bg-slate-900 text-slate-500'
+                }`}
+            >
+              <ShieldCheck className="h-3 w-3 text-emerald-400" />
+              {isMqttConnected ? 'Broker Live' : 'SSE Bridge'}
+            </span>
+
+            {deviceMeta?.location && (
+              <span className="hidden md:inline-flex items-center gap-1 text-xs text-slate-400 font-medium px-2 py-1 rounded-lg bg-slate-800/40 border border-slate-700/30">
+                <MapPin className="h-3 w-3 text-slate-500" />
+                {deviceMeta.location}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Right: Refresh & Status */}
-        <div className="flex items-center gap-3 text-xs text-slate-500">
-          <Clock className="h-3.5 w-3.5" />
-          Last updated: {liveDevice?.lastUpdated ? formatTimestamp(liveDevice.lastUpdated) : '--'}
-          <button
-            onClick={handleRefresh}
-            className="rounded-lg border border-slate-700 p-1.5 transition-colors hover:bg-slate-800 hover:text-white"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
-          <span
-            className={`rounded-full border px-2.5 py-1 font-medium ${
-              hasNewData
+        <div className="flex items-center justify-between sm:justify-end gap-3 text-xs text-slate-400 w-full sm:w-auto pt-2 sm:pt-0 border-t border-slate-800/60 sm:border-t-0">
+          <div className="flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5 text-slate-500" />
+            <span>Updated:</span>
+            <span className="text-slate-300 font-medium">
+              {liveDevice?.lastUpdated ? formatTimestamp(liveDevice.lastUpdated) : '--'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRefresh}
+              title="Refresh Live Data"
+              className="rounded-lg border border-slate-700/80 bg-slate-800/60 p-2 transition-all hover:bg-slate-700 hover:text-white active:scale-95 text-slate-300"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
+            </button>
+            <span
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-wide ${hasNewData
                 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : 'border-slate-700 bg-slate-800 text-slate-400'
-            }`}
-          >
-            {hasNewData ? 'Updated' : 'No change'}
-          </span>
+                : 'border-slate-800 bg-slate-800/60 text-slate-400'
+                }`}
+            >
+              {hasNewData ? 'Live Data' : 'Cached'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1123,20 +1801,19 @@ const LiveMonitoring = () => {
       {deviceMeta?.deviceType === 'office_control' && (
         <div className="space-y-6">
           {/* Room Selection Tabs */}
-          <div className="flex border-b border-slate-700/60 pb-px">
+          <div className="flex border-b border-slate-700/60 pb-px overflow-x-auto scrollbar-none">
             {[1, 2, 3].map((room) => (
               <button
                 key={room}
                 onClick={() => setActiveRoomTab(room)}
-                className={`relative px-6 py-3.5 text-sm font-semibold transition-all hover:text-white ${
-                  activeRoomTab === room ? 'text-green-400' : 'text-slate-400'
-                }`}
+                className={`relative px-6 py-3.5 text-sm font-semibold transition-all hover:text-white whitespace-nowrap ${activeRoomTab === room ? 'text-emerald-400' : 'text-slate-400'
+                  }`}
               >
                 Room {room} Control
                 {activeRoomTab === room && (
                   <motion.div
                     layoutId="activeRoomTabIndicator"
-                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-green-500"
+                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500"
                   />
                 )}
               </button>
@@ -1158,7 +1835,7 @@ const LiveMonitoring = () => {
                 </div>
               ) : !officeControlData[activeRoomTab] ? (
                 <div className="rounded-2xl border border-dashed border-slate-700/50 p-6 text-sm text-slate-400 text-center">
-                  <div className="animate-pulse mb-2 text-green-500 font-medium">
+                  <div className="animate-pulse mb-2 text-emerald-400 font-medium">
                     Waiting for Live Device Stream...
                   </div>
                   <div className="text-xs text-slate-500">
@@ -1208,25 +1885,25 @@ const LiveMonitoring = () => {
                   ) : (
                     <>
                       <BigMetric
-                        label="Soil Temp"
+                        label="Temp"
                         value={officeControlData[activeRoomTab]?.soil?.soil_temp}
                         unit="°C"
                         icon={Thermometer}
                         type="temperature"
                       />
                       <BigMetric
-                        label="Soil Moisture"
+                        label="Moisture"
                         value={officeControlData[activeRoomTab]?.soil?.moisture}
                         unit="%"
                         icon={Droplets}
                         type="moisture"
                       />
                       <EcMetricCard
-                        label="Soil EC"
+                        label="EC"
                         ecVal={officeControlData[activeRoomTab]?.soil?.ec}
                       />
                       <BigMetric
-                        label="Soil pH"
+                        label=" pH"
                         value={officeControlData[activeRoomTab]?.soil?.ph}
                         unit="pH"
                         icon={FlaskConical}
@@ -1320,7 +1997,7 @@ const LiveMonitoring = () => {
                       <LiveChart
                         data={officeControlHistory[activeRoomTab]?.soil_temp || []}
                         type="temperature"
-                        title="Soil Temperature Trend"
+                        title=" Temperature Trend"
                         unit="°C"
                       />
                       <LiveChart
@@ -1332,13 +2009,13 @@ const LiveMonitoring = () => {
                       <LiveChart
                         data={officeControlHistory[activeRoomTab]?.ec || []}
                         type="ec"
-                        title="Soil EC Trend"
+                        title="EC Trend"
                         unit="mS/cm"
                       />
                       <LiveChart
                         data={officeControlHistory[activeRoomTab]?.ph || []}
                         type="ph"
-                        title="Soil pH Trend"
+                        title=" pH Trend"
                         unit="pH"
                       />
                       <LiveChart
@@ -1412,7 +2089,7 @@ const LiveMonitoring = () => {
                   </div>
                 ) : !controllingData ? (
                   <div className="rounded-2xl border border-dashed border-slate-700/50 p-6 text-sm text-slate-400 text-center">
-                    <div className="animate-pulse mb-2 text-green-500 font-medium">
+                    <div className="animate-pulse mb-2 text-emerald-400 font-medium">
                       Waiting for Live Device Stream...
                     </div>
                     <div className="text-xs text-slate-500">
@@ -1479,189 +2156,878 @@ const LiveMonitoring = () => {
         );
       })()}
 
-      {/* ── Multi-Sensor Cold Storage Matrix ───────────────────────────────── */}
-      {deviceMeta?.deviceType === 'multi_sensor' && (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
-              7-Sensor Matrix
-            </h3>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-slate-500">Sort by:</span>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white outline-none"
+      {/* ── Multi-Sensor Cold Storage Matrix View ──────────────────────────── */}
+      {isMultiSensorDevice && (() => {
+        const sortedPorts = [...DEFAULT_PROBE_PORTS].sort((a, b) => {
+          if (sortBy === 'temp') return (multiSensorData[b]?.t || 0) - (multiSensorData[a]?.t || 0);
+          if (sortBy === 'humi') return (multiSensorData[b]?.h || 0) - (multiSensorData[a]?.h || 0);
+          return a.localeCompare(b);
+        });
+
+        // Current focused room data if activeMultiTab is S1..S7
+        const isFocusedRoom = activeMultiTab !== 'all';
+        const focusedProbeData = isFocusedRoom ? multiSensorData[activeMultiTab] : null;
+        const focusedRoomName = isFocusedRoom ? getProbeName(activeMultiTab, deviceMeta, customSensorNames) : '';
+        const focusedHistT = isFocusedRoom ? (sensorHistory?.[activeMultiTab]?.t || []) : [];
+        const focusedHistH = isFocusedRoom ? (sensorHistory?.[activeMultiTab]?.h || []) : [];
+        const focusedHistCo2 = isFocusedRoom ? (sensorHistory?.[activeMultiTab]?.co2 || []) : [];
+        const focusedSetpoints = isFocusedRoom ? multiSensorSetpoints[activeMultiTab] : null;
+        const focusedRelays = isFocusedRoom ? multiSensorRelays[activeMultiTab] : null;
+
+        const focusedRoomIdx = isFocusedRoom ? parseInt(activeMultiTab.replace('S', ''), 10) - 1 : 0;
+        const focusedChCooling = (focusedRoomIdx * 3) + 1;
+        const focusedChHumi = (focusedRoomIdx * 3) + 2;
+        const focusedChLight = (focusedRoomIdx * 3) + 3;
+        const focusedIsS7 = activeMultiTab === 'S7';
+        const focusedCoolingLabel = focusedIsS7 ? 'Fanpad' : 'AC / Cooling';
+
+        const focusedAlarms = isFocusedRoom
+          ? activeWarnings.filter((w) => {
+              const text = typeof w === 'string' ? w.toLowerCase() : JSON.stringify(w).toLowerCase();
+              return text.includes(activeMultiTab.toLowerCase()) || text.includes(`room ${activeMultiTab.replace('S', '')}`);
+            })
+          : [];
+
+        const focusedTValues = focusedHistT
+          .map((d) => (typeof d === 'object' && d !== null ? d.value : Number(d)))
+          .filter((v) => Number.isFinite(v) && v > 0);
+        const focusedHValues = focusedHistH
+          .map((d) => (typeof d === 'object' && d !== null ? d.value : Number(d)))
+          .filter((v) => Number.isFinite(v) && v > 0);
+
+        const focusedMinT = focusedTValues.length > 0 ? Math.min(...focusedTValues).toFixed(1) : '--';
+        const focusedMaxT = focusedTValues.length > 0 ? Math.max(...focusedTValues).toFixed(1) : '--';
+        const focusedAvgT = focusedTValues.length > 0 ? (focusedTValues.reduce((a, b) => a + b, 0) / focusedTValues.length).toFixed(1) : '--';
+
+        const focusedMinH = focusedHValues.length > 0 ? Math.min(...focusedHValues).toFixed(1) : '--';
+        const focusedMaxH = focusedHValues.length > 0 ? Math.max(...focusedHValues).toFixed(1) : '--';
+        const focusedAvgH = focusedHValues.length > 0 ? (focusedHValues.reduce((a, b) => a + b, 0) / focusedHValues.length).toFixed(1) : '--';
+
+        return (
+          <div className="space-y-6">
+            {/* ── Active Hardware Alarm / System Normal Status Banner ── */}
+            {activeWarnings.length > 0 ? (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-2xl border border-rose-500/40 bg-gradient-to-r from-rose-950/50 via-rose-900/30 to-slate-900/70 p-4 backdrop-blur-md shadow-lg shadow-rose-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
               >
-                <option value="id">Position</option>
-                <option value="temp">Temperature</option>
-                <option value="humi">Humidity</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {Object.entries(multiSensorData)
-              .sort(([idA, dataA], [idB, dataB]) => {
-                if (sortBy === 'temp') return (dataB.t || 0) - (dataA.t || 0);
-                if (sortBy === 'humi') return (dataB.h || 0) - (dataA.h || 0);
-                return idA.localeCompare(idB);
-              })
-              .map(([sensorId, data]) => (
-                <ColdRoomProbeCard
-                  key={sensorId}
-                  sensorId={sensorId}
-                  data={data}
-                  history={sensorHistory?.[sensorId] || { t: [], h: [] }}
-                  onSelect={setSelectedSensor}
-                />
-              ))}
-          </div>
-
-          {Object.keys(multiSensorData).length === 0 && !loading && (
-            <div className="py-12 text-center text-slate-500 text-sm italic">
-              Waiting for the sensor to be online...
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Multi-Sensor Sensor Detail Modal ─────────────────────────────── */}
-      {selectedSensor && multiSensorData[selectedSensor] && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="w-full max-w-4xl bg-slate-900 border border-slate-700 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-y-auto max-h-[90vh]"
-          >
-            <button
-              onClick={() => setSelectedSensor(null)}
-              className="absolute top-4 right-4 text-slate-500 hover:text-white"
-            >
-              ✕ Close
-            </button>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-6 sm:mb-8 mt-2 sm:mt-0">
-              <div className="p-3 sm:p-4 bg-blue-500/10 rounded-2xl shrink-0">
-                <Cpu className="h-6 w-6 sm:h-8 sm:w-8 text-blue-400" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="text-xl sm:text-2xl font-bold text-white uppercase tracking-wider truncate">
-                  {`Cold Room ${selectedSensor.toUpperCase().replace('S', '')}`}
-                </h2>
-                <span className="text-xs text-slate-400 block truncate">
-                  Live Telemetry Analysis — {formatTimestamp(liveDevice?.lastUpdated)}
-                </span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 sm:mb-8">
-              <div className="bg-slate-800/50 p-4 sm:p-6 rounded-2xl border border-slate-700 flex flex-col justify-center">
-                <p className="text-xs sm:text-sm text-slate-400 mb-1 sm:mb-2">Live Temperature</p>
-                <p className="text-2xl sm:text-3xl font-bold text-white truncate">
-                  {multiSensorData[selectedSensor]?.t != null ? multiSensorData[selectedSensor].t.toFixed(2) : '--'} °C
-                </p>
-              </div>
-              <div className="bg-slate-800/50 p-4 sm:p-6 rounded-2xl border border-slate-700 flex flex-col justify-center">
-                <p className="text-xs sm:text-sm text-slate-400 mb-1 sm:mb-2">Live Humidity</p>
-                <p className="text-2xl sm:text-3xl font-bold text-blue-400 truncate">
-                  {multiSensorData[selectedSensor]?.h != null ? multiSensorData[selectedSensor].h.toFixed(2) : '--'} %
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <LiveChart
-                data={(sensorHistory?.[selectedSensor]?.t || []).map((v, i) => ({
-                  time: i,
-                  value: v,
-                }))}
-                type="temperature"
-                title="Temperature History"
-                unit="°C"
-              />
-              <LiveChart
-                data={(sensorHistory?.[selectedSensor]?.h || []).map((v, i) => ({
-                  time: i,
-                  value: v,
-                }))}
-                type="moisture"
-                title="Humidity History"
-                unit="%"
-              />
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* ── Standard Single-Device Content Grid (Almora, Monit, System2) ──── */}
-      {deviceMeta?.deviceType !== 'multi_sensor' &&
-        deviceMeta?.deviceType !== 'office_control' &&
-        deviceMeta?.deviceType !== 'controlling' && (
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-            {/* Left: Big Metrics */}
-            <div className="space-y-4 xl:col-span-1">
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
-                Live Readings
-              </h3>
-              {loading ? (
-                <div className="space-y-4">
-                  {[...Array(activeFields.length || 4)].map((_, i) => (
-                    <SkeletonCard key={i} />
-                  ))}
-                </div>
-              ) : !liveDevice ? (
-                <div className="rounded-2xl border border-dashed border-slate-700/50 p-6 text-sm text-slate-400">
-                  No live device data available.
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {activeFields.map((f) => (
-                    <BigMetric
-                      key={f.key}
-                      label={f.label}
-                      value={activeMetrics[f.key]}
-                      unit={f.unit}
-                      icon={f.icon}
-                      type={f.type}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Right: Charts */}
-            <div className="space-y-4 xl:col-span-2">
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
-                Trend Charts
-              </h3>
-              {loading ? (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {[...Array(activeFields.length || 4)].map((_, i) => (
-                    <div
-                      key={i}
-                      className="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-4"
-                    >
-                      <div className="skeleton mb-4 h-4 w-32 rounded" />
-                      <div className="skeleton h-48 w-full rounded-xl" />
+                <div className="flex items-start sm:items-center gap-3">
+                  <div className="rounded-xl bg-rose-500/20 border border-rose-500/30 p-2.5 text-rose-400 shrink-0 animate-pulse">
+                    <AlertTriangle className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-bold text-white tracking-wide">
+                        Cold Storage Hardware Warnings Active
+                      </h4>
+                      <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-bold font-mono text-rose-300 border border-rose-500/30">
+                        {activeWarnings.length} {activeWarnings.length === 1 ? 'Alert' : 'Alerts'}
+                      </span>
                     </div>
-                  ))}
+                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-rose-200/90 font-medium">
+                      {activeWarnings.map((w, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-rose-900/50 border border-rose-700/40 px-2.5 py-0.5"
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-rose-400 animate-ping" />
+                          {typeof w === 'string' ? w : w.message || JSON.stringify(w)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {activeFields.map((f) => (
-                    <LiveChart
-                      key={f.key}
-                      data={chartData[f.key] || []}
-                      type={f.type}
-                      title={f.label}
-                      unit={f.unit}
+                <div className="text-[11px] font-mono text-rose-300/90 shrink-0 sm:text-right">
+                  <span className="inline-block bg-rose-500/10 px-2.5 py-1 rounded-lg border border-rose-500/20">
+                    Warning Buzzer Relay Ch22 Active
+                  </span>
+                </div>
+              </motion.div>
+            ) : (
+            <></>
+            )}
+
+            {/* ── Top Summary KPI Strip ── */}
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+              {/* Card 1: Active Chambers */}
+              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/80 p-3.5 sm:p-5 backdrop-blur-sm hover:border-emerald-500/30 transition-all flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`rounded-xl p-2 shrink-0 ${isDeviceOnline ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
+                      <Cpu className="h-4 w-4" />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-300 truncate">Active Chambers</span>
+                  </div>
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+                    isDeviceOnline
+                      ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                      : 'bg-slate-800 border border-slate-700 text-slate-400'
+                  }`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${isDeviceOnline ? 'bg-emerald-400 animate-pulse-dot' : 'bg-slate-500'}`} />
+                    {isDeviceOnline ? `${multiSensorSummary.onlineCount}/${multiSensorSummary.totalProbes} Live` : 'Standby / Offline'}
+                  </span>
+                </div>
+                <div className="mt-3 flex items-baseline gap-1.5">
+                  <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
+                    {isDeviceOnline ? multiSensorSummary.onlineCount : 0}
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium">/ {multiSensorSummary.totalProbes} online</span>
+                </div>
+                <p className="mt-2 text-[11px] text-slate-400 truncate">
+                  {isDeviceOnline ? 'Monitored Cold Storage Rooms (S1–S7)' : 'Awaiting Live Hardware Telemetry'}
+                </p>
+              </div>
+
+              {/* Card 2: Facility Average Temp */}
+              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/80 p-3.5 sm:p-5 backdrop-blur-sm hover:border-emerald-500/30 transition-all flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-2 text-emerald-400 shrink-0">
+                      <Thermometer className="h-4 w-4" />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-300 truncate">Facility Avg Temp</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
+                    °C
+                  </span>
+                </div>
+                <div className="mt-3 flex items-baseline gap-1">
+                  <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
+                    {multiSensorSummary.avgTemp}
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium">°C</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400 flex-wrap gap-1">
+                  <span>Min: <strong className="text-slate-200 font-mono">{multiSensorSummary.minTemp}°C</strong></span>
+                  <span>Max: <strong className="text-slate-200 font-mono">{multiSensorSummary.maxTemp}°C</strong></span>
+                </div>
+              </div>
+
+              {/* Card 3: Facility Average Humidity */}
+              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/80 p-3.5 sm:p-5 backdrop-blur-sm hover:border-emerald-500/30 transition-all flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-2 text-emerald-400 shrink-0">
+                      <Droplets className="h-4 w-4" />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-300 truncate">Facility Avg Humidity</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
+                    %
+                  </span>
+                </div>
+                <div className="mt-3 flex items-baseline gap-1">
+                  <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
+                    {multiSensorSummary.avgHumi}
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium">%</span>
+                </div>
+                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400 flex-wrap gap-1">
+                  <span>Min: <strong className="text-slate-200 font-mono">{multiSensorSummary.minHumi}%</strong></span>
+                  <span>Max: <strong className="text-slate-200 font-mono">{multiSensorSummary.maxHumi}%</strong></span>
+                </div>
+              </div>
+
+              {/* Card 4: Atmosphere / CO2 */}
+              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/80 p-3.5 sm:p-5 backdrop-blur-sm hover:border-emerald-500/30 transition-all flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-2 text-emerald-400 shrink-0">
+                      <Activity className="h-4 w-4" />
+                    </div>
+                    <span className="text-xs font-semibold text-slate-300 truncate">Chamber CO2</span>
+                  </div>
+                  <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
+                    PPM
+                  </span>
+                </div>
+                <div className="mt-3 flex items-baseline gap-1">
+                  <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
+                    {multiSensorSummary.co2 != null ? multiSensorSummary.co2 : '--'}
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium">ppm</span>
+                </div>
+                <p className="mt-2 text-[11px] text-slate-400 truncate">
+                  Controlled Air Atmosphere
+                </p>
+              </div>
+            </div>
+
+            {/* ── Navigation & Sort Bar (Responsive & Touch-Friendly) ── */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-2 sm:pb-0">
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none touch-pan-x pb-1 sm:pb-0 -mx-1 px-1">
+                {/* All Rooms Tab */}
+                <button
+                  onClick={() => setActiveMultiTab('all')}
+                  className={`relative shrink-0 flex items-center gap-2 px-4 sm:px-5 py-3 text-xs sm:text-sm font-semibold transition-all hover:text-white ${
+                    activeMultiTab === 'all' ? 'text-emerald-400' : 'text-slate-400'
+                  }`}
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  <span className="whitespace-nowrap">All Rooms Matrix</span>
+                  <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-slate-300 border border-slate-700">
+                    7
+                  </span>
+                  {activeMultiTab === 'all' && (
+                    <motion.div
+                      layoutId="activeMultiTabIndicator"
+                      className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500"
                     />
-                  ))}
+                  )}
+                </button>
+
+                {/* Individual Room Tabs (S1–S7) */}
+                {DEFAULT_PROBE_PORTS.map((port) => {
+                  const pData = multiSensorData[port];
+                  const pName = getProbeName(port, deviceMeta, customSensorNames);
+                  const isOnline = isDeviceOnline && (pData?.status === 'OK' || pData?.status === 'online');
+                  const isActive = activeMultiTab === port;
+                  const hasAlarm = activeWarnings.some((w) => {
+                    const text = typeof w === 'string' ? w.toLowerCase() : JSON.stringify(w).toLowerCase();
+                    return text.includes(port.toLowerCase()) || text.includes(`room ${port.replace('S', '')}`);
+                  });
+
+                  return (
+                    <button
+                      key={port}
+                      onClick={() => setActiveMultiTab(port)}
+                      className={`relative shrink-0 flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-3 text-xs font-semibold transition-all hover:text-white ${
+                        isActive ? 'text-emerald-400' : hasAlarm ? 'text-rose-400' : 'text-slate-400'
+                      }`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          hasAlarm ? 'bg-rose-500 animate-ping' : isOnline ? 'bg-emerald-400' : 'bg-slate-600'
+                        }`}
+                      />
+                      <span className="whitespace-nowrap">{pName}</span>
+                      <span className="font-mono text-[10px] text-slate-500">({port})</span>
+                      {pData?.t != null && pData.t > 0 && (
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-mono tabular-nums ${
+                            isActive
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-slate-800/80 text-slate-300'
+                          }`}
+                        >
+                          {pData.t.toFixed(1)}°C
+                        </span>
+                      )}
+                      {isActive && (
+                        <motion.div
+                          layoutId="activeMultiTabIndicator"
+                          className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500"
+                        />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {activeMultiTab === 'all' && (
+                <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0 pt-1 sm:pt-0 sm:pl-4">
+                  <span className="text-[11px] text-slate-400 font-medium">Sort:</span>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1 text-xs text-slate-200 outline-none focus:border-emerald-500 transition-colors"
+                  >
+                    <option value="id">Port Sequence (S1–S7)</option>
+                    <option value="temp">Highest Temperature</option>
+                    <option value="humi">Highest Humidity</option>
+                  </select>
                 </div>
               )}
             </div>
+
+            {/* ── View 1: All Rooms 7-Card Matrix ── */}
+            {activeMultiTab === 'all' && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {sortedPorts.map((sensorId) => {
+                    const data = multiSensorData[sensorId] || { t: null, h: null, status: 'STANDBY' };
+                    const history = sensorHistory?.[sensorId] || { t: [], h: [] };
+                    const roomName = getProbeName(sensorId, deviceMeta, customSensorNames);
+                    const setpoints = multiSensorSetpoints[sensorId];
+                    const relays = multiSensorRelays[sensorId];
+                    const hasAlarm = activeWarnings.some((w) => {
+                      const text = typeof w === 'string' ? w.toLowerCase() : JSON.stringify(w).toLowerCase();
+                      return text.includes(sensorId.toLowerCase()) || text.includes(`room ${sensorId.replace('S', '')}`);
+                    });
+
+                    return (
+                      <ColdRoomProbeCard
+                        key={sensorId}
+                        sensorId={sensorId}
+                        roomName={roomName}
+                        data={data}
+                        history={history}
+                        setpoints={setpoints}
+                        relays={relays}
+                        hasAlarm={hasAlarm}
+                        isDeviceOnline={isDeviceOnline}
+                        onSelect={setSelectedSensor}
+                        onFocus={(id) => setActiveMultiTab(id)}
+                      />
+                    );
+                  })}
+                </div>
+
+                {Object.keys(multiSensorData).length === 0 && !loading && (
+                  <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/30 py-12 text-center text-slate-400 text-sm">
+                    <p className="animate-pulse text-emerald-400 font-semibold mb-1">
+                      Listening for Multi-Sensor Telemetry Packets...
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Cold storage telemetry will automatically stream here over MQTT / SSE.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── View 2: Single Room Detailed Focus View ── */}
+            {activeMultiTab !== 'all' && (
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+                {/* Left Column (1 col): Live Readings, Actuators & Targets */}
+                <div className="space-y-4 xl:col-span-1">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                      Live Chamber Focus ({focusedRoomName})
+                    </h3>
+                    <button
+                      onClick={() => setActiveMultiTab('all')}
+                      className="flex items-center gap-1 text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" /> All Rooms
+                    </button>
+                  </div>
+
+                  {/* Room Identity Card */}
+                  <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-xs font-mono font-bold text-emerald-400">
+                          {activeMultiTab}
+                        </span>
+                        <div>
+                          <h4 className="text-sm font-bold text-white">{focusedRoomName}</h4>
+                          <p className="text-[11px] text-slate-400">
+                            {focusedSetpoints?.stage_name
+                              ? `${focusedSetpoints.stage_name} • Slot ${focusedSetpoints.slot_id || '1'}`
+                              : 'Cold Storage Room Channel'}
+                          </p>
+                        </div>
+                      </div>
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                          isDeviceOnline && (focusedProbeData?.status === 'OK' || focusedProbeData?.status === 'online')
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                        }`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            isDeviceOnline && (focusedProbeData?.status === 'OK' || focusedProbeData?.status === 'online')
+                              ? 'bg-emerald-400 animate-pulse-dot'
+                              : 'bg-slate-500'
+                          }`}
+                        />
+                        {isDeviceOnline && (focusedProbeData?.status === 'OK' || focusedProbeData?.status === 'online')
+                          ? 'Online'
+                          : 'Standby'}
+                      </span>
+                    </div>
+
+                    {focusedAlarms.length > 0 && (
+                      <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-950/40 p-2.5 text-xs text-rose-300 flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
+                        <span className="truncate">{focusedAlarms.join(' • ')}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  
+                  {/* Target Setpoints & Tolerance Bounds */}
+                  {focusedSetpoints && (
+                    <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-sm space-y-3">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                        <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                          <Layers className="h-3.5 w-3.5 text-emerald-400" /> Target Setpoints & Bounds
+                        </span>
+                        {focusedSetpoints.stage_name && (
+                          <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                            {focusedSetpoints.stage_name}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="rounded-xl bg-slate-950/40 p-2.5 border border-slate-800/60">
+                          <span className="text-[10px] text-slate-500 block mb-0.5">Target Temp</span>
+                          <div className="text-lg font-bold text-white font-mono">
+                            {focusedSetpoints.target_temp != null ? `${focusedSetpoints.target_temp}°C` : '--'}
+                          </div>
+                          {focusedSetpoints.temp_range != null && (
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              ±{focusedSetpoints.temp_range}°C band
+                            </span>
+                          )}
+                          {(focusedSetpoints.min_temp != null || focusedSetpoints.max_temp != null) && (
+                            <div className="mt-1 text-[9px] text-slate-500 font-mono truncate">
+                              Safety: {focusedSetpoints.min_temp ?? 0}° - {focusedSetpoints.max_temp ?? 50}°C
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="rounded-xl bg-slate-950/40 p-2.5 border border-slate-800/60">
+                          <span className="text-[10px] text-slate-500 block mb-0.5">Target Humidity</span>
+                          <div className="text-lg font-bold text-white font-mono">
+                            {focusedSetpoints.target_humi != null ? `${focusedSetpoints.target_humi}%` : '--'}
+                          </div>
+                          {focusedSetpoints.humi_range != null && (
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              ±{focusedSetpoints.humi_range}% band
+                            </span>
+                          )}
+                          {(focusedSetpoints.min_humi != null || focusedSetpoints.max_humi != null) && (
+                            <div className="mt-1 text-[9px] text-slate-500 font-mono truncate">
+                              Safety: {focusedSetpoints.min_humi ?? 0}% - {focusedSetpoints.max_humi ?? 100}%
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Big Metric Cards Grid */}
+                  <div className="space-y-3">
+                    <BigMetric
+                      label={`${focusedRoomName} Temperature`}
+                      value={focusedProbeData?.t}
+                      unit="°C"
+                      icon={Thermometer}
+                      type="temperature"
+                    />
+
+                    <BigMetric
+                      label={`${focusedRoomName} Humidity`}
+                      value={focusedProbeData?.h}
+                      unit="%"
+                      icon={Droplets}
+                      type="moisture"
+                    />
+
+                    {focusedProbeData?.co2 != null && (
+                      <BigMetric
+                        label={`${focusedRoomName} CO2 Level`}
+                        value={focusedProbeData?.co2}
+                        unit="ppm"
+                        icon={Activity}
+                        type="co2"
+                      />
+                    )}
+                  </div>
+
+                
+                </div>
+
+                {/* Right Column (2 cols): Real-time Trend Charts */}
+                <div className="space-y-4 xl:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+                      Real-Time Telemetry Trends ({focusedRoomName})
+                    </h3>
+                    <button
+                      onClick={() => setSelectedSensor(activeMultiTab)}
+                      className="flex items-center gap-1 text-xs text-slate-400 hover:text-emerald-400 transition-colors"
+                      title="Inspect in full modal"
+                    >
+                      <Maximize2 className="h-3.5 w-3.5" /> Fullscreen Modal
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <LiveChart
+                      data={focusedHistT}
+                      type="temperature"
+                      title={`${focusedRoomName} Temperature`}
+                      unit="°C"
+                      subtitle="Continuous Telemetry Feed"
+                    />
+
+                    <LiveChart
+                      data={focusedHistH}
+                      type="moisture"
+                      title={`${focusedRoomName} Humidity`}
+                      unit="%"
+                      subtitle="Continuous Telemetry Feed"
+                    />
+
+                    {focusedProbeData?.co2 != null && (
+                      <div className="md:col-span-2">
+                        <LiveChart
+                          data={(focusedHistCo2.length > 0 ? focusedHistCo2 : focusedHistT).map((pt) => ({
+                            time: pt.time,
+                            value: pt.value ?? focusedProbeData?.co2 ?? 420,
+                          }))}
+                          type="co2"
+                          title={`${focusedRoomName} CO2 Atmospheric Trend`}
+                          unit="ppm"
+                          subtitle="Atmospheric Carbon Dioxide"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  {/* Hardware Actuators & Relays State */}
+                  <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-sm space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                      <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                        <Zap className="h-3.5 w-3.5 text-emerald-400" /> Chamber Actuators (Relays)
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        Channels {focusedChCooling}, {focusedChHumi}, {focusedChLight}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      {/* Cooling / AC / Fanpad */}
+                      <div
+                        className={`rounded-xl p-2.5 border text-center transition-all ${
+                          focusedRelays?.cooling
+                            ? 'bg-emerald-500/15 border-emerald-500/30 shadow-sm shadow-emerald-500/10'
+                            : 'bg-slate-950/40 border-slate-800/60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-center mb-1">
+                          {focusedIsS7 ? (
+                            <Fan
+                              className={`h-4 w-4 ${
+                                focusedRelays?.cooling ? 'text-emerald-400 animate-spin' : 'text-slate-500'
+                              }`}
+                            />
+                          ) : (
+                            <Thermometer
+                              className={`h-4 w-4 ${
+                                focusedRelays?.cooling ? 'text-emerald-400' : 'text-slate-500'
+                              }`}
+                            />
+                          )}
+                        </div>
+                        <div className="text-[10px] font-medium text-slate-400 truncate">{focusedCoolingLabel}</div>
+                        <div className="text-[9px] text-slate-500 font-mono">Ch {focusedChCooling}</div>
+                        <div
+                          className={`mt-1 text-[11px] font-bold font-mono ${
+                            focusedRelays?.cooling ? 'text-emerald-300' : 'text-slate-500'
+                          }`}
+                        >
+                          {focusedRelays?.cooling ? 'ON' : 'OFF'}
+                        </div>
+                      </div>
+
+                      {/* Humidifier */}
+                      <div
+                        className={`rounded-xl p-2.5 border text-center transition-all ${
+                          focusedRelays?.humi
+                            ? 'bg-sky-500/15 border-sky-500/30 shadow-sm shadow-sky-500/10'
+                            : 'bg-slate-950/40 border-slate-800/60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-center mb-1">
+                          <Droplets
+                            className={`h-4 w-4 ${focusedRelays?.humi ? 'text-sky-400' : 'text-slate-500'}`}
+                          />
+                        </div>
+                        <div className="text-[10px] font-medium text-slate-400 truncate">Humidifier</div>
+                        <div className="text-[9px] text-slate-500 font-mono">Ch {focusedChHumi}</div>
+                        <div
+                          className={`mt-1 text-[11px] font-bold font-mono ${
+                            focusedRelays?.humi ? 'text-sky-300' : 'text-slate-500'
+                          }`}
+                        >
+                          {focusedRelays?.humi ? 'ON' : 'OFF'}
+                        </div>
+                      </div>
+
+                      {/* Grow Lights */}
+                      <div
+                        className={`rounded-xl p-2.5 border text-center transition-all ${
+                          focusedRelays?.light
+                            ? 'bg-amber-500/15 border-amber-500/30 shadow-sm shadow-amber-500/10'
+                            : 'bg-slate-950/40 border-slate-800/60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-center mb-1">
+                          <Sun
+                            className={`h-4 w-4 ${focusedRelays?.light ? 'text-amber-400' : 'text-slate-500'}`}
+                          />
+                        </div>
+                        <div className="text-[10px] font-medium text-slate-400 truncate">Grow Lights</div>
+                        <div className="text-[9px] text-slate-500 font-mono">Ch {focusedChLight}</div>
+                        <div
+                          className={`mt-1 text-[11px] font-bold font-mono ${
+                            focusedRelays?.light ? 'text-amber-300' : 'text-slate-500'
+                          }`}
+                        >
+                          {focusedRelays?.light ? 'ON' : 'OFF'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            )}
           </div>
-        )}
+        );
+      })()}
+
+      {/* ── Multi-Sensor Sensor Detail Modal (Theme Elevated) ─────────────── */}
+      {selectedSensor && multiSensorData[selectedSensor] && (() => {
+        const modalData = multiSensorData[selectedSensor];
+        const modalRoomName = getProbeName(selectedSensor, deviceMeta, customSensorNames);
+        const modalSetpoints = multiSensorSetpoints[selectedSensor];
+        const modalRelays = multiSensorRelays[selectedSensor];
+        const modalIdx = parseInt(selectedSensor.replace('S', ''), 10) - 1;
+        const modalChCooling = (modalIdx * 3) + 1;
+        const modalChHumi = (modalIdx * 3) + 2;
+        const modalChLight = (modalIdx * 3) + 3;
+        const modalIsS7 = selectedSensor === 'S7';
+        const modalCoolingLabel = modalIsS7 ? 'Fanpad' : 'AC / Cooling';
+
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              className="w-full max-w-4xl bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-y-auto max-h-[90vh]"
+            >
+              <button
+                onClick={() => setSelectedSensor(null)}
+                className="absolute top-5 right-5 rounded-full p-2 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+
+              {/* Modal Header */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-6 sm:mb-8">
+                <div className="p-3 sm:p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl shrink-0">
+                  <Cpu className="h-6 w-6 sm:h-7 sm:w-7 text-emerald-400" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-xs font-mono font-bold text-emerald-400">
+                      {selectedSensor}
+                    </span>
+                    <h2 className="text-xl sm:text-2xl font-bold text-white tracking-wide truncate">
+                      {modalRoomName}
+                    </h2>
+                    {modalSetpoints?.stage_name && (
+                      <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 text-[10px] font-bold text-emerald-300">
+                        {modalSetpoints.stage_name}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-slate-400 block truncate">
+                    Live Telemetry Analysis & Historical Trends • Updated {formatTimestamp(liveDevice?.lastUpdated)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Live KPI Tiles */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                <div className="bg-slate-950/60 p-4 sm:p-5 rounded-2xl border border-slate-800/80 hover:border-emerald-500/20 transition-all flex flex-col justify-center">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5 font-medium">
+                      <Thermometer className="h-4 w-4 text-emerald-400" /> Live Temperature
+                    </p>
+                    {modalSetpoints?.target_temp != null && (
+                      <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                        Target: {modalSetpoints.target_temp}°C
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
+                      {modalData?.t != null ? Number(modalData.t).toFixed(2) : '--'}
+                    </span>
+                    <span className="text-xs text-slate-400 font-medium">°C</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/60 p-4 sm:p-5 rounded-2xl border border-slate-800/80 hover:border-emerald-500/20 transition-all flex flex-col justify-center">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5 font-medium">
+                      <Droplets className="h-4 w-4 text-emerald-400" /> Live Humidity
+                    </p>
+                    {modalSetpoints?.target_humi != null && (
+                      <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                        Target: {modalSetpoints.target_humi}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
+                      {modalData?.h != null ? Number(modalData.h).toFixed(2) : '--'}
+                    </span>
+                    <span className="text-xs text-slate-400 font-medium">%</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950/60 p-4 sm:p-5 rounded-2xl border border-slate-800/80 hover:border-emerald-500/20 transition-all flex flex-col justify-center sm:col-span-2 lg:col-span-1">
+                  <p className="text-xs text-slate-400 mb-1.5 flex items-center gap-1.5 font-medium">
+                    <Activity className="h-4 w-4 text-emerald-400" /> Chamber CO2
+                  </p>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
+                      {modalData?.co2 != null ? modalData.co2 : '420'}
+                    </span>
+                    <span className="text-xs text-slate-400 font-medium">ppm</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Hardware Relays Status Row */}
+              {modalRelays && (
+                <div className="mb-6 rounded-2xl border border-slate-800/80 bg-slate-950/50 p-4">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-300 mb-3">
+                    <span className="flex items-center gap-1.5">
+                      <Zap className="h-3.5 w-3.5 text-emerald-400" /> Actuator Relay States
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      Channels {modalChCooling}, {modalChHumi}, {modalChLight}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div
+                      className={`rounded-xl p-3 border text-center ${
+                        modalRelays.cooling
+                          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                          : 'bg-slate-900/60 border-slate-800 text-slate-500'
+                      }`}
+                    >
+                      <div className="text-[11px] font-medium">{modalCoolingLabel} (Ch {modalChCooling})</div>
+                      <div className="text-sm font-bold font-mono mt-1">
+                        {modalRelays.cooling ? 'ACTIVE (ON)' : 'OFF'}
+                      </div>
+                    </div>
+                    <div
+                      className={`rounded-xl p-3 border text-center ${
+                        modalRelays.humi
+                          ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
+                          : 'bg-slate-900/60 border-slate-800 text-slate-500'
+                      }`}
+                    >
+                      <div className="text-[11px] font-medium">Humidifier (Ch {modalChHumi})</div>
+                      <div className="text-sm font-bold font-mono mt-1">
+                        {modalRelays.humi ? 'ACTIVE (ON)' : 'OFF'}
+                      </div>
+                    </div>
+                    <div
+                      className={`rounded-xl p-3 border text-center ${
+                        modalRelays.light
+                          ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                          : 'bg-slate-900/60 border-slate-800 text-slate-500'
+                      }`}
+                    >
+                      <div className="text-[11px] font-medium">Grow Lights (Ch {modalChLight})</div>
+                      <div className="text-sm font-bold font-mono mt-1">
+                        {modalRelays.light ? 'ACTIVE (ON)' : 'OFF'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Live Trend Charts in Modal */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <LiveChart
+                  data={sensorHistory?.[selectedSensor]?.t || []}
+                  type="temperature"
+                  title={`${modalRoomName} Temperature Trend`}
+                  unit="°C"
+                />
+                <LiveChart
+                  data={sensorHistory?.[selectedSensor]?.h || []}
+                  type="moisture"
+                  title={`${modalRoomName} Humidity Trend`}
+                  unit="%"
+                />
+              </div>
+            </motion.div>
+          </div>
+        );
+      })()}
+
+      {/* ── Standard Single-Device Content Grid (Monit, Generic Single Device) ──── */}
+      {isStandardDevice && (
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          {/* Left: Big Metrics */}
+          <div className="space-y-4 xl:col-span-1">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+              Live Readings
+            </h3>
+            {loading ? (
+              <div className="space-y-4">
+                {[...Array(activeFields.length || 4)].map((_, i) => (
+                  <SkeletonCard key={i} />
+                ))}
+              </div>
+            ) : !liveDevice ? (
+              <div className="rounded-2xl border border-dashed border-slate-700/50 p-6 text-sm text-slate-400">
+                No live device data available.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {activeFields.map((f) => (
+                  <BigMetric
+                    key={f.key}
+                    label={f.label}
+                    value={activeMetrics[f.key]}
+                    unit={f.unit}
+                    icon={f.icon}
+                    type={f.type}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Right: Charts */}
+          <div className="space-y-4 xl:col-span-2">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+              Trend Charts
+            </h3>
+            {loading ? (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {[...Array(activeFields.length || 4)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="rounded-2xl border border-slate-700/30 bg-slate-800/30 p-4"
+                  >
+                    <div className="skeleton mb-4 h-4 w-32 rounded" />
+                    <div className="skeleton h-48 w-full rounded-xl" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {activeFields.map((f) => (
+                  <LiveChart
+                    key={f.key}
+                    data={chartData[f.key] || []}
+                    type={f.type}
+                    title={f.label}
+                    unit={f.unit}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -35,15 +35,21 @@ exports.getDevices = async (req, res) => {
         let latestPacket = null;
         try {
           const TelemetryModel = getTelemetryModel(mqttId);
-          latestPacket = await TelemetryModel.findOne({ deviceId: device._id }).sort({ timestamp: -1 });
+          latestPacket = await TelemetryModel.findOne({
+            $or: [
+              { deviceId: device._id },
+              { mqttId: device.mqttId },
+              { mqttId: device.mqttId?.toLowerCase() }
+            ].filter(Boolean)
+          }).sort({ timestamp: -1 });
         } catch (e) {
           console.warn(`[DeviceController] Could not fetch latest packet for ${mqttId}: ${e.message}`);
         }
 
         const lastSeenTime = latestPacket?.timestamp || device.lastUpdated;
         const diffMs = lastSeenTime ? (now - new Date(lastSeenTime)) : Infinity;
-        // 5 minutes threshold for considering device online
-        const isOnline = diffMs < 5 * 60 * 1000;
+        // 2 minutes threshold for considering device online (active telemetry sending)
+        const isOnline = diffMs >= 0 && diffMs < 2 * 60 * 1000;
 
         let status = device.status;
         if (device.status !== 'blocked') {
@@ -402,19 +408,53 @@ exports.getDeviceAnalytics = async (req, res) => {
             }
           }
         }
-      } else if (device.deviceType === 'multi_sensor') {
-        // multi_sensor mapping
+      } else if (device.deviceType === 'multi_sensor' || device.deviceType === 'almora' || device.deviceType === 'almora2' || device.deviceType === 'cold_storage' || (device.name && (device.name.toLowerCase().includes('almora') || device.name.toLowerCase().includes('cold')))) {
+        // Multi-sensor / Almora 7 Cold Storage rooms mapping
+        const getSensor = (sNum) => {
+          const sLower = `s${sNum}`;
+          const sUpper = `S${sNum}`;
+          if (d[sLower]) return d[sLower];
+          if (d[sUpper]) return d[sUpper];
+          if (d.sensor_data && typeof d.sensor_data === 'object') {
+            if (d.sensor_data[sLower]) return d.sensor_data[sLower];
+            if (d.sensor_data[sUpper]) return d.sensor_data[sUpper];
+            for (const probe of Object.values(d.sensor_data)) {
+              if (probe && (probe.id === sNum || probe.id === String(sNum))) {
+                return probe;
+              }
+            }
+          }
+          return null;
+        };
+
+        const s1 = getSensor(1);
+        const s2 = getSensor(2);
+        const s3 = getSensor(3);
+        const s4 = getSensor(4);
+        const s5 = getSensor(5);
+        const s6 = getSensor(6);
+        const s7 = getSensor(7);
+
         mappedFeeds.push({
           created_at: p.timestamp.toISOString(),
           entry_id: mappedFeeds.length + 1,
-          field1: d.s1?.t !== undefined && d.s1?.t !== null ? String(d.s1.t) : null,
-          field2: d.s2?.t !== undefined && d.s2?.t !== null ? String(d.s2.t) : null,
-          field3: d.s3?.t !== undefined && d.s3?.t !== null ? String(d.s3.t) : null,
-          field4: d.s4?.t !== undefined && d.s4?.t !== null ? String(d.s4.t) : null,
-          field5: d.s5?.t !== undefined && d.s5?.t !== null ? String(d.s5.t) : null,
-          field6: d.s6?.t !== undefined && d.s6?.t !== null ? String(d.s6.t) : null,
-          field7: d.s7?.t !== undefined && d.s7?.t !== null ? String(d.s7.t) : null,
+          field1: s1 ? (s1.t ?? s1.temp ?? null) : null,
+          field2: s2 ? (s2.t ?? s2.temp ?? null) : null,
+          field3: s3 ? (s3.t ?? s3.temp ?? null) : null,
+          field4: s4 ? (s4.t ?? s4.temp ?? null) : null,
+          field5: s5 ? (s5.t ?? s5.temp ?? null) : null,
+          field6: s6 ? (s6.t ?? s6.temp ?? null) : null,
+          field7: s7 ? (s7.t ?? s7.temp ?? null) : null,
           field8: null,
+          multi_sensor_data: {
+            S1: s1 ? { t: s1.t ?? s1.temp ?? null, h: s1.h ?? s1.humi ?? s1.hum ?? null, co2: s1.co2 ?? null, status: s1.status || 'OK' } : null,
+            S2: s2 ? { t: s2.t ?? s2.temp ?? null, h: s2.h ?? s2.humi ?? s2.hum ?? null, co2: s2.co2 ?? null, status: s2.status || 'OK' } : null,
+            S3: s3 ? { t: s3.t ?? s3.temp ?? null, h: s3.h ?? s3.humi ?? s3.hum ?? null, co2: s3.co2 ?? null, status: s3.status || 'OK' } : null,
+            S4: s4 ? { t: s4.t ?? s4.temp ?? null, h: s4.h ?? s4.humi ?? s4.hum ?? null, co2: s4.co2 ?? null, status: s4.status || 'OK' } : null,
+            S5: s5 ? { t: s5.t ?? s5.temp ?? null, h: s5.h ?? s5.humi ?? s5.hum ?? null, co2: s5.co2 ?? null, status: s5.status || 'OK' } : null,
+            S6: s6 ? { t: s6.t ?? s6.temp ?? null, h: s6.h ?? s6.humi ?? s6.hum ?? null, co2: s6.co2 ?? null, status: s6.status || 'OK' } : null,
+            S7: s7 ? { t: s7.t ?? s7.temp ?? null, h: s7.h ?? s7.humi ?? s7.hum ?? null, co2: s7.co2 ?? null, status: s7.status || 'OK' } : null,
+          }
         });
       } else if (device.deviceType === 'controlling') {
         const tel = d.telemetry || d || {};

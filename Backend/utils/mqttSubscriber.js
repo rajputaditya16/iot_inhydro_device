@@ -43,7 +43,7 @@ const resolveDeviceId = async (mqttId, topic) => {
         { _id: mongoose.Types.ObjectId.isValid(mqttId) ? mqttId : null }
       ].filter(Boolean)
     });
-  } catch (e) {}
+  } catch (e) { }
 
   if (device) {
     deviceCache.set(cacheKey, device._id);
@@ -79,7 +79,7 @@ const startMqttSubscriber = () => {
     });
   });
 
-  client.on('message', async (topic, message) => {
+  client.on('message', async (topic, message, packet) => {
     try {
       const topicParts = topic.split('/');
       // Topic structure is: inhydro/{mqttId}/...
@@ -98,14 +98,61 @@ const startMqttSubscriber = () => {
         payloadData = { raw: payloadString };
       }
 
+      const isRetain = Boolean(packet && packet.retain);
+      const rawTs = payloadData?.timestamp || payloadData?.created_at || payloadData?.time;
+      const parsedTime = rawTs && !isNaN(new Date(typeof rawTs === 'string' && rawTs.includes(' ') && !rawTs.includes('T') ? rawTs.replace(' ', 'T') : rawTs).getTime())
+        ? new Date(typeof rawTs === 'string' && rawTs.includes(' ') && !rawTs.includes('T') ? rawTs.replace(' ', 'T') : rawTs)
+        : null;
+      const packetTimestamp = parsedTime || (isRetain ? null : new Date());
+
       // Stream setpoint updates real-time via SSE to web dashboard
       if (topic.includes('/setpoints/')) {
+        const deviceId = await resolveDeviceId(mqttId, topic);
+        const now = Date.now();
+        const isFresh = !isRetain && packetTimestamp && (now - packetTimestamp.getTime() < 2 * 60 * 1000);
+
+        if (deviceId && isFresh) {
+          Device.findByIdAndUpdate(deviceId, {
+            status: 'online',
+            lastUpdated: packetTimestamp
+          }).catch(() => { });
+        }
         telemetryEmitter.emit('telemetry', {
+          deviceId: deviceId ? String(deviceId) : null,
           mqttId,
           topic,
           data: payloadData,
-          timestamp: new Date()
+          isRetain,
+          timestamp: packetTimestamp || new Date()
         });
+
+        // If packet contains sensor_data, queue telemetry document for history
+        if (payloadData && payloadData.sensor_data && typeof payloadData.sensor_data === 'object') {
+          const normData = {};
+          Object.entries(payloadData.sensor_data).forEach(([pKey, pVal]) => {
+            if (!pVal || typeof pVal !== 'object') return;
+            let sKey = null;
+            if (pVal.id !== undefined && pVal.id !== null) sKey = `s${pVal.id}`;
+            else if (pKey.toLowerCase().startsWith('s')) sKey = pKey.toLowerCase();
+            if (sKey) {
+              normData[sKey] = {
+                t: pVal.temp ?? pVal.t ?? null,
+                h: pVal.humi ?? pVal.h ?? null,
+                co2: pVal.co2 ?? null,
+                status: pVal.status || 'OK'
+              };
+            }
+          });
+          if (Object.keys(normData).length > 0) {
+            queueTelemetryDoc(mqttId, {
+              deviceId: deviceId || null,
+              mqttId,
+              topic: `inhydro/${mqttId}/telemetry/live`,
+              data: normData,
+              timestamp: packetTimestamp || new Date()
+            });
+          }
+        }
         return;
       }
 
@@ -118,7 +165,8 @@ const startMqttSubscriber = () => {
         mqttId,
         topic,
         data: payloadData,
-        timestamp: new Date()
+        isRetain,
+        timestamp: packetTimestamp || new Date()
       });
 
       if (deviceId) {
@@ -139,12 +187,16 @@ const startMqttSubscriber = () => {
           return; // Device is blocked, ignore telemetry
         }
 
+        // Only mark online if packet is fresh (not a stale retained message)
+        const tsForCheck = packetTimestamp ? packetTimestamp.getTime() : 0;
+        const isFresh = !isRetain && tsForCheck > 0 && (now - tsForCheck < 2 * 60 * 1000);
+
         // Throttle DB online status update to at most once per 15 seconds per device
-        if (now - cachedStatus.lastUpdate > 15000) {
+        if (isFresh && (now - cachedStatus.lastUpdate > 15000)) {
           cachedStatus.lastUpdate = now;
           Device.findByIdAndUpdate(deviceId, {
             status: 'online',
-            lastUpdated: new Date()
+            lastUpdated: packetTimestamp
           }).catch(err => {
             console.error(`[MQTT Subscriber] Failed to update device online status: ${err.message}`);
           });
@@ -152,15 +204,13 @@ const startMqttSubscriber = () => {
       }
 
       // ── High-Throughput Bulk Write Queue (P3 Optimization) ──
-      const packetTimestamp = (payloadData && payloadData.timestamp && !isNaN(new Date(payloadData.timestamp).getTime()))
-        ? new Date(payloadData.timestamp)
-        : new Date();
+      const saveTimestamp = packetTimestamp || new Date();
 
       if (Array.isArray(payloadData)) {
         payloadData.forEach(item => {
           const itemTime = (item && item.timestamp && !isNaN(new Date(item.timestamp).getTime()))
             ? new Date(item.timestamp)
-            : new Date();
+            : saveTimestamp;
           queueTelemetryDoc(mqttId, {
             deviceId: deviceId || null,
             mqttId,
@@ -175,7 +225,7 @@ const startMqttSubscriber = () => {
           mqttId,
           topic,
           data: payloadData,
-          timestamp: packetTimestamp
+          timestamp: saveTimestamp
         });
       }
     } catch (err) {
