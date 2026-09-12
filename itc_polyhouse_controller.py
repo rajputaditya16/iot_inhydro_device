@@ -7,9 +7,15 @@ import os
 import datetime
 import copy
 import re
+import queue
+from collections import deque
+import subprocess
+import socket
+import fcntl
+import glob
+import sys
 import tkinter as tk
 from tkinter import font, ttk, messagebox
-import sys
 import paho.mqtt.client as mqtt
 from PIL import Image, ImageTk
 
@@ -17,6 +23,7 @@ from PIL import Image, ImageTk
 # BASE PATHS & DEVICE IDENTITY
 # -----------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
 ID_FILE = os.path.join(BASE_DIR, "device_id.txt")
 
 def get_device_id():
@@ -33,6 +40,8 @@ CONFIG_FILE = os.path.join(BASE_DIR, "config_itc.json")
 SETPOINTS_FILE = os.path.join(BASE_DIR, "setpoints_itc.json")
 DLI_FILE = os.path.join(BASE_DIR, "dli_history_itc.json")
 ALARM_LOG_FILE = os.path.join(BASE_DIR, "alarm_history.jsonl")
+LOG_DIR = os.path.join(BASE_DIR, "local_logs")
+ACTIVE_LOG_FILE = os.path.join(LOG_DIR, "active.jsonl")
 
 # -----------------------------------------------------------------------------
 # MODBUS & HARDWARE CHANNEL MAPPING
@@ -92,6 +101,7 @@ system_config = {
     'upload_frequency_min': 1.0,
     'temp_alarm_offset': 5.0,
     'humi_alarm_offset': 5.0,
+    'system_password': '1234',
     'pump_arbitration_mode': 'sequential',  # 'sequential' or 'parallel'
     'pump_start_delay_sec': 3.0,
     'pump_post_run_delay_sec': 3.0,
@@ -113,6 +123,19 @@ running = True
 system_paused = False
 relay_states = {ch: False for ch in range(1, 33)}
 
+# Sensor Error & Fault Tracking (Section 15 & Section 20A Note)
+sensor_consecutive_fails = {ph: 0 for ph in ALL_POLYHOUSES}
+sensor_fault_logged = {ph: False for ph in ALL_POLYHOUSES}
+
+# UI Toast Notification Tracker
+setpoint_toast_message = ""
+setpoint_toast_expiry = 0
+
+def set_ui_toast(msg, duration_sec=5):
+    global setpoint_toast_message, setpoint_toast_expiry
+    setpoint_toast_message = msg
+    setpoint_toast_expiry = time.time() + duration_sec
+
 # DLI State (Daily Light Integral in mol/m²/day)
 dli_data = {
     "date": datetime.date.today().isoformat(),
@@ -130,8 +153,9 @@ active_water_zone_start = 0
 # 5 ACF Cyclic Timers (for PH-01 to PH-05)
 acf_timers = {ph: {"state": "ON", "switch_time": time.time()} for ph in ACTIVE_POLYHOUSES}
 
-# Sprinkler Cyclic Timers (for CYCLIC mode)
+# Sprinkler & Fogger Cyclic Timers (for CYCLIC mode)
 sprinkler_cyclic_timers = {ph: {"state": "OFF", "switch_time": time.time()} for ph in ACTIVE_POLYHOUSES}
+fogger_cyclic_timers = {ph: {"state": "OFF", "switch_time": time.time()} for ph in ACTIVE_POLYHOUSES}
 
 # Buzzer & Alarm State
 buzzer_active = False
@@ -143,6 +167,15 @@ active_warnings = []
 # Sync & Upload Trackers
 last_upload_time = 0
 last_dli_calc_time = time.time()
+last_offline_save_time = 0
+
+# Rolling Trend History for Screen 14 (120 points per polyhouse)
+trend_data_history = {ph: deque(maxlen=120) for ph in ALL_POLYHOUSES}
+trend_lock = threading.Lock()
+last_trend_sample_time = 0
+
+# Scheduled Irrigation / Fogging Runtime State (Screen 12)
+active_scheduled_irrigation = {}
 
 # -----------------------------------------------------------------------------
 # TIME FORMAT HELPERS (12-HOUR AM/PM <-> 24-HOUR)
@@ -177,6 +210,18 @@ def format_time_24h(t_str):
             return f"{hh:02d}:{mm:02d}"
     except Exception: pass
     return t_str
+
+def is_within_window(start_str, stop_str):
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    now = datetime.datetime.now(ist_tz).time()
+    try:
+        s_24 = format_time_24h(str(start_str))
+        e_24 = format_time_24h(str(stop_str))
+        st = datetime.datetime.strptime(s_24, "%H:%M").time()
+        et = datetime.datetime.strptime(e_24, "%H:%M").time()
+    except Exception:
+        return True
+    return (st <= now <= et) if st <= et else (now >= st or now <= et)
 
 # -----------------------------------------------------------------------------
 # DEFAULT ITC POLYHOUSE SCHEDULE & SETPOINTS GENERATOR
@@ -233,6 +278,22 @@ def generate_default_itc_schedule(skey):
         "acf_cycle_enabled": True,
         "acf_on_min": 15,
         "acf_off_min": 30,
+        # Control122.py Tabular Cyclic Timers
+        "Timer1 Name": "ACF FANS",
+        "Timer1 Start": "00:00",
+        "Timer1 Stop": "23:59",
+        "Timer1 ON Min": 15,
+        "Timer1 OFF Min": 30,
+        "Timer2 Name": "SPRINKLER",
+        "Timer2 Start": "06:00",
+        "Timer2 Stop": "18:00",
+        "Timer2 ON Min": 2,
+        "Timer2 OFF Min": 30,
+        "Timer3 Name": "FOGGER",
+        "Timer3 Start": "08:00",
+        "Timer3 Stop": "17:00",
+        "Timer3 ON Min": 1,
+        "Timer3 OFF Min": 2,
         "active_setting": "Setting A",
         "settings": stages,
         "irrigation_slots": [
@@ -319,6 +380,9 @@ def load_config():
     if 'pump_post_run_delay_sec' not in system_config: 
         system_config['pump_post_run_delay_sec'] = 3.0
         need_save = True
+    if 'system_password' not in system_config:
+        system_config['system_password'] = '1234'
+        need_save = True
     if 'sensor_names' not in system_config:
         system_config['sensor_names'] = {
             'PH-01': 'POLYHOUSE 01',
@@ -368,6 +432,34 @@ def save_dli_history():
     except Exception as e:
         print(f"Save DLI Error: {e}")
 
+def load_trend_history_from_logs():
+    if not os.path.exists(ACTIVE_LOG_FILE):
+        return
+    try:
+        with open(ACTIVE_LOG_FILE, "r") as f:
+            lines = [l.strip() for l in f if l.strip()]
+        for l in lines[-60:]:
+            try:
+                rec = json.loads(l)
+                ts = rec.get("timestamp", "")
+                time_label = ts.split("T")[1][:5] if "T" in ts else ts[:5]
+                s_data = rec.get("sensor_data", {})
+                for port, item in s_data.items():
+                    skey = item.get("skey")
+                    if skey in trend_data_history and item.get("status") == "OK":
+                        trend_data_history[skey].append({
+                            "time": time_label,
+                            "temp": item.get("temp"),
+                            "humi": item.get("humi"),
+                            "co2": item.get("co2"),
+                            "par": item.get("par"),
+                            "dli": item.get("dli")
+                        })
+            except Exception: pass
+        print(f"[STORAGE] Pre-loaded trend buffer from {ACTIVE_LOG_FILE}")
+    except Exception as e:
+        print(f"Load Trend Log Error: {e}")
+
 def load_setpoints():
     global sensor_setpoints
     need_save = False
@@ -395,12 +487,14 @@ def load_setpoints():
     if need_save or not os.path.exists(SETPOINTS_FILE):
         save_setpoints()
 
-def save_setpoints():
+def save_setpoints(source="LOCAL_HMI"):
     try:
         os.makedirs(os.path.dirname(os.path.abspath(SETPOINTS_FILE)), exist_ok=True)
         with open(SETPOINTS_FILE, 'w') as f:
             json.dump(sensor_setpoints, f, indent=4)
-        print(f"[STORAGE] Setpoints saved to {SETPOINTS_FILE}")
+        print(f"[STORAGE] Setpoints saved to {SETPOINTS_FILE} ({source})")
+        log_alarm_event("SYSTEM", f"Setpoints updated from {source}", "-", "-")
+        set_ui_toast(f"✔ SETPOINTS UPDATED ({source})")
         broadcast_current_state()
     except Exception as e:
         print(f"Save Setpoints Error: {e}")
@@ -408,7 +502,26 @@ def save_setpoints():
 def get_setpoints(skey):
     if skey not in sensor_setpoints:
         sensor_setpoints[skey] = generate_default_itc_schedule(skey)
-    return sensor_setpoints[skey]
+    sp = sensor_setpoints[skey]
+    if skey in ACTIVE_POLYHOUSES:
+        sp.setdefault("Timer1 Name", "ACF FANS")
+        sp.setdefault("Timer1 Start", "00:00")
+        sp.setdefault("Timer1 Stop", "23:59")
+        sp.setdefault("Timer1 ON Min", int(sp.get("acf_on_min", 15)))
+        sp.setdefault("Timer1 OFF Min", int(sp.get("acf_off_min", 30)))
+
+        sp.setdefault("Timer2 Name", "SPRINKLER")
+        sp.setdefault("Timer2 Start", "06:00")
+        sp.setdefault("Timer2 Stop", "18:00")
+        sp.setdefault("Timer2 ON Min", max(1, int(sp.get("sprinkler_duration_sec", 120)) // 60))
+        sp.setdefault("Timer2 OFF Min", int(sp.get("sprinkler_interval_min", 30)))
+
+        sp.setdefault("Timer3 Name", "FOGGER")
+        sp.setdefault("Timer3 Start", "08:00")
+        sp.setdefault("Timer3 Stop", "17:00")
+        sp.setdefault("Timer3 ON Min", max(1, int(sp.get("fogger_min_on_sec", 60)) // 60))
+        sp.setdefault("Timer3 OFF Min", max(1, int(sp.get("fogger_min_off_sec", 120)) // 60))
+    return sp
 
 def get_sensor_display_name(skey):
     names = system_config.get("sensor_names", {})
@@ -452,7 +565,22 @@ def get_active_setpoints(skey):
         "sprinkler_interval_min": int(sp_data.get("sprinkler_interval_min", 30)),
         "acf_cycle_enabled": bool(sp_data.get("acf_cycle_enabled", True)),
         "acf_on_min": int(sp_data.get("acf_on_min", 15)),
-        "acf_off_min": int(sp_data.get("acf_off_min", 30))
+        "acf_off_min": int(sp_data.get("acf_off_min", 30)),
+        "Timer1 Name": sp_data.get("Timer1 Name", "ACF FANS"),
+        "Timer1 Start": sp_data.get("Timer1 Start", "00:00"),
+        "Timer1 Stop": sp_data.get("Timer1 Stop", "23:59"),
+        "Timer1 ON Min": int(sp_data.get("Timer1 ON Min", sp_data.get("acf_on_min", 15))),
+        "Timer1 OFF Min": int(sp_data.get("Timer1 OFF Min", sp_data.get("acf_off_min", 30))),
+        "Timer2 Name": sp_data.get("Timer2 Name", "SPRINKLER"),
+        "Timer2 Start": sp_data.get("Timer2 Start", "06:00"),
+        "Timer2 Stop": sp_data.get("Timer2 Stop", "18:00"),
+        "Timer2 ON Min": int(sp_data.get("Timer2 ON Min", 2)),
+        "Timer2 OFF Min": int(sp_data.get("Timer2 OFF Min", 30)),
+        "Timer3 Name": sp_data.get("Timer3 Name", "FOGGER"),
+        "Timer3 Start": sp_data.get("Timer3 Start", "08:00"),
+        "Timer3 Stop": sp_data.get("Timer3 Stop", "17:00"),
+        "Timer3 ON Min": int(sp_data.get("Timer3 ON Min", 1)),
+        "Timer3 OFF Min": int(sp_data.get("Timer3 OFF Min", 2))
     }
 
     if mode != "SCHEDULE":
@@ -513,28 +641,50 @@ def get_active_setpoints(skey):
     return active_info
 
 # -----------------------------------------------------------------------------
-# HARDWARE RELAY CONTROL & BUZZER ROUTINES
+# HARDWARE RELAY CONTROL & BUZZER ROUTINES (THREAD-SAFE QUEUE)
 # -----------------------------------------------------------------------------
+relay_cmd_queue = queue.Queue()
+
+def relay_worker_loop():
+    global working_relay_id, running
+    while running:
+        try:
+            cmd = relay_cmd_queue.get(timeout=0.5)
+            if cmd is None:
+                break
+            channel, state = cmd
+            port = system_config.get("relay_port", RELAY_PORT_FIXED)
+            if os.path.exists(port):
+                slave_ids_to_try = [working_relay_id] if working_relay_id is not None else POSSIBLE_RELAY_IDS
+                for s_id in slave_ids_to_try:
+                    if s_id is None: continue
+                    inst = None
+                    try:
+                        inst = minimalmodbus.Instrument(port, s_id)
+                        inst.serial.baudrate = RELAY_BAUD
+                        inst.serial.timeout = 0.2
+                        inst.close_port_after_each_call = True
+                        inst.write_bit(channel - 1, 1 if state else 0, functioncode=5)
+                        working_relay_id = s_id
+                        break
+                    except Exception:
+                        pass
+                    finally:
+                        if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
+                            try: inst.serial.close()
+                            except Exception: pass
+            relay_cmd_queue.task_done()
+        except queue.Empty:
+            continue
+        except Exception:
+            pass
+
+threading.Thread(target=relay_worker_loop, daemon=True).start()
+
 def set_relay(channel, state):
-    global working_relay_id
     if channel < 1 or channel > 32: return
     relay_states[channel] = bool(state)
-
-    port = system_config.get("relay_port", RELAY_PORT_FIXED)
-    if not os.path.exists(port): return
-
-    slave_ids_to_try = [working_relay_id] if working_relay_id is not None else POSSIBLE_RELAY_IDS
-    for s_id in slave_ids_to_try:
-        if s_id is None: continue
-        try:
-            inst = minimalmodbus.Instrument(port, s_id)
-            inst.serial.baudrate = RELAY_BAUD
-            inst.serial.timeout = 0.2
-            inst.close_port_after_each_call = True
-            inst.write_bit(channel - 1, 1 if state else 0, functioncode=5)
-            working_relay_id = s_id
-            return
-        except Exception: pass
+    relay_cmd_queue.put((channel, bool(state)))
 
 def trigger_buzzer_pulse(duration_sec=5.0):
     def _pulse():
@@ -548,8 +698,14 @@ def emergency_stop_all():
     system_paused = True
     pump_active = False
     active_water_zone = None
+    while not relay_cmd_queue.empty():
+        try:
+            relay_cmd_queue.get_nowait()
+            relay_cmd_queue.task_done()
+        except Exception: break
     for ch in range(1, 33):
-        set_relay(ch, False)
+        relay_states[ch] = False
+        relay_cmd_queue.put((ch, False))
     print("[EMERGENCY] All 32 relays de-energized. System paused.")
 
 # -----------------------------------------------------------------------------
@@ -559,7 +715,10 @@ CONTROL_TOPIC = f"inhydro/{DEVICE_NAME}/control"
 CURRENT_SETP_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/current"
 CONTROL_SYNC_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/request_sync"
 
-control_client = mqtt.Client()
+try:
+    control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+except Exception:
+    control_client = mqtt.Client()
 is_mqtt_connected = False
 CONTROL_BROKER = "147.93.106.142"
 CONTROL_PORT = 1883
@@ -588,6 +747,63 @@ def broadcast_current_state():
         except Exception as e:
             print(f"Broadcast error: {e}")
 
+def save_local_telemetry_if_offline(snap_sensor, snap_dli, relay_st, pump_st):
+    global last_offline_save_time
+    if is_mqtt_connected:
+        return
+    cur_t = time.time()
+    if cur_t - last_offline_save_time < 30.0:
+        return
+    last_offline_save_time = cur_t
+
+    ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    ts_str = datetime.datetime.now(ist_tz).isoformat()
+    record = {
+        "timestamp": ts_str,
+        "device_id": DEVICE_NAME,
+        "sensor_data": snap_sensor,
+        "dli_data": snap_dli,
+        "relay_states": relay_st,
+        "pump_active": pump_st
+    }
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        with open(ACTIVE_LOG_FILE, "a") as f:
+            f.write(json.dumps(record) + "\n")
+        if os.path.exists(ACTIVE_LOG_FILE) and os.path.getsize(ACTIVE_LOG_FILE) > 1500000:
+            rot = os.path.join(LOG_DIR, f"log_{int(time.time())}.jsonl")
+            os.rename(ACTIVE_LOG_FILE, rot)
+    except Exception as e:
+        print(f"[OFFLINE LOG] Error: {e}")
+
+def sync_offline_thread():
+    while running:
+        time.sleep(15)
+        if not is_mqtt_connected or not control_client:
+            continue
+        try:
+            if not os.path.exists(LOG_DIR): continue
+            files = [f for f in os.listdir(LOG_DIR) if f.endswith(".jsonl")]
+            if not files: continue
+
+            target_f = os.path.join(LOG_DIR, files[0])
+            if os.path.exists(target_f) and os.path.getsize(target_f) > 0:
+                with open(target_f, "r") as f:
+                    lines = [line.strip() for line in f if line.strip()][:50]
+                if lines:
+                    batch = [json.loads(l) for l in lines]
+                    control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/history", json.dumps(batch), retain=False)
+                    with open(target_f, "r") as f:
+                        all_lines = f.readlines()
+                    remaining = all_lines[len(lines):]
+                    if remaining:
+                        with open(target_f, "w") as f:
+                            f.writelines(remaining)
+                    else:
+                        os.remove(target_f)
+        except Exception:
+            pass
+
 def on_control_message(client, userdata, msg):
     try:
         if msg.topic == CONTROL_SYNC_TOPIC:
@@ -599,7 +815,7 @@ def on_control_message(client, userdata, msg):
         if target_ph in ALL_POLYHOUSES:
             sp = get_setpoints(target_ph)
             sp.update(new_data)
-            save_setpoints()
+            save_setpoints(source="CLOUD_MQTT")
     except Exception as e:
         print(f"[MQTT Error] {e}")
 
@@ -628,10 +844,334 @@ try:
 except Exception: pass
 
 # -----------------------------------------------------------------------------
+# BLUETOOTH SERIAL TERMINAL & WI-FI PROVISIONING (MONIT.PY / ALMORA2.PY PATTERN)
+# -----------------------------------------------------------------------------
+def set_wifi(ssid, password):
+    try:
+        subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True)
+        command = ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password]
+        result = subprocess.run(command, capture_output=True, text=True)
+        if "key-mgmt" in result.stderr:
+            fallback_cmd = ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password, 'wifi-sec.key-mgmt', 'wpa-psk']
+            result_fallback = subprocess.run(fallback_cmd, capture_output=True, text=True)
+            if result_fallback.returncode == 0:
+                log_alarm_event("SYSTEM", f"WiFi connected to {ssid}", "CONNECTED", "ONLINE")
+                set_ui_toast(f"✔ WiFi CONNECTED: {ssid}")
+                return f"SUCCESS: Connected to '{ssid}'!"
+            else:
+                return f"FAILED: {result_fallback.stderr.strip()}"
+        if result.returncode == 0:
+            log_alarm_event("SYSTEM", f"WiFi connected to {ssid}", "CONNECTED", "ONLINE")
+            set_ui_toast(f"✔ WiFi CONNECTED: {ssid}")
+            return f"SUCCESS: Connected to '{ssid}'!"
+        else:
+            return f"FAILED: {result.stderr.strip()}"
+    except Exception as e:
+        return f"ERROR: {str(e)}"
+
+def scan_wifi():
+    try:
+        command = ['sudo', 'nmcli', '-t', '-f', 'SSID,SIGNAL', 'dev', 'wifi', 'list']
+        result = subprocess.run(command, capture_output=True, text=True, timeout=8)
+        if result.returncode == 0:
+            lines = result.stdout.strip().split('\n')
+            found = {}
+            for line in lines:
+                if ':' in line:
+                    parts = line.rsplit(':', 1)
+                    s_name = parts[0].strip()
+                    sig = parts[1].strip()
+                    if s_name and s_name not in found:
+                        found[s_name] = sig
+            if not found:
+                return "\r\n[NO WIFI NETWORKS FOUND]\r\n"
+            response = "\r\n--- NEARBY WIFI NETWORKS ---\r\n"
+            for i, (s_name, sig) in enumerate(found.items(), 1):
+                response += f"{i}. {s_name} ({sig}% Signal)\r\n"
+            response += "\r\nUse command: WIFI:SSID:PASSWORD\r\n"
+            return response
+        else:
+            return f"SCAN FAILED: {result.stderr.strip()}"
+    except Exception as e:
+        return f"SCAN ERROR: {str(e)}"
+
+def get_system_ip_summary():
+    try:
+        res = subprocess.run(['hostname', '-I'], capture_output=True, text=True)
+        ips = res.stdout.strip()
+        return ips if ips else "127.0.0.1"
+    except Exception:
+        return "Unknown"
+
+def process_bt_command(text, write_fn):
+    cmd = text.strip()
+    if not cmd: return
+    print(f"[BLUETOOTH] Received Command: '{cmd}'")
+
+    if cmd.startswith("WIFI:") or cmd.startswith("4:"):
+        raw = cmd[5:] if cmd.startswith("WIFI:") else cmd[2:]
+        parts = raw.split(":")
+        if len(parts) >= 2:
+            ssid = parts[0].strip()
+            passw = ":".join(parts[1:]).strip()
+            write_fn(f"\r\nCONNECTING TO WIFI '{ssid}'...\r\n")
+            resp = set_wifi(ssid, passw)
+            write_fn(f"\r\n{resp}\r\n\r\n")
+        else:
+            write_fn("\r\nERROR: Format is WIFI:SSID:PASSWORD or 4:SSID:PASSWORD\r\n\r\n")
+
+    elif cmd.startswith("ID:") or cmd.startswith("5:"):
+        raw_id = cmd[3:] if cmd.startswith("ID:") else cmd[2:]
+        new_id = raw_id.strip()
+        if new_id:
+            with open(ID_FILE, "w") as f: f.write(new_id)
+            write_fn(f"\r\nSUCCESS: Device ID set to {new_id}. Restarting...\r\n\r\n")
+            root.after(2000, restart_program)
+
+    elif cmd.upper() in ["SCAN", "2"]:
+        write_fn("\r\nSCANNING NEARBY WIFI NETWORKS...\r\n")
+        scan_res = scan_wifi()
+        write_fn(f"{scan_res}\r\n")
+
+    elif cmd.upper() in ["PING", "1"]:
+        write_fn("\r\nPONG - ITC Polyhouse System Alive & Ready!\r\n\r\n")
+
+    elif cmd.upper() in ["STATUS", "INFO", "3"]:
+        with sensor_data_lock: snap = dict(sensor_data)
+        lines = [
+            "=========================================",
+            f"--- ITC POLYHOUSE CONTROLLER STATUS ---",
+            f"Device ID  : {DEVICE_NAME}",
+            f"IP Address : {get_system_ip_summary()}",
+            f"Cloud MQTT : {'ONLINE' if is_mqtt_connected else 'OFFLINE'}",
+            f"Water Pump : {'RUNNING' if pump_active else 'IDLE'} (Zone: {active_water_zone or 'None'})",
+            "-----------------------------------------"
+        ]
+        for ph in ALL_POLYHOUSES:
+            port = SENSOR_MAP.get(ph)
+            d = snap.get(port, {})
+            if d.get("status") == "OK":
+                t_str = f"{d.get('temp', '--'):.1f}C"
+                h_str = f"{d.get('humi', '--'):.1f}%"
+                c_str = f", CO2: {d.get('co2')}ppm" if d.get('co2') else ""
+                lines.append(f"{ph}: Temp {t_str}, RH {h_str}{c_str}")
+            else:
+                lines.append(f"{ph}: SENSOR OFFLINE")
+        lines.append(f"Active Warnings: {', '.join(active_warnings) if active_warnings else 'None'}")
+        lines.append("=========================================\r\n")
+        write_fn("\r\n" + "\r\n".join(lines))
+
+    else:
+        fallback = f"\r\nACK: Received '{cmd}'\r\nAvailable Commands: 1.PING | 2.SCAN | 3.STATUS | 4.WIFI:SSID:PASSWORD | 5.ID:new_id\r\n\r\n"
+        write_fn(fallback)
+
+def handle_bt_client_fd(fd_int):
+    try:
+        print(f"[BLUETOOTH] Client Connected (FD: {fd_int})")
+        welcome_msg = (
+            "\r\n=================================================\r\n"
+            f"--- INHYDRO ITC POLYHOUSE AUTOMATION SYSTEM ---\r\n"
+            f"Device ID: {DEVICE_NAME}\r\n"
+            "=================================================\r\n"
+            "COMMAND MENU:\r\n"
+            "1. PING\r\n"
+            "2. SCAN\r\n"
+            "3. STATUS\r\n"
+            "4. WIFI:SSID:PASSWORD\r\n"
+            "5. ID:new_device_id\r\n"
+            "=================================================\r\n\r\n"
+        )
+        os.write(fd_int, welcome_msg.encode('utf-8'))
+
+        buf = ""
+        while True:
+            raw = os.read(fd_int, 1024)
+            if not raw:
+                print(f"[BLUETOOTH] Client Disconnected (FD: {fd_int})")
+                break
+            buf += raw.decode('utf-8', errors='ignore')
+
+            lines = []
+            while "\n" in buf or "\r" in buf:
+                if "\r\n" in buf: line, buf = buf.split("\r\n", 1)
+                elif "\n" in buf: line, buf = buf.split("\n", 1)
+                else: line, buf = buf.split("\r", 1)
+                lines.append(line)
+
+            if not lines and buf.strip():
+                lines.append(buf)
+                buf = ""
+
+            for l in lines:
+                process_bt_command(l, lambda s: os.write(fd_int, s.encode('utf-8')))
+    except Exception as e:
+        print(f"[BLUETOOTH] Client FD error: {e}")
+    finally:
+        try: os.close(fd_int)
+        except Exception: pass
+
+def handle_bt_client_sock(client_sock):
+    try:
+        welcome_msg = (
+            "\r\n=================================================\r\n"
+            f"--- INHYDRO ITC POLYHOUSE AUTOMATION SYSTEM ---\r\n"
+            f"Device ID: {DEVICE_NAME}\r\n"
+            "=================================================\r\n"
+            "COMMAND MENU:\r\n"
+            "1. PING\r\n"
+            "2. SCAN\r\n"
+            "3. STATUS\r\n"
+            "4. WIFI:SSID:PASSWORD\r\n"
+            "5. ID:new_device_id\r\n"
+            "=================================================\r\n\r\n"
+        )
+        client_sock.send(welcome_msg.encode('utf-8'))
+        buf = ""
+        while True:
+            raw = client_sock.recv(1024)
+            if not raw: break
+            buf += raw.decode('utf-8', errors='ignore')
+
+            lines = []
+            while "\n" in buf or "\r" in buf:
+                if "\r\n" in buf: line, buf = buf.split("\r\n", 1)
+                elif "\n" in buf: line, buf = buf.split("\n", 1)
+                else: line, buf = buf.split("\r", 1)
+                lines.append(line)
+
+            if not lines and buf.strip():
+                lines.append(buf)
+                buf = ""
+
+            for l in lines:
+                process_bt_command(l, lambda s: client_sock.send(s.encode('utf-8')))
+    except Exception as e:
+        pass
+    finally:
+        try: client_sock.close()
+        except Exception: pass
+
+def auto_trust_devices():
+    try:
+        subprocess.run(["bluetoothctl", "power", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["bluetoothctl", "discoverable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["bluetoothctl", "pairable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception: pass
+
+    while running:
+        try:
+            output = subprocess.check_output(['bluetoothctl', 'paired-devices'], text=True)
+            for line in output.split('\n'):
+                if line.startswith('Device '):
+                    mac = line.split(" ")[1]
+                    subprocess.run(["bluetoothctl", "trust", mac], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception: pass
+        time.sleep(15)
+
+def register_spp_dbus():
+    try:
+        for p_path in glob.glob('/usr/lib/python3*/dist-packages'):
+            if p_path not in sys.path: sys.path.append(p_path)
+        import dbus, dbus.service
+        from dbus.mainloop.glib import DBusGMainLoop
+        from gi.repository import GLib
+
+        DBusGMainLoop(set_as_default=True)
+
+        class BluetoothAgent(dbus.service.Object):
+            @dbus.service.method('org.bluez.Agent1', in_signature='', out_signature='')
+            def Release(self): pass
+            @dbus.service.method('org.bluez.Agent1', in_signature='os', out_signature='')
+            def AuthorizeService(self, device, uuid): return
+            @dbus.service.method('org.bluez.Agent1', in_signature='o', out_signature='s')
+            def RequestPinCode(self, device): return '0000'
+            @dbus.service.method('org.bluez.Agent1', in_signature='o', out_signature='u')
+            def RequestPasskey(self, device): return dbus.UInt32(123456)
+            @dbus.service.method('org.bluez.Agent1', in_signature='ouq', out_signature='')
+            def DisplayPasskey(self, device, passkey, entered): pass
+            @dbus.service.method('org.bluez.Agent1', in_signature='os', out_signature='')
+            def DisplayPinCode(self, device, pincode): pass
+            @dbus.service.method('org.bluez.Agent1', in_signature='ou', out_signature='')
+            def RequestConfirmation(self, device, passkey): return
+            @dbus.service.method('org.bluez.Agent1', in_signature='o', out_signature='')
+            def RequestAuthorization(self, device): return
+            @dbus.service.method('org.bluez.Agent1', in_signature='', out_signature='')
+            def Cancel(self): pass
+
+        class BluezProfile(dbus.service.Object):
+            @dbus.service.method('org.bluez.Profile1', in_signature='oha{sv}', out_signature='')
+            def NewConnection(self, path, fd, properties):
+                fd_int = fd.take()
+                flags = fcntl.fcntl(fd_int, fcntl.F_GETFL)
+                fcntl.fcntl(fd_int, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
+                threading.Thread(target=handle_bt_client_fd, args=(fd_int,), daemon=True).start()
+            @dbus.service.method('org.bluez.Profile1', in_signature='o', out_signature='')
+            def RequestDisconnection(self, path): pass
+
+        bus = dbus.SystemBus()
+        agent_path = '/inhydro/auto_agent'
+        try:
+            agent = BluetoothAgent(bus, agent_path)
+            obj = bus.get_object('org.bluez', '/org/bluez')
+            manager = dbus.Interface(obj, 'org.bluez.AgentManager1')
+            try: manager.UnregisterAgent(agent_path)
+            except Exception: pass
+            manager.RegisterAgent(agent_path, 'NoInputNoOutput')
+            manager.RequestDefaultAgent(agent_path)
+        except Exception: pass
+
+        profile_path = '/inhydro/spp_profile'
+        profile = BluezProfile(bus, profile_path)
+        manager_p = dbus.Interface(bus.get_object('org.bluez', '/org/bluez'), 'org.bluez.ProfileManager1')
+        opts = {
+            'AutoConnect': dbus.Boolean(True),
+            'Role': 'server',
+            'Name': f'Inhydro_{DEVICE_NAME}',
+            'Service': '00001101-0000-1000-8000-00805F9B34FB',
+            'Channel': dbus.UInt16(1),
+            'RequireAuthentication': dbus.Boolean(False),
+            'RequireAuthorization': dbus.Boolean(False)
+        }
+        manager_p.RegisterProfile(profile_path, '00001101-0000-1000-8000-00805F9B34FB', opts)
+
+        mainloop = GLib.MainLoop()
+        threading.Thread(target=mainloop.run, daemon=True).start()
+        print("[BLUETOOTH] BlueZ SPP Profile1 & GLib Event Dispatcher Registered!")
+    except Exception as e:
+        print(f"[BLUETOOTH] Notice: BlueZ DBus setup fallback: {e}")
+
+def start_bluetooth_server():
+    # 1. Register DBus Profile
+    register_spp_dbus()
+
+    # 2. Start RFCOMM socket fallback loop
+    while running:
+        server_sock = None
+        try:
+            os.system("sdptool add --channel=1 SP >/dev/null 2>&1")
+            time.sleep(0.5)
+            server_sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
+            server_sock.bind((socket.BDADDR_ANY, 1))
+            server_sock.listen(1)
+            print("[BLUETOOTH] Native RFCOMM Server Listening on Channel 1")
+            while running:
+                client_sock, client_info = server_sock.accept()
+                print(f"[BLUETOOTH] Direct RFCOMM Client connected: {client_info}")
+                threading.Thread(target=handle_bt_client_sock, args=(client_sock,), daemon=True).start()
+        except Exception as e:
+            time.sleep(5)
+        finally:
+            if server_sock:
+                try: server_sock.close()
+                except Exception: pass
+
+# -----------------------------------------------------------------------------
 # MAIN AUTOMATION & SENSOR ACQUISITION THREAD
 # -----------------------------------------------------------------------------
 def sensor_reader():
-    global running, system_paused, active_warnings, last_upload_time, last_dli_calc_time
+    global running, system_paused, active_warnings, last_upload_time, last_dli_calc_time, last_trend_sample_time
     global pump_active, pump_start_time, pump_stop_scheduled_time, active_water_zone, active_water_zone_start
     global buzzer_active, buzzer_start_time, buzzer_silenced_for_current_alarm
 
@@ -761,7 +1301,30 @@ def sensor_reader():
                     'status': 'OK' if (temp is not None and humi is not None) else 'OFFLINE'
                 }
 
+            if temp is not None and humi is not None:
+                sensor_consecutive_fails[skey] = 0
+                sensor_fault_logged[skey] = False
+            else:
+                sensor_consecutive_fails[skey] = sensor_consecutive_fails.get(skey, 0) + 1
+
         last_dli_calc_time = now
+
+        # Periodic Historical Trend Data Point Sampling (Screen 14)
+        if (now - last_trend_sample_time) >= 30.0:
+            last_trend_sample_time = now
+            with trend_lock:
+                for p_key in ALL_POLYHOUSES:
+                    p_port = SENSOR_MAP.get(p_key)
+                    with sensor_data_lock: sd = sensor_data.get(p_port, {})
+                    if sd.get("status") == "OK":
+                        trend_data_history[p_key].append({
+                            "time": now_dt.strftime("%H:%M"),
+                            "temp": sd.get("temp"),
+                            "humi": sd.get("humi"),
+                            "co2": sd.get("co2"),
+                            "par": sd.get("par"),
+                            "dli": sd.get("dli")
+                        })
 
         # 2. EVALUATE CONTROL LOGIC & ALARMS
         current_warnings = []
@@ -775,7 +1338,29 @@ def sensor_reader():
             port = SENSOR_MAP[skey]
             with sensor_data_lock: d = sensor_data.get(port, {})
             if d.get("status") != "OK":
-                current_warnings.append(f"{get_sensor_display_name(skey)} OFFLINE")
+                if sensor_consecutive_fails.get(skey, 0) >= 3:
+                    msg = f"⚠ SENSOR FAULT: {get_sensor_display_name(skey)} Comm Error"
+                    current_warnings.append(msg)
+                    if not sensor_fault_logged.get(skey, False):
+                        log_alarm_event(skey, msg, "OFFLINE", "ONLINE")
+                        trigger_buzzer_pulse(5.0)
+                        sensor_fault_logged[skey] = True
+                else:
+                    current_warnings.append(f"{get_sensor_display_name(skey)} RETRYING...")
+
+                # Safe-State Strategy (Section 15):
+                # Inhibit all active water requests to prevent flooding/runaway
+                # Maintain ACF fan in safe cyclic circulation mode
+                timer_acf = acf_timers[skey]
+                t_on_sec = float(get_setpoints(skey).get("acf_on_min", 15)) * 60.0
+                t_off_sec = float(get_setpoints(skey).get("acf_off_min", 30)) * 60.0
+                if timer_acf["state"] == "ON" and (now - timer_acf["switch_time"]) >= t_on_sec:
+                    timer_acf["state"] = "OFF"; timer_acf["switch_time"] = now
+                elif timer_acf["state"] == "OFF" and (now - timer_acf["switch_time"]) >= t_off_sec:
+                    timer_acf["state"] = "ON"; timer_acf["switch_time"] = now
+                set_relay(RELAY_CH_ACF[skey], timer_acf["state"] == "ON")
+                set_relay(RELAY_CH_FOGGER[skey], False)
+                set_relay(RELAY_CH_SPRINKLER[skey], False)
                 continue
 
             t, h = d['temp'], d['humi']
@@ -812,36 +1397,78 @@ def sensor_reader():
                 continue
 
             elif mode == "CYCLIC":
-                # ACF Cyclic Timer
+                # Control122.py style Cyclic Timers (Timer 1: ACF Fans, Timer 2: Sprinkler, Timer 3: Fogger)
+                # Timer 1: ACF Fans
                 timer_acf = acf_timers[skey]
-                t_on_sec = float(sp_eval.get("acf_on_min", 15)) * 60.0
-                t_off_sec = float(sp_eval.get("acf_off_min", 30)) * 60.0
-                if timer_acf["state"] == "ON" and (now - timer_acf["switch_time"]) >= t_on_sec:
-                    timer_acf["state"] = "OFF"; timer_acf["switch_time"] = now
-                elif timer_acf["state"] == "OFF" and (now - timer_acf["switch_time"]) >= t_off_sec:
-                    timer_acf["state"] = "ON"; timer_acf["switch_time"] = now
-                set_relay(RELAY_CH_ACF[skey], timer_acf["state"] == "ON")
+                t_on_sec = float(sp_eval.get("Timer1 ON Min", sp_eval.get("acf_on_min", 15))) * 60.0
+                t_off_sec = float(sp_eval.get("Timer1 OFF Min", sp_eval.get("acf_off_min", 30))) * 60.0
+                in_win_acf = is_within_window(sp_eval.get("Timer1 Start", "00:00"), sp_eval.get("Timer1 Stop", "23:59"))
+                if in_win_acf:
+                    if timer_acf["state"] == "ON" and (now - timer_acf["switch_time"]) >= t_on_sec:
+                        timer_acf["state"] = "OFF"; timer_acf["switch_time"] = now
+                    elif timer_acf["state"] == "OFF" and (now - timer_acf["switch_time"]) >= t_off_sec:
+                        timer_acf["state"] = "ON"; timer_acf["switch_time"] = now
+                    set_relay(RELAY_CH_ACF[skey], timer_acf["state"] == "ON")
+                else:
+                    timer_acf["state"] = "OFF"; timer_acf["switch_time"] = 0.0
+                    set_relay(RELAY_CH_ACF[skey], False)
 
-                # Sprinkler Cyclic Timer
+                # Timer 2: Sprinkler Valve
                 spr_cyc = sprinkler_cyclic_timers[skey]
-                dur_s = float(sp_eval.get("sprinkler_duration_sec", 120))
-                int_s = float(sp_eval.get("sprinkler_interval_min", 30)) * 60.0
-                if spr_cyc["state"] == "ON" and (now - spr_cyc["switch_time"]) >= dur_s:
-                    spr_cyc["state"] = "OFF"; spr_cyc["switch_time"] = now
-                elif spr_cyc["state"] == "OFF" and (now - spr_cyc["switch_time"]) >= int_s:
-                    spr_cyc["state"] = "ON"; spr_cyc["switch_time"] = now
-                if spr_cyc["state"] == "ON":
-                    water_requests.append(("SPRINKLER", skey))
+                dur_s = float(sp_eval.get("Timer2 ON Min", max(1, int(sp_eval.get("sprinkler_duration_sec", 120)) // 60))) * 60.0
+                int_s = float(sp_eval.get("Timer2 OFF Min", sp_eval.get("sprinkler_interval_min", 30))) * 60.0
+                in_win_spr = is_within_window(sp_eval.get("Timer2 Start", "06:00"), sp_eval.get("Timer2 Stop", "18:00"))
+                if in_win_spr:
+                    if spr_cyc["state"] == "ON" and (now - spr_cyc["switch_time"]) >= dur_s:
+                        spr_cyc["state"] = "OFF"; spr_cyc["switch_time"] = now
+                    elif spr_cyc["state"] == "OFF" and (now - spr_cyc["switch_time"]) >= int_s:
+                        spr_cyc["state"] = "ON"; spr_cyc["switch_time"] = now
+                    if spr_cyc["state"] == "ON":
+                        water_requests.append(("SPRINKLER", skey))
+                else:
+                    spr_cyc["state"] = "OFF"; spr_cyc["switch_time"] = 0.0
+
+                # Timer 3: Fogger Valve
+                fog_cyc = fogger_cyclic_timers[skey]
+                dur_f = float(sp_eval.get("Timer3 ON Min", max(1, int(sp_eval.get("fogger_min_on_sec", 60)) // 60))) * 60.0
+                int_f = float(sp_eval.get("Timer3 OFF Min", max(1, int(sp_eval.get("fogger_min_off_sec", 120)) // 60))) * 60.0
+                in_win_fog = is_within_window(sp_eval.get("Timer3 Start", "08:00"), sp_eval.get("Timer3 Stop", "17:00"))
+                if in_win_fog:
+                    if fog_cyc["state"] == "ON" and (now - fog_cyc["switch_time"]) >= dur_f:
+                        fog_cyc["state"] = "OFF"; fog_cyc["switch_time"] = now
+                    elif fog_cyc["state"] == "OFF" and (now - fog_cyc["switch_time"]) >= int_f:
+                        fog_cyc["state"] = "ON"; fog_cyc["switch_time"] = now
+                    if fog_cyc["state"] == "ON":
+                        water_requests.append(("FOGGER", skey))
+                else:
+                    fog_cyc["state"] = "OFF"; fog_cyc["switch_time"] = 0.0
 
             elif mode in ["AUTO", "SCHEDULE"]:
-                # Check scheduled irrigation slots
+                # Check scheduled irrigation/fogging slots (Screen 12)
                 raw_sp = get_setpoints(skey)
                 for islot in raw_sp.get("irrigation_slots", []):
                     if islot.get("enabled", True):
                         st_slot = format_time_24h(islot.get("start", "00:00"))
+                        slot_id = islot.get("id", 1)
+                        curr_active = active_scheduled_irrigation.get(skey)
                         if st_slot == current_time_str:
-                            req_type = str(islot.get("type", "sprinkler")).upper()
-                            water_requests.append((req_type, skey))
+                            if not curr_active or curr_active.get("trig_minute") != current_time_str:
+                                req_type = str(islot.get("type", "sprinkler")).upper()
+                                dur_s = float(islot.get("duration_sec", 120))
+                                active_scheduled_irrigation[skey] = {
+                                    "type": req_type,
+                                    "stop_time": now + dur_s,
+                                    "slot_id": slot_id,
+                                    "trig_minute": current_time_str
+                                }
+                                log_alarm_event(skey, f"Scheduled {req_type} Slot {slot_id} Started ({dur_s:.0f}s)", "RUNNING", "SCHEDULE")
+
+                if skey in active_scheduled_irrigation:
+                    sched_info = active_scheduled_irrigation[skey]
+                    if now < sched_info["stop_time"]:
+                        water_requests.append((sched_info["type"], skey))
+                    else:
+                        del active_scheduled_irrigation[skey]
 
                 # Table 13 Environmental Control Matrix (Rev 02)
                 t_hyst = float(sp_eval.get("temp_hysteresis", 1.0))
@@ -873,6 +1500,8 @@ def sensor_reader():
                     current_warnings.append(f"{get_sensor_display_name(skey)} High Humidity Ventilation")
                 elif is_low_t and is_low_h:
                     req_fogger, req_sprinkler, req_acf_env = True, False, False
+                elif is_low_t and is_normal_h:
+                    req_fogger, req_sprinkler, req_acf_env = False, False, False
 
                 # ACF Cyclic Timer fallback when cooling demand is idle
                 timer_acf = acf_timers[skey]
@@ -994,6 +1623,11 @@ def sensor_reader():
             broadcast_current_state()
             last_upload_time = now
 
+        # 6. LOCAL OFFLINE DATA BUFFERING (Sections 16 & 17)
+        with sensor_data_lock: snap_sensor = dict(sensor_data)
+        with dli_lock: snap_dli = dict(dli_data)
+        save_local_telemetry_if_offline(snap_sensor, snap_dli, relay_states, pump_active)
+
         time.sleep(1.0)
 
 # -----------------------------------------------------------------------------
@@ -1001,9 +1635,13 @@ def sensor_reader():
 # -----------------------------------------------------------------------------
 root = tk.Tk()
 root.title("INHYDRO ITC Polyhouse Automation System")
-root.attributes("-fullscreen", True)
-root.configure(bg="white")
+is_kiosk = "--fullscreen" in sys.argv or os.path.exists("/etc/rpi-issue")
+root.attributes("-fullscreen", is_kiosk)
 root.geometry("1024x600")
+root.bind("<Escape>", lambda event: root.attributes("-fullscreen", False))
+root.bind("<F11>", lambda event: root.attributes("-fullscreen", not bool(root.attributes("-fullscreen"))))
+root.protocol("WM_DELETE_WINDOW", lambda: quit_app())
+root.configure(bg="white")
 
 big = font.Font(family="Helvetica", size=14, weight="bold")
 med = font.Font(family="Helvetica", size=10, weight="bold")
@@ -1016,6 +1654,7 @@ BTN_FONT_INLINE = ("Helvetica", 8, "bold")
 
 def quit_app():
     global running
+    print("[APP] Shutting down ITC Polyhouse Controller gracefully...")
     running = False
     emergency_stop_all()
     try: root.destroy()
@@ -1035,7 +1674,6 @@ frame_main = tk.Frame(root, bg="white")
 frame_detail = tk.Frame(root, bg="white")
 frame_set = tk.Frame(root, bg="white")
 frame_schedule = tk.Frame(root, bg="white")
-frame_manual = tk.Frame(root, bg="white")
 
 def add_logo(parent):
     try:
@@ -1092,7 +1730,7 @@ def add_bottom_right_clock(parent, bg_color="white"):
     return lbl
 
 def show(frame):
-    for f in [frame_main, frame_detail, frame_set, frame_schedule, frame_manual]:
+    for f in [frame_main, frame_detail, frame_set, frame_schedule]:
         f.pack_forget()
     frame.pack(fill="both", expand=True)
     add_logo(frame)
@@ -1117,17 +1755,14 @@ footer_main = tk.Frame(frame_main, bg="#f1f5f9", height=80, bd=1, relief="solid"
 footer_main.pack(side="bottom", fill="x")
 footer_main.pack_propagate(False)
 
-btn_cyclic_timers = tk.Button(footer_main, text="CYCLIC TIMERS", font=BTN_FONT_MAIN, width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, bg="#0284c7", fg="white", cursor="hand2", command=lambda: open_schedule_editor("PH-01"))
-btn_cyclic_timers.pack(side="left", padx=10, pady=10)
+btn_setpoints_timers = tk.Button(footer_main, text="SETPOINTS & TIMERS", font=("Helvetica", 11, "bold"), width=22, height=FRAME_BTN_HEIGHT, bg="#0284c7", fg="white", cursor="hand2", command=lambda: check_pin_and_proceed("Setpoints & Timers", lambda: open_setpoints("PH-01")))
+btn_setpoints_timers.pack(side="left", padx=12, pady=10)
 
-btn_sys_settings = tk.Button(footer_main, text="SYSTEM SETTINGS", font=BTN_FONT_MAIN, width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, bg="#0891b2", fg="white", cursor="hand2", command=lambda: open_system_settings_modal())
-btn_sys_settings.pack(side="left", padx=10, pady=10)
+btn_sys_settings = tk.Button(footer_main, text="SETTINGS", font=("Helvetica", 11, "bold"), width=16, height=FRAME_BTN_HEIGHT, bg="#0891b2", fg="white", cursor="hand2", command=lambda: check_pin_and_proceed("System Settings", open_system_settings_modal))
+btn_sys_settings.pack(side="left", padx=12, pady=10)
 
-btn_restart_app = tk.Button(footer_main, text="RESTART", font=BTN_FONT_MAIN, width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, bg="#1565c0", fg="white", cursor="hand2", command=lambda: restart_program())
-btn_restart_app.pack(side="left", padx=10, pady=10)
-
-btn_pause = tk.Button(footer_main, text="STOP ALL", font=BTN_FONT_MAIN, width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, bg="#c62828", fg="white", cursor="hand2", command=lambda: toggle_pause())
-btn_pause.pack(side="left", padx=10, pady=10)
+btn_restart_app = tk.Button(footer_main, text="RESTART", font=("Helvetica", 11, "bold"), width=14, height=FRAME_BTN_HEIGHT, bg="#1565c0", fg="white", cursor="hand2", command=lambda: restart_program())
+btn_restart_app.pack(side="left", padx=12, pady=10)
 
 lbl_clock = tk.Label(footer_main, text="Day, YYYY-MM-DD\n hh:mm:ss AM/PM (IST)", font=("Helvetica", 10, "bold"), fg="#00897b", bg="#f1f5f9", justify="right")
 lbl_clock.pack(side="right", padx=15, pady=5)
@@ -1150,9 +1785,11 @@ def toggle_pause():
     system_paused = not system_paused
     if system_paused:
         emergency_stop_all()
-        btn_pause.config(text="RESUME RUN", bg="#2e7d32")
+        if 'btn_pause' in globals() and btn_pause.winfo_exists():
+            btn_pause.config(text="RESUME RUN", bg="#2e7d32")
     else:
-        btn_pause.config(text="STOP ALL", bg="#c62828")
+        if 'btn_pause' in globals() and btn_pause.winfo_exists():
+            btn_pause.config(text="STOP ALL", bg="#c62828")
 
 def rebuild_grid():
     for i in range(10):
@@ -1174,64 +1811,30 @@ active_detail_skey = "PH-01"
 lbl_detail_title = tk.Label(frame_detail, text="POLYHOUSE DETAILS", font=big, fg="#1565c0", bg="white")
 lbl_detail_title.pack(pady=(35, 4))
 
-# Operating Mode Switcher Bar
-mode_frame = tk.Frame(frame_detail, bg="white")
-mode_frame.pack(pady=4)
-
-tk.Label(mode_frame, text="OPERATING MODE:", font=("Helvetica", 11, "bold"), bg="white", fg="#475569").pack(side="left", padx=8)
-
-mode_buttons = {}
-for m_name in ["AUTO", "MANUAL", "SCHEDULE", "CYCLIC"]:
-    btn_m = tk.Button(mode_frame, text=m_name, font=("Helvetica", 10, "bold"), bg="#e2e8f0", fg="#1e293b",
-                      width=10, height=1, relief="flat", bd=0, cursor="hand2")
-    btn_m.config(command=lambda m=m_name: set_polyhouse_mode(m))
-    btn_m.pack(side="left", padx=4)
-    mode_buttons[m_name] = btn_m
-
-def set_polyhouse_mode(new_mode):
-    global active_detail_skey
-    if active_detail_skey == "PH-06":
-        messagebox.showinfo("Monitoring Zone", "PH-06 is a designated monitoring-only zone without actuator control.")
-        return
-    sp = get_setpoints(active_detail_skey)
-    sp["mode"] = new_mode
-    save_setpoints()
-    update_mode_buttons_highlight()
-    update_ui()
-
-def update_mode_buttons_highlight():
-    curr_mode = get_setpoints(active_detail_skey).get("mode", "AUTO").upper()
-    for m, btn in mode_buttons.items():
-        if m == curr_mode:
-            btn.config(bg="#1565c0", fg="white")
-        else:
-            btn.config(bg="#e2e8f0", fg="#1e293b")
-
-txt_detail_data = tk.Text(frame_detail, font=font.Font(size=11, weight="bold"), bg="white", bd=0, highlightthickness=0, height=18, width=75)
-txt_detail_data.pack(pady=5, expand=True, fill="both")
+txt_detail_data = tk.Text(frame_detail, font=font.Font(size=11, weight="bold"), bg="white", bd=0, highlightthickness=0, height=16, width=75)
+txt_detail_data.pack(pady=10, expand=True, fill="both")
 txt_detail_data.tag_configure("black", foreground="#000000", justify="center")
 txt_detail_data.tag_configure("blue", foreground="#1565c0", justify="center")
 txt_detail_data.tag_configure("green", foreground="#16a34a", justify="center")
 txt_detail_data.tag_configure("red", foreground="#c62828", justify="center")
 txt_detail_data.tag_configure("grey", foreground="#64748b", justify="center")
 
-btn_f_det = tk.Frame(frame_detail, bg="white")
-btn_f_det.pack(side="bottom", pady=25)
+footer_det = tk.Frame(frame_detail, bg="#f1f5f9", height=80, bd=1, relief="solid", highlightbackground="#cbd5e1")
+footer_det.pack(side="bottom", fill="x")
+footer_det.pack_propagate(False)
 
-btn_back_det = tk.Button(btn_f_det, text="BACK TO DASHBOARD", font=BTN_FONT_MAIN, bg="#64748b", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: show(frame_main))
-btn_back_det.pack(side="left", padx=6)
+btn_back_det = tk.Button(footer_det, text="BACK TO DASHBOARD", font=("Helvetica", 11, "bold"), bg="#64748b", fg="white", width=20, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: show(frame_main))
+btn_back_det.pack(side="left", padx=12, pady=10)
 
-btn_set_det = tk.Button(btn_f_det, text="CONFIGURE SETPOINTS", font=BTN_FONT_MAIN, bg="#1565c0", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: open_setpoints(active_detail_port))
-btn_set_det.pack(side="left", padx=6)
+btn_set_det = tk.Button(footer_det, text="SETPOINTS & TIMERS", font=("Helvetica", 11, "bold"), bg="#0284c7", fg="white", width=22, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: check_pin_and_proceed("Configure Setpoints & Timers", lambda: open_setpoints(active_detail_port)))
+btn_set_det.pack(side="left", padx=12, pady=10)
 
-btn_sched_det = tk.Button(btn_f_det, text="CYCLIC TIMERS", font=BTN_FONT_MAIN, bg="#0284c7", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: open_schedule_editor(active_detail_skey))
-btn_sched_det.pack(side="left", padx=6)
+btn_rename_det = tk.Button(footer_det, text="RENAME", font=("Helvetica", 11, "bold"), bg="#d97706", fg="white", width=14, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: edit_active_polyhouse_name())
+btn_rename_det.pack(side="left", padx=12, pady=10)
 
-btn_manual_det = tk.Button(btn_f_det, text="MANUAL OVERRIDE", font=BTN_FONT_MAIN, bg="#ea580c", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: open_manual_control_for_house(active_detail_skey))
-btn_manual_det.pack(side="left", padx=6)
-
-btn_rename_det = tk.Button(btn_f_det, text="RENAME", font=BTN_FONT_MAIN, bg="#d97706", fg="white", width=12, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: edit_active_polyhouse_name())
-btn_rename_det.pack(side="left", padx=6)
+lbl_clock_det = tk.Label(footer_det, text="Day, YYYY-MM-DD\n hh:mm:ss AM/PM (IST)", font=("Helvetica", 10, "bold"), fg="#00897b", bg="#f1f5f9", justify="right")
+lbl_clock_det.pack(side="right", padx=15, pady=5)
+clock_labels.append(lbl_clock_det)
 
 def open_sensor_detail(port):
     global active_detail_port, active_detail_skey
@@ -1239,17 +1842,12 @@ def open_sensor_detail(port):
     active_detail_skey = next((k for k, v in SENSOR_MAP.items() if v == port), "PH-01")
     if active_detail_skey == "PH-06":
         lbl_detail_title.config(text=f"{get_sensor_display_name(active_detail_skey)} — ENVIRONMENTAL MONITORING")
-        mode_frame.pack_forget()
-        btn_sched_det.pack_forget()
-        btn_manual_det.pack_forget()
-        btn_set_det.config(text="CONFIGURE LIMITS")
+        btn_set_det.config(text="LIMITS")
     else:
-        lbl_detail_title.config(text=f"{get_sensor_display_name(active_detail_skey)} — DETAILED CONTROL")
-        mode_frame.pack(pady=4, before=txt_detail_data)
-        btn_sched_det.pack(side="left", padx=6, after=btn_set_det)
-        btn_manual_det.pack(side="left", padx=6, after=btn_sched_det)
-        btn_set_det.config(text="CONFIGURE SETPOINTS")
-        update_mode_buttons_highlight()
+        lbl_detail_title.config(text=f"{get_sensor_display_name(active_detail_skey)} — DETAILED MONITORING")
+        btn_set_det.pack(side="left", padx=12, pady=10, after=btn_back_det)
+        btn_rename_det.pack(side="left", padx=12, pady=10, after=btn_set_det)
+        btn_set_det.config(text="SETPOINTS & TIMERS")
     show(frame_detail)
 
 def edit_active_polyhouse_name():
@@ -1261,142 +1859,6 @@ def edit_active_polyhouse_name():
             lbl_detail_title.config(text=f"{new_name.strip()} — DETAILED CONTROL")
             update_ui()
     open_almora_keypad(f"Rename ({active_detail_skey})", curr_name, on_confirm, is_alphanumeric=True)
-
-# -----------------------------------------------------------------------------
-# SCREEN 13: MANUAL CONTROL & INDEPENDENT TESTING FRAME (frame_manual)
-# -----------------------------------------------------------------------------
-selected_manual_house = "PH-01"
-
-lbl_man_title = tk.Label(frame_manual, text="SCREEN 13 : MANUAL CONTROL & TESTING (SAFETY INTERLOCKED)", font=big, fg="#ea580c", bg="white")
-lbl_man_title.pack(pady=(35, 4))
-
-man_house_bar = tk.Frame(frame_manual, bg="white")
-man_house_bar.pack(pady=4)
-
-tk.Label(man_house_bar, text="SELECT POLYHOUSE:", font=("Helvetica", 11, "bold"), bg="white", fg="#475569").pack(side="left", padx=6)
-
-man_house_buttons = {}
-for ph in ACTIVE_POLYHOUSES:
-    b_ph = tk.Button(man_house_bar, text=ph, font=("Helvetica", 10, "bold"), bg="#e2e8f0", fg="#1e293b",
-                     width=9, height=1, relief="flat", bd=0, cursor="hand2")
-    b_ph.config(command=lambda p=ph: select_manual_house(p))
-    b_ph.pack(side="left", padx=3)
-    man_house_buttons[ph] = b_ph
-
-def select_manual_house(ph):
-    global selected_manual_house
-    selected_manual_house = ph
-    for p, b in man_house_buttons.items():
-        if p == selected_manual_house: b.config(bg="#ea580c", fg="white")
-        else: b.config(bg="#e2e8f0", fg="#1e293b")
-    refresh_manual_card()
-
-def open_manual_control_for_house(ph):
-    if ph in ACTIVE_POLYHOUSES:
-        select_manual_house(ph)
-    show(frame_manual)
-
-manual_cards_frame = tk.Frame(frame_manual, bg="white")
-manual_cards_frame.pack(pady=10, padx=20, fill="both", expand=True)
-
-# Polyhouse Actuators Card (Left)
-man_left_card = tk.LabelFrame(manual_cards_frame, text="POLYHOUSE FIELD ACTUATORS", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="white", padx=15, pady=15, bd=2, relief="solid")
-man_left_card.pack(side="left", fill="both", expand=True, padx=10)
-
-lbl_man_acf_stat = tk.Label(man_left_card, text="ACF (24 Fans): OFF", font=med, bg="white", fg="#c62828")
-lbl_man_acf_stat.pack(pady=4)
-btn_man_acf = tk.Button(man_left_card, text="TOGGLE ACF (24 FANS)", font=BTN_FONT_MAIN, bg="#1565c0", fg="white", width=24, height=2, cursor="hand2")
-btn_man_acf.pack(pady=4)
-
-lbl_man_spr_stat = tk.Label(man_left_card, text="Sprinkler Valve: CLOSED", font=med, bg="white", fg="#c62828")
-lbl_man_spr_stat.pack(pady=4)
-btn_man_spr = tk.Button(man_left_card, text="TOGGLE SPRINKLER VALVE", font=BTN_FONT_MAIN, bg="#0284c7", fg="white", width=24, height=2, cursor="hand2")
-btn_man_spr.pack(pady=4)
-
-lbl_man_fog_stat = tk.Label(man_left_card, text="Fogger Valve: CLOSED", font=med, bg="white", fg="#c62828")
-lbl_man_fog_stat.pack(pady=4)
-btn_man_fog = tk.Button(man_left_card, text="TOGGLE FOGGER VALVE", font=BTN_FONT_MAIN, bg="#0891b2", fg="white", width=24, height=2, cursor="hand2")
-btn_man_fog.pack(pady=4)
-
-# Global Common Equipment Card (Right)
-man_right_card = tk.LabelFrame(manual_cards_frame, text="COMMON WATER PUMP & SAFETY INTERLOCKS", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="white", padx=15, pady=15, bd=2, relief="solid")
-man_right_card.pack(side="right", fill="both", expand=True, padx=10)
-
-lbl_man_pump_stat = tk.Label(man_right_card, text="Common Water Pump: STOPPED", font=med, bg="white", fg="#c62828")
-lbl_man_pump_stat.pack(pady=6)
-
-lbl_pump_interlock_msg = tk.Label(man_right_card, text="Safety Rule: Pump requires at least 1 open valve\nto prevent deadhead pressure or dry running.", font=("Helvetica", 9), bg="#f8fafc", fg="#475569", relief="solid", bd=1, padx=8, pady=4)
-lbl_pump_interlock_msg.pack(pady=4)
-
-btn_man_pump = tk.Button(man_right_card, text="TOGGLE COMMON PUMP", font=BTN_FONT_MAIN, bg="#16a34a", fg="white", width=24, height=2, cursor="hand2")
-btn_man_pump.pack(pady=6)
-
-btn_test_buzzer = tk.Button(man_right_card, text="TEST HARDWARE BUZZER (5s)", font=BTN_FONT_MAIN, bg="#d97706", fg="white", width=24, height=1, cursor="hand2", command=lambda: trigger_buzzer_pulse(5.0))
-btn_test_buzzer.pack(pady=6)
-
-btn_emergency_stop = tk.Button(man_right_card, text="EMERGENCY ALL RELAYS OFF", font=BTN_FONT_MAIN, bg="#dc2626", fg="white", width=24, height=2, cursor="hand2", command=emergency_stop_all)
-btn_emergency_stop.pack(pady=6)
-
-def toggle_manual_acf():
-    ch = RELAY_CH_ACF[selected_manual_house]
-    new_state = not relay_states.get(ch, False)
-    set_relay(ch, new_state)
-    refresh_manual_card()
-
-def toggle_manual_sprinkler():
-    ch = RELAY_CH_SPRINKLER[selected_manual_house]
-    new_state = not relay_states.get(ch, False)
-    set_relay(ch, new_state)
-    refresh_manual_card()
-
-def toggle_manual_fogger():
-    ch = RELAY_CH_FOGGER[selected_manual_house]
-    new_state = not relay_states.get(ch, False)
-    set_relay(ch, new_state)
-    refresh_manual_card()
-
-def toggle_manual_pump():
-    global pump_active
-    curr_pump = relay_states.get(RELAY_CH_COMMON_PUMP, False)
-    if not curr_pump:
-        # Safety Check: Is any water valve open?
-        open_valves = [ph for ph in ACTIVE_POLYHOUSES if relay_states.get(RELAY_CH_SPRINKLER[ph]) or relay_states.get(RELAY_CH_FOGGER[ph])]
-        if not open_valves:
-            # Auto-open current sprinkler to protect pump
-            set_relay(RELAY_CH_SPRINKLER[selected_manual_house], True)
-            messagebox.showinfo("Safety Interlock", f"Auto-opened {selected_manual_house} sprinkler valve before starting pump to prevent deadhead overpressure.")
-        set_relay(RELAY_CH_COMMON_PUMP, True)
-        pump_active = True
-    else:
-        set_relay(RELAY_CH_COMMON_PUMP, False)
-        pump_active = False
-    refresh_manual_card()
-
-btn_man_acf.config(command=toggle_manual_acf)
-btn_man_spr.config(command=toggle_manual_sprinkler)
-btn_man_fog.config(command=toggle_manual_fogger)
-btn_man_pump.config(command=toggle_manual_pump)
-
-def refresh_manual_card():
-    ph = selected_manual_house
-    ch_acf = RELAY_CH_ACF[ph]
-    ch_spr = RELAY_CH_SPRINKLER[ph]
-    ch_fog = RELAY_CH_FOGGER[ph]
-
-    acf_st = relay_states.get(ch_acf, False)
-    spr_st = relay_states.get(ch_spr, False)
-    fog_st = relay_states.get(ch_fog, False)
-    pump_st = relay_states.get(RELAY_CH_COMMON_PUMP, False)
-
-    lbl_man_acf_stat.config(text=f"{ph} ACF (24 Fans): {'RUNNING (ON)' if acf_st else 'STOPPED (OFF)'}", fg="#16a34a" if acf_st else "#c62828")
-    lbl_man_spr_stat.config(text=f"{ph} Sprinkler: {'OPEN' if spr_st else 'CLOSED'}", fg="#16a34a" if spr_st else "#c62828")
-    lbl_man_fog_stat.config(text=f"{ph} Fogger: {'OPEN' if fog_st else 'CLOSED'}", fg="#16a34a" if fog_st else "#c62828")
-    lbl_man_pump_stat.config(text=f"Common Water Pump: {'RUNNING' if pump_st else 'STOPPED'}", fg="#16a34a" if pump_st else "#c62828")
-
-man_footer = tk.Frame(frame_manual, bg="white")
-man_footer.pack(side="bottom", pady=20)
-tk.Button(man_footer, text="BACK TO DASHBOARD", font=BTN_FONT_MAIN, bg="#64748b", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: show(frame_main)).pack(side="left", padx=10)
-tk.Button(man_footer, text="VIEW DETAILS", font=BTN_FONT_MAIN, bg="#1565c0", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: open_sensor_detail(SENSOR_MAP[selected_manual_house])).pack(side="left", padx=10)
 
 # -----------------------------------------------------------------------------
 # SCREEN 10 & 11: UNIFIED SETPOINTS & CYCLIC TIMERS (MONIT.PY DESIGN)
@@ -1525,19 +1987,9 @@ def render_unified_setpoints_view():
         make_sp_cell(grid_m, ph, "humi_low_limit", "RH Low Min (%):", width_lbl=20, default_val=35.0).grid(row=1, column=1, padx=10, pady=6, sticky="ew")
         return
 
-    # TOP SECTION: 2 Equal Columns (Left: Climate Control, Right: Equipment Limits)
-    sp_top_container = tk.Frame(sp_container, bg="#ffffff")
-    sp_top_container.pack(fill="x", side="top", pady=(0, 4))
-
-    left_sp_pane = tk.Frame(sp_top_container, bg="#ffffff")
-    left_sp_pane.pack(side="left", fill="both", expand=True, padx=4)
-
-    right_sp_pane = tk.Frame(sp_top_container, bg="#ffffff")
-    right_sp_pane.pack(side="right", fill="both", expand=True, padx=4)
-
-    # Card 1 (LEFT PANE): Climate Control
-    card_climate = tk.LabelFrame(left_sp_pane, text=f" {disp_name} CLIMATE CONTROL ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
-    card_climate.pack(fill="both", expand=True, pady=4, padx=4)
+    # TOP SECTION: Climate Control (Full Width)
+    card_climate = tk.LabelFrame(sp_container, text=f" {disp_name} CLIMATE CONTROL ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
+    card_climate.pack(fill="x", side="top", pady=(0, 6), padx=4)
 
     grid_climate = tk.Frame(card_climate, bg="#ffffff")
     grid_climate.pack(pady=4, padx=6, fill="x")
@@ -1552,7 +2004,7 @@ def render_unified_setpoints_view():
     make_sp_cell(temp_section, ph, "temp_hysteresis", "Hysteresis:").pack(fill="x", pady=2)
 
     # Vertical Separator
-    tk.Frame(grid_climate, bg="#cbd5e1", width=1).pack(side="left", fill="y", padx=4, pady=2)
+    tk.Frame(grid_climate, bg="#cbd5e1", width=1).pack(side="left", fill="y", padx=8, pady=2)
 
     # Right Column: Humidity Setpoints
     humi_section = tk.Frame(grid_climate, bg="#ffffff")
@@ -1563,118 +2015,81 @@ def render_unified_setpoints_view():
     make_sp_cell(humi_section, ph, "humi_high", "RH Max:").pack(fill="x", pady=2)
     make_sp_cell(humi_section, ph, "humi_hysteresis", "Hysteresis:").pack(fill="x", pady=2)
 
-    # Card 2 (RIGHT PANE): Equipment Run/Rest Limits
-    card_limits = tk.LabelFrame(right_sp_pane, text=f" {disp_name} EQUIPMENT RUN/REST LIMITS ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
-    card_limits.pack(fill="both", expand=True, pady=4, padx=4)
-
-    grid_limits = tk.Frame(card_limits, bg="#ffffff")
-    grid_limits.pack(pady=4, padx=6, fill="x")
-
-    make_sp_cell(grid_limits, ph, "fogger_min_on_sec", "Fogger Min ON (Sec):", width_lbl=20, default_val=60).pack(fill="x", pady=2)
-    make_sp_cell(grid_limits, ph, "fogger_min_off_sec", "Fogger Min OFF (Sec):", width_lbl=20, default_val=120).pack(fill="x", pady=2)
-    make_sp_cell(grid_limits, ph, "sprinkler_duration_sec", "Sprinkler Spray (Sec):", width_lbl=20, default_val=120).pack(fill="x", pady=2)
-    make_sp_cell(grid_limits, ph, "sprinkler_interval_min", "Sprinkler Rest (Min):", width_lbl=20, default_val=30).pack(fill="x", pady=2)
-
-    # BOTTOM SECTION: CYCLIC TIMERS (Exact monit.py design with build_timer_grid_box)
+    # BOTTOM SECTION: CYCLIC TIMERS (Exact control122.py make_tabular_timers_card design)
     sp_bottom_container = tk.Frame(sp_container, bg="#ffffff")
     sp_bottom_container.pack(fill="x", side="top", pady=(4, 6), padx=4)
 
-    card_timers_1 = tk.LabelFrame(sp_bottom_container, text=f" {disp_name} CYCLIC TIMERS ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
+    card_font = ("Arial", 11, "bold")
+    color = "#1565c0"
+    card_timers_1 = tk.LabelFrame(sp_bottom_container, text=f" {disp_name} CYCLIC TIMERS ", font=card_font, fg=color, bg="white", bd=2, relief="groove")
     card_timers_1.pack(fill="x", pady=(3, 6), padx=4)
 
-    cols_group = [
-        {"name": "ACF Fans (24 Fans)", "load": "24 ACFs Group", "on_k": "acf_on_min", "on_unit": "Min", "off_k": "acf_off_min", "off_unit": "Min", "en_k": "acf_cycle_enabled"},
-        {"name": "Sprinkler Valve",    "load": "Solenoid Ch " + str(RELAY_CH_SPRINKLER.get(ph, 6)), "on_k": "sprinkler_duration_sec", "on_unit": "Sec", "off_k": "sprinkler_interval_min", "off_unit": "Min", "en_k": None},
-        {"name": "Fogger Valve",       "load": "Solenoid Ch " + str(RELAY_CH_FOGGER.get(ph, 11)), "on_k": "fogger_min_on_sec", "on_unit": "Sec", "off_k": "fogger_min_off_sec", "off_unit": "Sec", "en_k": None}
+    cols = [
+        {"name": "Timer 1 (ACF)", "keys": {
+            "Name": "Timer1 Name", "Start": "Timer1 Start", "Stop": "Timer1 Stop", "ON Min": "Timer1 ON Min", "OFF Min": "Timer1 OFF Min"
+        }},
+        {"name": "Timer 2 (Sprinkler)", "keys": {
+            "Name": "Timer2 Name", "Start": "Timer2 Start", "Stop": "Timer2 Stop", "ON Min": "Timer2 ON Min", "OFF Min": "Timer2 OFF Min"
+        }},
+        {"name": "Timer 3 (Fogger)", "keys": {
+            "Name": "Timer3 Name", "Start": "Timer3 Start", "Stop": "Timer3 Stop", "ON Min": "Timer3 ON Min", "OFF Min": "Timer3 OFF Min"
+        }},
     ]
 
-    header_frame = tk.Frame(card_timers_1, bg="#f1f5f9")
-    header_frame.pack(fill="x", pady=4, padx=6)
-    tk.Label(header_frame, text="Setting", font=("Arial", 10, "bold"), fg="#64748b", bg="#f1f5f9", width=12, anchor="w").pack(side="left", padx=2)
+    lbl_font = ("Arial", 10, "bold")
+    btn_font = ("Arial", 9, "bold")
 
-    for col in cols_group:
-        col_hdr = tk.Frame(header_frame, bg="#f1f5f9")
-        col_hdr.pack(side="left", expand=True, fill="x", padx=3)
-        tk.Label(col_hdr, text=col["name"].upper(), font=("Arial", 10, "bold"), fg="#1565c0", bg="#f1f5f9", anchor="center").pack(side="left", expand=True, padx=2)
+    header_frame = tk.Frame(card_timers_1, bg="#f5f5f5")
+    header_frame.pack(fill="x", pady=2, padx=2)
+    tk.Label(header_frame, text="Setting", font=lbl_font, fg="#555", bg="#f5f5f5", width=12, anchor="w").pack(side="left", padx=2)
+    for col in cols:
+        tk.Label(header_frame, text=col["name"], font=lbl_font, fg=color, bg="#f5f5f5", width=15, anchor="center").pack(side="left", expand=True)
 
-    # Row 1: Load Description
-    r_load = tk.Frame(card_timers_1, bg="#ffffff"); r_load.pack(fill="x", pady=3, padx=6)
-    tk.Label(r_load, text="Actuator Load:", font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", width=12, anchor="w").pack(side="left", padx=2)
-    for col in cols_group:
-        col_f = tk.Frame(r_load, bg="#ffffff"); col_f.pack(side="left", expand=True, fill="x", padx=3)
-        tk.Label(col_f, text=col["load"], font=("Arial", 9), fg="#475569", bg="#ffffff", anchor="center").pack(side="left", expand=True)
+    row_keys = [("Name", "Name:"), ("Start", "Start:"), ("Stop", "Stop:"), ("ON Min", "ON Min:"), ("OFF Min", "OFF Min:")]
 
-    # Row 2: Status / Enable
-    r_stat = tk.Frame(card_timers_1, bg="#ffffff"); r_stat.pack(fill="x", pady=3, padx=6)
-    tk.Label(r_stat, text="Cyclic Status:", font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", width=12, anchor="w").pack(side="left", padx=2)
-    for col in cols_group:
-        col_f = tk.Frame(r_stat, bg="#ffffff"); col_f.pack(side="left", expand=True, fill="x", padx=3)
-        if col["en_k"]:
-            en_v = tk.BooleanVar(value=sp.get(col["en_k"], True))
-            def _tog(k=col["en_k"], v=en_v):
-                sp[k] = v.get(); save_setpoints()
-            tk.Checkbutton(col_f, text="Cyclic Active", variable=en_v, font=("Arial", 9, "bold"), bg="#ffffff", fg="#1565c0", command=_tog).pack(anchor="center")
-        else:
-            tk.Label(col_f, text="Active in CYCLIC", font=("Arial", 9, "bold"), fg="#16a34a", bg="#ffffff").pack(anchor="center")
+    for r_key, r_lbl in row_keys:
+        r_frame = tk.Frame(card_timers_1, bg="white")
+        r_frame.pack(fill="x", pady=3, padx=2)
 
-    # Row 3: ON Duration
-    r_on = tk.Frame(card_timers_1, bg="#ffffff"); r_on.pack(fill="x", pady=3, padx=6)
-    tk.Label(r_on, text="ON Duration:", font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", width=12, anchor="w").pack(side="left", padx=2)
-    for col in cols_group:
-        col_f = tk.Frame(r_on, bg="#ffffff"); col_f.pack(side="left", expand=True, fill="x", padx=3)
-        on_k = col["on_k"]
-        val_lbl = tk.Label(col_f, text=f"{sp.get(on_k, 0)} {col['on_unit']}", font=("Arial", 10, "bold"), fg="#e65100", bg="#f8fafc", width=8, anchor="center", relief="sunken", bd=1)
-        val_lbl.pack(side="left", expand=True, padx=2)
-        def _edit_on(k=on_k, l=val_lbl, u=col["on_unit"], nm=col["name"]):
-            def _set(v):
-                try:
-                    iv = int(float(v))
-                    sp[k] = iv
-                    l.config(text=f"{iv} {u}")
-                    save_setpoints()
-                except Exception: pass
-            open_almora_keypad(f"Set {ph} {nm} ON ({u})", str(sp.get(k, 0)), _set)
-        tk.Button(col_f, text="EDIT", font=("Arial", 9, "bold"), width=5, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=1, padx=3,
-                  command=_edit_on).pack(side="right", padx=2)
+        tk.Label(r_frame, text=r_lbl, font=lbl_font, fg="#555", bg="white", width=12, anchor="w").pack(side="left", padx=2)
 
-    # Row 4: OFF Duration / Interval
-    r_off = tk.Frame(card_timers_1, bg="#ffffff"); r_off.pack(fill="x", pady=3, padx=6)
-    tk.Label(r_off, text="OFF Interval:", font=("Arial", 10, "bold"), fg="#0f172a", bg="#ffffff", width=12, anchor="w").pack(side="left", padx=2)
-    for col in cols_group:
-        col_f = tk.Frame(r_off, bg="#ffffff"); col_f.pack(side="left", expand=True, fill="x", padx=3)
-        off_k = col["off_k"]
-        val_lbl2 = tk.Label(col_f, text=f"{sp.get(off_k, 0)} {col['off_unit']}", font=("Arial", 10, "bold"), fg="#e65100", bg="#f8fafc", width=8, anchor="center", relief="sunken", bd=1)
-        val_lbl2.pack(side="left", expand=True, padx=2)
-        def _edit_off(k=off_k, l=val_lbl2, u=col["off_unit"], nm=col["name"]):
-            def _set(v):
-                try:
-                    iv = int(float(v))
-                    sp[k] = iv
-                    l.config(text=f"{iv} {u}")
-                    save_setpoints()
-                except Exception: pass
-            open_almora_keypad(f"Set {ph} {nm} OFF ({u})", str(sp.get(k, 0)), _set)
-        tk.Button(col_f, text="EDIT", font=("Arial", 9, "bold"), width=5, bg="#0284c7", fg="white", activebackground="#38bdf8", activeforeground="white", bd=1, relief="raised", pady=1, padx=3,
-                  command=_edit_off).pack(side="right", padx=2)
+        for col in cols:
+            col_frame = tk.Frame(r_frame, bg="white")
+            col_frame.pack(side="left", expand=True, fill="x")
 
-    # Quick Matrix: All 5 Polyhouses ACF Fans
-    card_all = tk.LabelFrame(sp_bottom_container, text=" ALL 5 POLYHOUSES ACF CYCLIC TIMERS QUICK VIEW ", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff", bd=2, relief="groove")
-    card_all.pack(fill="x", pady=(6, 12), padx=4)
+            full_key = col["keys"][r_key]
+            val_lbl = tk.Label(col_frame, text=str(sp.get(full_key, "")),
+                               font=lbl_font, fg="#e65100" if r_key != "Name" else "#333", bg="white", width=10, anchor="center")
+            val_lbl.pack(side="left", expand=True)
 
-    grid_all = tk.Frame(card_all, bg="#ffffff")
-    grid_all.pack(fill="x", pady=4, padx=6)
+            def _make_timer_edit(k=full_key, l=val_lbl, rk=r_key, ph_name=ph):
+                def _confirm(val):
+                    try:
+                        if rk in ["ON Min", "OFF Min"]:
+                            iv = int(float(val))
+                            sp[k] = iv
+                            if k == "Timer1 ON Min": sp["acf_on_min"] = iv
+                            elif k == "Timer1 OFF Min": sp["acf_off_min"] = iv
+                            elif k == "Timer2 ON Min": sp["sprinkler_duration_sec"] = iv * 60
+                            elif k == "Timer2 OFF Min": sp["sprinkler_interval_min"] = iv
+                            elif k == "Timer3 ON Min": sp["fogger_min_on_sec"] = iv * 60
+                            elif k == "Timer3 OFF Min": sp["fogger_min_off_sec"] = iv * 60
+                        else:
+                            sp[k] = str(val).strip()
+                        l.config(text=str(sp[k]))
+                        save_setpoints()
+                    except Exception: pass
 
-    for idx, p_house in enumerate(ACTIVE_POLYHOUSES):
-        p_sp = get_setpoints(p_house)
-        b_box = tk.Frame(grid_all, bg="#f8fafc", bd=1, relief="solid", padx=6, pady=4)
-        b_box.grid(row=0, column=idx, padx=4, pady=2, sticky="nsew")
-        grid_all.columnconfigure(idx, weight=1)
+                is_alpha = (rk == "Name")
+                kmode = "alphanumeric" if is_alpha else ("time" if rk in ["Start", "Stop"] else "numeric")
+                open_almora_keypad(f"Edit {ph_name} {k}", str(l.cget("text")), _confirm, is_alphanumeric=is_alpha, mode=kmode)
 
-        tk.Label(b_box, text=p_house, font=("Arial", 10, "bold"), fg="#1565c0", bg="#f8fafc").pack(anchor="center")
-        tk.Label(b_box, text=f"ON: {p_sp.get('acf_on_min', 15)} Min", font=("Arial", 9), fg="#334155", bg="#f8fafc").pack(anchor="center")
-        tk.Label(b_box, text=f"OFF: {p_sp.get('acf_off_min', 30)} Min", font=("Arial", 9), fg="#334155", bg="#f8fafc").pack(anchor="center")
-        st_t = "Active" if p_sp.get("acf_cycle_enabled", True) else "Disabled"
-        tk.Label(b_box, text=st_t, font=("Arial", 9, "bold"), fg="#16a34a" if st_t == "Active" else "#dc2626", bg="#f8fafc").pack(anchor="center")
+            btn = tk.Button(col_frame, text="EDIT", font=btn_font, bg="#f5f5f5", fg="#333",
+                            activebackground=color, activeforeground="white", bd=1, relief="groove",
+                            command=_make_timer_edit)
+            btn.pack(side="right", padx=2)
+
+
 
 # -----------------------------------------------------------------------------
 # SCREEN 17: SYSTEM SETTINGS MODAL
@@ -1699,6 +2114,7 @@ def open_system_settings_modal():
         ("Cloud Upload Frequency (min)", "upload_frequency_min", system_config.get("upload_frequency_min", 1.0)),
         ("Temp High Alarm Offset (°C)", "temp_alarm_offset", system_config.get("temp_alarm_offset", 5.0)),
         ("RH High Alarm Offset (%)", "humi_alarm_offset", system_config.get("humi_alarm_offset", 5.0)),
+        ("System Security PIN", "system_password", system_config.get("system_password", "1234")),
         ("Pump Start Delay (sec)", "pump_start_delay_sec", system_config.get("pump_start_delay_sec", 3.0)),
         ("Pump Stop/Post-Run Delay (sec)", "pump_post_run_delay_sec", system_config.get("pump_post_run_delay_sec", 3.0)),
         ("Buzzer Auto-Silence Limit (sec)", "buzzer_auto_silence_sec", system_config.get("buzzer_auto_silence_sec", 30))
@@ -1715,10 +2131,17 @@ def open_system_settings_modal():
         def _edit(k=k_name, l=lbl_v, t=label_t):
             def _confirm(new_val):
                 try:
-                    fval = float(new_val)
-                    system_config[k] = fval
-                    l.config(text=str(fval))
-                    save_config()
+                    if k == "system_password":
+                        val_s = str(new_val).strip()
+                        if val_s:
+                            system_config[k] = val_s
+                            l.config(text=val_s)
+                            save_config()
+                    else:
+                        fval = float(new_val)
+                        system_config[k] = fval
+                        l.config(text=str(fval))
+                        save_config()
                 except Exception: pass
             open_almora_keypad(f"Edit {t}", l.cget("text"), _confirm)
 
@@ -1783,9 +2206,458 @@ def open_alarm_history_modal():
     tk.Button(m_main, text="CLOSE", font=BTN_FONT_MAIN, bg="#64748b", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=modal.destroy).pack(pady=10)
 
 # -----------------------------------------------------------------------------
-# FULLSCREEN TOUCH KEYPAD MODAL (NUMERIC, TIME, CALENDAR, ALPHANUMERIC)
+# SCREEN 16: COMMUNICATION & DEVICE HEALTH DIAGNOSTICS MODAL
+# -----------------------------------------------------------------------------
+def open_comm_health_modal():
+    modal = tk.Toplevel(root)
+    modal.configure(bg="white")
+    modal.attributes("-fullscreen", True)
+    add_logo(modal)
+    add_top_left_exit(modal)
+    add_bottom_right_clock(modal)
+
+    m_main = tk.Frame(modal, bg="white")
+    m_main.pack(fill="both", expand=True, pady=(50, 40), padx=30)
+
+    tk.Label(m_main, text="SCREEN 16 : COMMUNICATION & DEVICE HEALTH DIAGNOSTICS", font=big, fg="#0d9488", bg="white").pack(pady=6)
+
+    cards_f = tk.Frame(m_main, bg="white")
+    cards_f.pack(fill="both", expand=True, pady=10)
+
+    # Left: Hardware Serial Ports
+    left_card = tk.LabelFrame(cards_f, text="RS485 SENSOR & RELAY HARDWARE PORTS", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="white", padx=10, pady=8)
+    left_card.pack(side="left", fill="both", expand=True, padx=8)
+
+    for ph, port in SENSOR_MAP.items():
+        exists = os.path.exists(port)
+        rf = tk.Frame(left_card, bg="white"); rf.pack(fill="x", pady=2)
+        tk.Label(rf, text=f"{ph} Temp/RH Port:", font=("Helvetica", 10, "bold"), width=18, anchor="w", bg="white", fg="#1e293b").pack(side="left")
+        tk.Label(rf, text=f"{'CONNECTED' if exists else 'NOT DETECTED'}", font=("Helvetica", 9, "bold"), fg="#16a34a" if exists else "#dc2626", bg="white").pack(side="left")
+
+    r_port = system_config.get("relay_port", RELAY_PORT_FIXED)
+    r_exists = os.path.exists(r_port)
+    rf_rel = tk.Frame(left_card, bg="white"); rf_rel.pack(fill="x", pady=(6, 2))
+    tk.Label(rf_rel, text="32-Ch Relay Port:", font=("Helvetica", 10, "bold"), width=18, anchor="w", bg="white", fg="#1e293b").pack(side="left")
+    tk.Label(rf_rel, text=f"{'CONNECTED (ID ' + str(working_relay_id or 'Scan') + ')' if r_exists else 'NOT DETECTED'}", font=("Helvetica", 9, "bold"), fg="#16a34a" if r_exists else "#dc2626", bg="white").pack(side="left")
+
+    # Right: Cloud Link & Subsystems
+    right_card = tk.LabelFrame(cards_f, text="NETWORK, CLOUD & PERSISTENCE SUBSYSTEMS", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="white", padx=10, pady=8)
+    right_card.pack(side="right", fill="both", expand=True, padx=8)
+
+    net_items = [
+        ("Cloud Broker Link:", f"Mosquitto VPS ({CONTROL_BROKER})", "ONLINE" if is_mqtt_connected else "DISCONNECTED", "#16a34a" if is_mqtt_connected else "#dc2626"),
+        ("MQTT Client ID:", DEVICE_NAME, "ACTIVE", "#1565c0"),
+        ("Bluetooth Serial SPP:", f"Inhydro_{DEVICE_NAME} (Ch 1)", "LISTENING", "#16a34a"),
+        ("System Local IP:", get_system_ip_summary().split()[0] if get_system_ip_summary() else "N/A", "ACTIVE", "#0284c7"),
+        ("Telemetry Upload Topic:", CURRENT_SETP_TOPIC, "READY", "#1565c0"),
+        ("Pump Arbitration Mode:", system_config.get("pump_arbitration_mode", "sequential").upper(), "ACTIVE", "#ea580c"),
+        ("Alarm Log File:", os.path.basename(ALARM_LOG_FILE), f"{os.path.getsize(ALARM_LOG_FILE) if os.path.exists(ALARM_LOG_FILE) else 0} bytes", "#475569"),
+        ("Offline Buffer File:", os.path.basename(ACTIVE_LOG_FILE), f"{os.path.getsize(ACTIVE_LOG_FILE) if os.path.exists(ACTIVE_LOG_FILE) else 0} bytes", "#475569")
+    ]
+    for lbl_n, val_n, st_n, col_n in net_items:
+        rf = tk.Frame(right_card, bg="white"); rf.pack(fill="x", pady=4)
+        tk.Label(rf, text=lbl_n, font=("Helvetica", 10, "bold"), width=22, anchor="w", bg="white", fg="#1e293b").pack(side="left")
+        tk.Label(rf, text=val_n, font=("Helvetica", 9), anchor="w", bg="white", fg="#475569").pack(side="left", padx=4)
+        tk.Label(rf, text=st_n, font=("Helvetica", 9, "bold"), fg=col_n, bg="white").pack(side="right")
+
+    tk.Button(m_main, text="CLOSE", font=BTN_FONT_MAIN, bg="#64748b", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=modal.destroy).pack(pady=10)
+
+# -----------------------------------------------------------------------------
+# SCREEN 14: HISTORICAL TRENDS & SENSOR ANALYTICS MODAL
+# -----------------------------------------------------------------------------
+trends_modal = None
+
+def open_trends_modal(default_skey="PH-01"):
+    global trends_modal
+    if trends_modal and trends_modal.winfo_exists():
+        try: trends_modal.destroy()
+        except Exception: pass
+
+    trends_modal = tk.Toplevel(root)
+    make_modal_fullscreen(trends_modal)
+    add_logo(trends_modal)
+    add_top_left_exit(trends_modal)
+    add_bottom_right_clock(trends_modal)
+
+    current_ph = default_skey if default_skey in ALL_POLYHOUSES else "PH-01"
+    current_metric = "temp"
+
+    m_main = tk.Frame(trends_modal, bg="white")
+    m_main.pack(fill="both", expand=True, pady=(45, 12), padx=20)
+
+    lbl_head = tk.Label(m_main, text="SCREEN 14 : HISTORICAL PARAMETER TRENDS & SENSOR ANALYTICS", font=big, fg="#7c3aed", bg="white")
+    lbl_head.pack(pady=(0, 4))
+
+    # Control Bar: Polyhouse Selector & Metric Selector
+    ctrl_bar = tk.Frame(m_main, bg="white")
+    ctrl_bar.pack(fill="x", pady=2)
+
+    ph_bar = tk.Frame(ctrl_bar, bg="white")
+    ph_bar.pack(side="left", padx=5)
+    tk.Label(ph_bar, text="POLYHOUSE:", font=("Helvetica", 10, "bold"), bg="white", fg="#475569").pack(side="left", padx=4)
+
+    ph_btn_map = {}
+    for p in ALL_POLYHOUSES:
+        b = tk.Button(ph_bar, text=p, font=("Helvetica", 9, "bold"), width=7, relief="flat", bd=0, bg="#e2e8f0", fg="#1e293b", cursor="hand2")
+        b.config(command=lambda ph_target=p: select_ph(ph_target))
+        b.pack(side="left", padx=2)
+        ph_btn_map[p] = b
+
+    metric_bar = tk.Frame(ctrl_bar, bg="white")
+    metric_bar.pack(side="right", padx=5)
+    tk.Label(metric_bar, text="METRIC:", font=("Helvetica", 10, "bold"), bg="white", fg="#475569").pack(side="left", padx=4)
+
+    metrics_def = [
+        ("temp", "TEMPERATURE (°C)", "#fb923c"),
+        ("humi", "HUMIDITY (%)", "#38bdf8"),
+        ("co2",  "CO₂ (ppm)", "#c084fc"),
+        ("par",  "PAR (µmol)", "#facc15"),
+        ("dli",  "DLI (mol)", "#34d399")
+    ]
+    metric_btn_map = {}
+    for m_key, m_lbl, m_col in metrics_def:
+        b = tk.Button(metric_bar, text=m_lbl, font=("Helvetica", 9, "bold"), width=15, relief="flat", bd=0, bg="#e2e8f0", fg="#1e293b", cursor="hand2")
+        b.config(command=lambda mk=m_key: select_metric(mk))
+        b.pack(side="left", padx=2)
+        metric_btn_map[m_key] = b
+
+    # Stats Ribbon
+    stats_ribbon = tk.Frame(m_main, bg="#f8fafc", bd=1, relief="solid", highlightbackground="#e2e8f0", padx=10, pady=4)
+    stats_ribbon.pack(fill="x", pady=4)
+
+    lbl_chart_title = tk.Label(stats_ribbon, text="", font=("Helvetica", 11, "bold"), fg="#1e293b", bg="#f8fafc")
+    lbl_chart_title.pack(side="left", padx=6)
+
+    lbl_stat_latest = tk.Label(stats_ribbon, text="LATEST: --", font=("Helvetica", 10, "bold"), fg="#1565c0", bg="#f8fafc")
+    lbl_stat_latest.pack(side="left", padx=10)
+
+    lbl_stat_min = tk.Label(stats_ribbon, text="MIN: --", font=("Helvetica", 10, "bold"), fg="#059669", bg="#f8fafc")
+    lbl_stat_min.pack(side="left", padx=10)
+
+    lbl_stat_max = tk.Label(stats_ribbon, text="MAX: --", font=("Helvetica", 10, "bold"), fg="#dc2626", bg="#f8fafc")
+    lbl_stat_max.pack(side="left", padx=10)
+
+    lbl_stat_avg = tk.Label(stats_ribbon, text="AVG: --", font=("Helvetica", 10, "bold"), fg="#475569", bg="#f8fafc")
+    lbl_stat_avg.pack(side="left", padx=10)
+
+    lbl_samples_cnt = tk.Label(stats_ribbon, text="SAMPLES: 0", font=("Helvetica", 9), fg="#64748b", bg="#f8fafc")
+    lbl_samples_cnt.pack(side="right", padx=6)
+
+    # Graph Canvas (Dark Industrial Theme)
+    chart_canvas = tk.Canvas(m_main, bg="#0f172a", highlightthickness=1, highlightbackground="#334155", height=320)
+    chart_canvas.pack(fill="both", expand=True, pady=4)
+
+    def select_ph(p):
+        nonlocal current_ph
+        current_ph = p
+        for pk, b in ph_btn_map.items():
+            if pk == current_ph: b.config(bg="#7c3aed", fg="white")
+            else: b.config(bg="#e2e8f0", fg="#1e293b")
+        redraw_chart()
+
+    def select_metric(mk):
+        nonlocal current_metric
+        current_metric = mk
+        for k, b in metric_btn_map.items():
+            if k == current_metric: b.config(bg="#7c3aed", fg="white")
+            else: b.config(bg="#e2e8f0", fg="#1e293b")
+        redraw_chart()
+
+    def redraw_chart():
+        if not trends_modal or not trends_modal.winfo_exists(): return
+        chart_canvas.delete("all")
+
+        cw = chart_canvas.winfo_width()
+        ch = chart_canvas.winfo_height()
+        if cw < 200 or ch < 100:
+            cw, ch = 960, 320
+
+        m_dict = dict(metrics_def)
+        m_color = next((col for k, lbl, col in metrics_def if k == current_metric), "#38bdf8")
+        unit_str = "°C" if current_metric == "temp" else ("%" if current_metric == "humi" else ("ppm" if current_metric == "co2" else ("µmol/m²/s" if current_metric == "par" else "mol/m²/d")))
+
+        disp_ph = get_sensor_display_name(current_ph)
+        lbl_chart_title.config(text=f"{disp_ph} — {m_dict.get(current_metric, '').upper()}")
+
+        with trend_lock:
+            raw_hist = list(trend_data_history.get(current_ph, []))
+
+        valid_pts = []
+        for item in raw_hist:
+            v = item.get(current_metric)
+            if v is not None:
+                try: valid_pts.append((item.get("time", ""), float(v)))
+                except Exception: pass
+
+        if not valid_pts:
+            chart_canvas.create_text(cw // 2, ch // 2, text=f"No trend telemetry points recorded yet for {disp_ph} ({m_dict.get(current_metric)})\nWaiting for periodic telemetry logging stream...", fill="#94a3b8", font=("Helvetica", 13, "bold"), justify="center")
+            lbl_stat_latest.config(text="LATEST: --")
+            lbl_stat_min.config(text="MIN: --")
+            lbl_stat_max.config(text="MAX: --")
+            lbl_stat_avg.config(text="AVG: --")
+            lbl_samples_cnt.config(text="SAMPLES: 0")
+            return
+
+        vals = [v for _, v in valid_pts]
+        latest_v = vals[-1]
+        min_v = min(vals)
+        max_v = max(vals)
+        avg_v = sum(vals) / len(vals)
+
+        lbl_stat_latest.config(text=f"LATEST: {latest_v:.1f} {unit_str}")
+        lbl_stat_min.config(text=f"MIN: {min_v:.1f} {unit_str}")
+        lbl_stat_max.config(text=f"MAX: {max_v:.1f} {unit_str}")
+        lbl_stat_avg.config(text=f"AVG: {avg_v:.1f} {unit_str}")
+        lbl_samples_cnt.config(text=f"SAMPLES: {len(vals)}")
+
+        left_m = 70
+        right_m = 30
+        top_m = 30
+        bot_m = 40
+        pw = cw - left_m - right_m
+        ph_h = ch - top_m - bot_m
+
+        y_min = min_v
+        y_max = max_v
+        if y_max == y_min:
+            y_min -= 1.0; y_max += 1.0
+        y_padding = 0.12 * (y_max - y_min)
+        plot_min = y_min - y_padding
+        plot_max = y_max + y_padding
+
+        steps = 4
+        for i in range(steps + 1):
+            frac = i / float(steps)
+            gy = top_m + ph_h - (frac * ph_h)
+            g_val = plot_min + frac * (plot_max - plot_min)
+            chart_canvas.create_line(left_m, gy, left_m + pw, gy, fill="#1e293b", dash=(4, 4), width=1)
+            chart_canvas.create_text(left_m - 8, gy, text=f"{g_val:.1f}", fill="#94a3b8", font=("Helvetica", 9), anchor="e")
+
+        sp_eval = get_active_setpoints(current_ph)
+        if current_metric == "temp":
+            t_set = sp_eval.get("target_temp")
+            if t_set and plot_min <= t_set <= plot_max:
+                sy = top_m + ph_h - ((t_set - plot_min) / (plot_max - plot_min)) * ph_h
+                chart_canvas.create_line(left_m, sy, left_m + pw, sy, fill="#22c55e", dash=(6, 4), width=1)
+                chart_canvas.create_text(left_m + pw - 5, sy - 8, text=f"TARGET: {t_set:.1f}°C", fill="#22c55e", font=("Helvetica", 9, "bold"), anchor="e")
+        elif current_metric == "humi":
+            h_set = sp_eval.get("target_humi")
+            if h_set and plot_min <= h_set <= plot_max:
+                sy = top_m + ph_h - ((h_set - plot_min) / (plot_max - plot_min)) * ph_h
+                chart_canvas.create_line(left_m, sy, left_m + pw, sy, fill="#22c55e", dash=(6, 4), width=1)
+                chart_canvas.create_text(left_m + pw - 5, sy - 8, text=f"TARGET: {h_set:.1f}%", fill="#22c55e", font=("Helvetica", 9, "bold"), anchor="e")
+
+        coords = []
+        n = len(valid_pts)
+        time_step = max(1, n // 6)
+
+        for i, (t_stamp, v) in enumerate(valid_pts):
+            x = left_m + (i / float(n - 1)) * pw if n > 1 else left_m + pw / 2
+            y = top_m + ph_h - ((v - plot_min) / (plot_max - plot_min)) * ph_h
+            coords.extend([x, y])
+
+            if i % time_step == 0 or i == n - 1:
+                chart_canvas.create_line(x, top_m + ph_h, x, top_m + ph_h + 5, fill="#64748b", width=1)
+                chart_canvas.create_text(x, top_m + ph_h + 14, text=t_stamp, fill="#94a3b8", font=("Helvetica", 8), anchor="center")
+
+        if len(coords) >= 4:
+            chart_canvas.create_line(coords, fill=m_color, width=3, smooth=True)
+
+        for i in range(0, len(coords), 2):
+            cx, cy = coords[i], coords[i + 1]
+            if i == len(coords) - 2:
+                chart_canvas.create_oval(cx - 5, cy - 5, cx + 5, cy + 5, fill="#ffffff", outline=m_color, width=2)
+                chart_canvas.create_text(cx, cy - 14, text=f"{valid_pts[-1][1]:.1f} {unit_str}", fill="#ffffff", font=("Helvetica", 10, "bold"), anchor="s")
+            elif n <= 30:
+                chart_canvas.create_oval(cx - 2, cy - 2, cx + 2, cy + 2, fill=m_color, outline="")
+
+    select_ph(current_ph)
+    select_metric(current_metric)
+
+    def auto_refresh_trends():
+        if trends_modal and trends_modal.winfo_exists():
+            redraw_chart()
+            trends_modal.after(4000, auto_refresh_trends)
+
+    trends_modal.after(4000, auto_refresh_trends)
+
+    btn_bar = tk.Frame(m_main, bg="white")
+    btn_bar.pack(side="bottom", pady=4)
+    tk.Button(btn_bar, text="REFRESH GRAPH", font=BTN_FONT_MAIN, bg="#7c3aed", fg="white", width=16, height=1, cursor="hand2", command=redraw_chart).pack(side="left", padx=8)
+    tk.Button(btn_bar, text="CLOSE", font=BTN_FONT_MAIN, bg="#64748b", fg="white", width=16, height=1, cursor="hand2", command=trends_modal.destroy).pack(side="left", padx=8)
+
+# -----------------------------------------------------------------------------
+# SCREEN 12: IRRIGATION & FOGGING AUTOMATION SCHEDULE MODAL
+# -----------------------------------------------------------------------------
+irrig_sched_modal = None
+
+def open_irrigation_schedule_modal(default_skey="PH-01"):
+    global irrig_sched_modal
+    if irrig_sched_modal and irrig_sched_modal.winfo_exists():
+        try: irrig_sched_modal.destroy()
+        except Exception: pass
+
+    current_ph = default_skey if default_skey in ACTIVE_POLYHOUSES else "PH-01"
+
+    irrig_sched_modal = tk.Toplevel(root)
+    make_modal_fullscreen(irrig_sched_modal)
+    add_logo(irrig_sched_modal)
+    add_top_left_exit(irrig_sched_modal)
+    add_bottom_right_clock(irrig_sched_modal)
+
+    m_main = tk.Frame(irrig_sched_modal, bg="white")
+    m_main.pack(fill="both", expand=True, pady=(45, 15), padx=25)
+
+    tk.Label(m_main, text="SCREEN 12 : IRRIGATION & FOGGING AUTOMATION SCHEDULE", font=big, fg="#059669", bg="white").pack(pady=(0, 6))
+
+    ph_bar = tk.Frame(m_main, bg="white")
+    ph_bar.pack(pady=4)
+
+    tk.Label(ph_bar, text="SELECT POLYHOUSE:", font=("Helvetica", 11, "bold"), bg="white", fg="#475569").pack(side="left", padx=6)
+
+    ph_buttons = {}
+    for p in ACTIVE_POLYHOUSES:
+        b = tk.Button(ph_bar, text=p, font=("Helvetica", 10, "bold"), width=9, relief="flat", bd=0, bg="#e2e8f0", fg="#1e293b", cursor="hand2")
+        b.config(command=lambda ph_target=p: select_house(ph_target))
+        b.pack(side="left", padx=4)
+        ph_buttons[p] = b
+
+    slots_container = tk.Frame(m_main, bg="white", bd=1, relief="solid", highlightbackground="#cbd5e1", padx=10, pady=10)
+    slots_container.pack(fill="both", expand=True, pady=8)
+
+    lbl_house_title = tk.Label(slots_container, text="", font=("Helvetica", 12, "bold"), fg="#1565c0", bg="white")
+    lbl_house_title.pack(anchor="w", pady=(0, 6))
+
+    slots_frame = tk.Frame(slots_container, bg="white")
+    slots_frame.pack(fill="both", expand=True)
+
+    def select_house(p):
+        nonlocal current_ph
+        current_ph = p
+        for pk, b in ph_buttons.items():
+            if pk == current_ph: b.config(bg="#059669", fg="white")
+            else: b.config(bg="#e2e8f0", fg="#1e293b")
+        render_slots_table()
+
+    def render_slots_table():
+        for w in slots_frame.winfo_children(): w.destroy()
+
+        disp_name = get_sensor_display_name(current_ph)
+        lbl_house_title.config(text=f"{disp_name} — SCHEDULED IRRIGATION & FOGGING CYCLES")
+
+        sp = get_setpoints(current_ph)
+        slots = sp.setdefault("irrigation_slots", [])
+
+        hdr = tk.Frame(slots_frame, bg="#f1f5f9", bd=1, relief="solid", highlightbackground="#e2e8f0")
+        hdr.pack(fill="x", pady=(0, 4))
+        tk.Label(hdr, text="SLOT #", font=("Helvetica", 10, "bold"), fg="#1e293b", bg="#f1f5f9", width=8, anchor="center").pack(side="left", padx=4, pady=6)
+        tk.Label(hdr, text="START TIME", font=("Helvetica", 10, "bold"), fg="#1e293b", bg="#f1f5f9", width=16, anchor="center").pack(side="left", padx=4)
+        tk.Label(hdr, text="EQUIPMENT TYPE", font=("Helvetica", 10, "bold"), fg="#1e293b", bg="#f1f5f9", width=18, anchor="center").pack(side="left", padx=4)
+        tk.Label(hdr, text="RUN DURATION", font=("Helvetica", 10, "bold"), fg="#1e293b", bg="#f1f5f9", width=16, anchor="center").pack(side="left", padx=4)
+        tk.Label(hdr, text="STATUS", font=("Helvetica", 10, "bold"), fg="#1e293b", bg="#f1f5f9", width=14, anchor="center").pack(side="left", padx=4)
+        tk.Label(hdr, text="ACTIONS", font=("Helvetica", 10, "bold"), fg="#1e293b", bg="#f1f5f9", width=12, anchor="center").pack(side="left", padx=4)
+
+        if not slots:
+            tk.Label(slots_frame, text="No scheduled irrigation/fogging slots configured. Click '+ ADD NEW SLOT' below.", font=("Helvetica", 11), fg="#64748b", bg="white", pady=20).pack()
+            return
+
+        for idx, slot in enumerate(slots):
+            row = tk.Frame(slots_frame, bg="white", bd=1, relief="solid", highlightbackground="#f1f5f9")
+            row.pack(fill="x", pady=2)
+
+            s_id = slot.get("id", idx + 1)
+            tk.Label(row, text=f"Slot {s_id}", font=("Helvetica", 10, "bold"), fg="#1565c0", bg="white", width=8, anchor="center").pack(side="left", padx=4, pady=4)
+
+            st_val = format_time_12h(slot.get("start", "07:00 AM"))
+            btn_t = tk.Button(row, text=st_val, font=("Helvetica", 10, "bold"), bg="#f8fafc", fg="#0f172a", width=14, relief="sunken", bd=1, cursor="hand2")
+            def _edit_t(s=slot, b=btn_t):
+                def _confirm_t(new_t):
+                    s["start"] = format_time_12h(new_t)
+                    b.config(text=s["start"])
+                    save_setpoints("SCHEDULE_TIME")
+                open_almora_keypad("Set Irrigation Start Time", s.get("start", "07:00 AM"), _confirm_t, mode="time")
+            btn_t.config(command=_edit_t)
+            btn_t.pack(side="left", padx=10)
+
+            t_val = str(slot.get("type", "sprinkler")).upper()
+            btn_type = tk.Button(row, text=f"✔ {t_val}", font=("Helvetica", 9, "bold"),
+                                 bg="#e0f2fe" if t_val == "SPRINKLER" else "#fef3c7",
+                                 fg="#0369a1" if t_val == "SPRINKLER" else "#b45309",
+                                 width=16, relief="flat", cursor="hand2")
+            def _toggle_type(s=slot, b=btn_type):
+                new_t = "fogger" if s.get("type", "sprinkler").lower() == "sprinkler" else "sprinkler"
+                s["type"] = new_t
+                up_t = new_t.upper()
+                b.config(text=f"✔ {up_t}", bg="#e0f2fe" if up_t == "SPRINKLER" else "#fef3c7", fg="#0369a1" if up_t == "SPRINKLER" else "#b45309")
+                save_setpoints("SCHEDULE_TYPE")
+            btn_type.config(command=_toggle_type)
+            btn_type.pack(side="left", padx=10)
+
+            dur_val = int(slot.get("duration_sec", 120))
+            btn_dur = tk.Button(row, text=f"{dur_val} sec", font=("Helvetica", 10, "bold"), bg="#f8fafc", fg="#e65100", width=14, relief="sunken", bd=1, cursor="hand2")
+            def _edit_dur(s=slot, b=btn_dur):
+                def _confirm_d(new_d):
+                    try:
+                        iv = int(float(new_d))
+                        if iv > 0:
+                            s["duration_sec"] = iv
+                            b.config(text=f"{iv} sec")
+                            save_setpoints("SCHEDULE_DURATION")
+                    except Exception: pass
+                open_almora_keypad("Set Run Duration (Sec)", str(s.get("duration_sec", 120)), _confirm_d, mode="numeric")
+            btn_dur.config(command=_edit_dur)
+            btn_dur.pack(side="left", padx=10)
+
+            en_val = bool(slot.get("enabled", True))
+            btn_en = tk.Button(row, text="ENABLED" if en_val else "DISABLED", font=("Helvetica", 9, "bold"),
+                               bg="#dcfce7" if en_val else "#f1f5f9", fg="#15803d" if en_val else "#64748b",
+                               width=12, relief="flat", cursor="hand2")
+            def _toggle_en(s=slot, b=btn_en):
+                s["enabled"] = not s.get("enabled", True)
+                cur_en = s["enabled"]
+                b.config(text="ENABLED" if cur_en else "DISABLED", bg="#dcfce7" if cur_en else "#f1f5f9", fg="#15803d" if cur_en else "#64748b")
+                save_setpoints("SCHEDULE_STATUS")
+            btn_en.config(command=_toggle_en)
+            btn_en.pack(side="left", padx=8)
+
+            btn_del = tk.Button(row, text="🗑 DELETE", font=("Helvetica", 9, "bold"), bg="#fee2e2", fg="#b91c1c", width=10, relief="flat", cursor="hand2")
+            def _del_slot(i_del=idx):
+                del slots[i_del]
+                for r_i, s_item in enumerate(slots):
+                    s_item["id"] = r_i + 1
+                save_setpoints("DELETE_SLOT")
+                render_slots_table()
+            btn_del.config(command=_del_slot)
+            btn_del.pack(side="left", padx=6)
+
+    def add_new_slot():
+        sp = get_setpoints(current_ph)
+        slots = sp.setdefault("irrigation_slots", [])
+        new_id = len(slots) + 1
+        slots.append({
+            "id": new_id,
+            "start": "08:00 AM",
+            "duration_sec": 120,
+            "type": "sprinkler",
+            "enabled": True
+        })
+        save_setpoints("ADD_SLOT")
+        render_slots_table()
+
+    actions_bar = tk.Frame(m_main, bg="white")
+    actions_bar.pack(side="bottom", pady=8)
+
+    tk.Button(actions_bar, text="+ ADD NEW SLOT", font=BTN_FONT_MAIN, bg="#0284c7", fg="white", width=18, height=FRAME_BTN_HEIGHT, cursor="hand2", command=add_new_slot).pack(side="left", padx=8)
+    tk.Button(actions_bar, text="✔ SAVE & APPLY", font=BTN_FONT_MAIN, bg="#059669", fg="white", width=18, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: (save_setpoints("IRRIGATION_SCHEDULE"), irrig_sched_modal.destroy())).pack(side="left", padx=8)
+    tk.Button(actions_bar, text="CLOSE", font=BTN_FONT_MAIN, bg="#64748b", fg="white", width=14, height=FRAME_BTN_HEIGHT, cursor="hand2", command=irrig_sched_modal.destroy).pack(side="left", padx=8)
+
+    select_house(current_ph)
+
+# -----------------------------------------------------------------------------
+# FULLSCREEN TOUCH KEYPAD & PIN MODAL (NUMERIC, TIME, CALENDAR, ALPHANUMERIC)
 # -----------------------------------------------------------------------------
 keypad_modal = None
+pin_modal = None
 
 def make_modal_fullscreen(win):
     win.configure(bg="white")
@@ -1800,22 +2672,421 @@ def make_modal_fullscreen(win):
     win.grab_set()
     win.focus_force()
 
+def log_auth_event(user_idx, user_name, status):
+    try:
+        log_dir = os.path.join(BASE_DIR, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        event = {
+            "timestamp": datetime.datetime.now().isoformat(),
+            "user_index": user_idx,
+            "user_name": user_name,
+            "status": status
+        }
+        with open(os.path.join(log_dir, "auth_events.jsonl"), "a") as f:
+            f.write(json.dumps(event) + "\n")
+    except Exception as e:
+        print(f"Error logging auth event: {e}")
+
+def check_pin_and_proceed(action_title, on_success):
+    sw = root.winfo_screenwidth()
+    sh = root.winfo_screenheight()
+    win = tk.Toplevel(root)
+    win.title("Security Authentication")
+    win.configure(bg="#ffffff")
+    win.geometry(f"{sw}x{sh}+0+0")
+    win.focus_force()
+    win.update()
+    win.attributes("-fullscreen", True)
+    win.grab_set()
+
+    lbl_auth_clock = tk.Label(win, text="", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff", justify="left")
+    lbl_auth_clock.place(x=15, y=10, anchor="nw")
+    def update_auth_clock():
+        if win.winfo_exists():
+            lbl_auth_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y\n%I:%M:%S %p"))
+            win.after(1000, update_auth_clock)
+    update_auth_clock()
+
+    def close_win():
+        win.destroy()
+        try:
+            root.geometry(f"{sw}x{sh}+0+0")
+            root.attributes("-fullscreen", True)
+            root.focus_force()
+        except Exception:
+            pass
+
+    password_entered = ""
+    selected_user = 1
+    error_active = False
+    show_password = False
+
+    main_container = tk.Frame(win, bg="#ffffff")
+    main_container.place(relx=0.5, rely=0.5, anchor="center")
+
+    header_frame = tk.Frame(main_container, bg="#ffffff")
+    header_frame.pack(fill="x", padx=20, pady=(15, 5))
+
+    title_sub_frame = tk.Frame(header_frame, bg="#ffffff")
+    title_sub_frame.pack(side="left")
+
+    tk.Label(title_sub_frame, text="SECURITY LOCK", font=("Arial", 16, "bold"), fg="#1565c0", bg="#ffffff").pack(anchor="w")
+    desc_txt = f"Select user and enter authorization PIN to unlock {action_title}:" if action_title else "Select user and enter authorization PIN to unlock setpoints:"
+    tk.Label(title_sub_frame, text=desc_txt, font=("Arial", 10), fg="#64748b", bg="#ffffff").pack(anchor="w", pady=2)
+
+    try:
+        if os.path.exists(LOGO_PATH):
+            logo_img_modal = ImageTk.PhotoImage(Image.open(LOGO_PATH).resize((120, 75), Image.LANCZOS))
+            win.logo_img_modal = logo_img_modal
+            tk.Label(header_frame, image=logo_img_modal, bg="#ffffff").pack(side="right", padx=10)
+    except Exception: pass
+
+    # TWO USER SELECTION BUTTONS ONLY (Exact monit.py design)
+    user_frame = tk.Frame(main_container, bg="#ffffff")
+    user_frame.pack(pady=10)
+
+    user_btns = []
+
+    def show_error_in_display(msg):
+        nonlocal error_active, password_entered
+        password_entered = ""
+        color = "#000000" if "4-8" in msg else "#dc2626"
+        display_lbl.config(text=msg, fg=color, font=("serif", 13, "bold"))
+        error_active = True
+
+    def rename_user_popup():
+        nonlocal selected_user
+        pop = tk.Toplevel(win)
+        pop.title("Rename Operator")
+        pop.configure(bg="#ffffff")
+        pop.geometry(f"{sw}x{sh}+0+0")
+        pop.focus_force()
+        pop.update()
+        pop.attributes("-fullscreen", True)
+        pop.grab_set()
+
+        lbl_pop_clock = tk.Label(pop, text="", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff", justify="left")
+        lbl_pop_clock.place(x=15, y=10, anchor="nw")
+        def update_pop_clock():
+            if pop.winfo_exists():
+                lbl_pop_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y\n%I:%M:%S %p"))
+                pop.after(1000, update_pop_clock)
+        update_pop_clock()
+
+        def close_pop():
+            pop.destroy()
+            try:
+                win.geometry(f"{sw}x{sh}+0+0")
+                win.attributes("-fullscreen", True)
+                win.focus_force()
+                win.grab_set()
+            except Exception:
+                pass
+
+        name_entered = system_config.get(f"USER {selected_user} Name", f"Operator {selected_user}")
+        container = tk.Frame(pop, bg="#ffffff")
+        container.place(relx=0.5, rely=0.5, anchor="center")
+
+        tk.Label(container, text="RENAME OPERATOR", font=("Arial", 14, "bold"), fg="#1565c0", bg="#ffffff").pack(pady=10)
+        tk.Label(container, text=f"Edit name for User {selected_user}:", font=("Arial", 10), fg="#64748b", bg="#ffffff").pack(pady=2)
+
+        display_lbl_rename = tk.Label(container, text=name_entered, font=("Arial", 16, "bold"), fg="#e65100", bg="#f1f5f9", width=22, relief="sunken", bd=2)
+        display_lbl_rename.pack(pady=10)
+
+        def char_press(c):
+            nonlocal name_entered
+            if len(name_entered) < 20:
+                name_entered += c
+                display_lbl_rename.config(text=name_entered)
+        def char_back():
+            nonlocal name_entered
+            name_entered = name_entered[:-1]
+            display_lbl_rename.config(text=name_entered)
+        def char_clear():
+            nonlocal name_entered
+            name_entered = ""
+            display_lbl_rename.config(text="")
+        def char_save():
+            if not name_entered.strip(): return
+            system_config[f"USER {selected_user} Name"] = name_entered.strip()
+            save_config()
+            user_btns[selected_user - 1].config(text=name_entered.strip())
+            close_pop()
+
+        kb_frame = tk.Frame(container, bg="#ffffff")
+        kb_frame.pack(pady=10)
+        for ri, row_k in enumerate([list("1234567890"), list("QWERTYUIOP"), list("ASDFGHJKL:"), list("ZXCVBNM._ ")]):
+            for ci, ch in enumerate(row_k):
+                lbl = ch if ch != ' ' else 'SPC'
+                tk.Button(kb_frame, text=lbl, font=("Arial", 11, "bold"), width=4, height=1, bg="#f1f5f9", fg="#0f172a", activebackground="#0284c7", activeforeground="white",
+                          command=lambda x=ch: char_press(x)).grid(row=ri, column=ci, padx=2, pady=2)
+
+        action_frame = tk.Frame(container, bg="#ffffff")
+        action_frame.pack(fill="x", pady=15)
+        tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#64748b", fg="white", width=8, height=2, command=close_pop).pack(side="left", padx=10)
+        tk.Button(action_frame, text="CLEAR", font=("Arial", 10, "bold"), bg="#dc2626", fg="white", width=8, height=2, command=char_clear).pack(side="left", padx=10)
+        tk.Button(action_frame, text="BACK", font=("Arial", 10, "bold"), bg="#f97316", fg="white", width=10, height=2, command=char_back).pack(side="left", padx=10)
+        tk.Button(action_frame, text="SAVE", font=("Arial", 10, "bold"), bg="#0284c7", fg="white", width=10, height=2, command=char_save).pack(side="right", padx=10)
+
+    def change_pin_popup():
+        nonlocal selected_user
+        pop = tk.Toplevel(win)
+        pop.title("Change Operator PIN")
+        pop.configure(bg="#ffffff")
+        pop.geometry(f"{sw}x{sh}+0+0")
+        pop.focus_force()
+        pop.update()
+        pop.attributes("-fullscreen", True)
+        pop.grab_set()
+
+        lbl_pop_clock = tk.Label(pop, text="", font=("Arial", 10, "bold"), fg="#1565c0", bg="#ffffff", justify="left")
+        lbl_pop_clock.place(x=15, y=10, anchor="nw")
+        def update_pop_clock():
+            if pop.winfo_exists():
+                lbl_pop_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y\n%I:%M:%S %p"))
+                pop.after(1000, update_pop_clock)
+        update_pop_clock()
+
+        def close_pop():
+            pop.destroy()
+            try:
+                win.geometry(f"{sw}x{sh}+0+0")
+                win.attributes("-fullscreen", True)
+                win.focus_force()
+                win.grab_set()
+            except Exception:
+                pass
+
+        step = 1
+        old_pin = ""; new_pin = ""; input_value = ""
+        show_pin = False; pop_error_active = False
+
+        container = tk.Frame(pop, bg="#ffffff")
+        container.place(relx=0.5, rely=0.5, anchor="center")
+
+        step_lbl = tk.Label(container, text="STEP 1: ENTER OLD PIN", font=("Arial", 12, "bold"), fg="#1565c0", bg="#ffffff")
+        step_lbl.pack(pady=10)
+
+        display_frame = tk.Frame(container, bg="#ffffff")
+        display_frame.pack(pady=10)
+
+        display_lbl_pin = tk.Label(display_frame, text="", font=("Arial", 20, "bold"), fg="#2e7d32", bg="#f1f5f9", width=12, relief="sunken", bd=2, anchor="center")
+        display_lbl_pin.pack(side="left", padx=5)
+
+        def show_pop_err(msg):
+            nonlocal pop_error_active, input_value
+            input_value = ""
+            color = "#000000" if "4-8" in msg else "#dc2626"
+            display_lbl_pin.config(text=msg, fg=color, font=("serif", 13, "bold"))
+            pop_error_active = True
+
+        def update_pin_display():
+            if pop_error_active: return
+            display_lbl_pin.config(fg="#2e7d32", font=("Arial", 20, "bold"))
+            display_lbl_pin.config(text=input_value if show_pin else "●" * len(input_value))
+
+        def toggle_pin_show():
+            nonlocal show_pin
+            show_pin = not show_pin
+            eye_btn.config(text="HIDE" if show_pin else "SHOW", bg="#0284c7" if show_pin else "#64748b", fg="white")
+            update_pin_display()
+
+        eye_btn = tk.Button(display_frame, text="SHOW", font=("Arial", 10, "bold"), width=6, bg="#64748b", fg="white", bd=1, relief="raised", command=toggle_pin_show)
+        eye_btn.pack(side="left", padx=5)
+
+        def num_press(num):
+            nonlocal input_value, pop_error_active
+            if pop_error_active: pop_error_active = False; input_value = ""
+            if len(input_value) < 8:
+                input_value += str(num)
+                update_pin_display()
+
+        def num_back():
+            nonlocal input_value, pop_error_active
+            if pop_error_active: pop_error_active = False; input_value = ""
+            input_value = input_value[:-1]
+            update_pin_display()
+
+        def num_clear():
+            nonlocal input_value, pop_error_active
+            pop_error_active = False; input_value = ""
+            update_pin_display()
+
+        def num_confirm():
+            nonlocal step, old_pin, new_pin, input_value
+            if pop_error_active: return
+            correct_old = str(system_config.get(f"USER {selected_user} PASSWORD", f"{selected_user}{selected_user}{selected_user}{selected_user}"))
+            if step == 1:
+                if input_value != correct_old and input_value != str(system_config.get("system_password", "1234")).strip():
+                    show_pop_err("WRONG PIN")
+                    return
+                old_pin = input_value; input_value = ""; step = 2
+                step_lbl.config(text="STEP 2: ENTER NEW PIN (4-8 DIGITS)")
+                update_pin_display()
+            elif step == 2:
+                if not input_value.isdigit() or len(input_value) < 4 or len(input_value) > 8:
+                    show_pop_err("4-8 DIGITS")
+                    return
+                new_pin = input_value; input_value = ""; step = 3
+                step_lbl.config(text="STEP 3: CONFIRM NEW PIN")
+                update_pin_display()
+            elif step == 3:
+                if input_value != new_pin:
+                    show_pop_err("MISMATCH")
+                    input_value = ""; step = 2
+                    step_lbl.config(text="STEP 2: ENTER NEW PIN (4-8 DIGITS)")
+                    return
+                system_config[f"USER {selected_user} PASSWORD"] = new_pin
+                save_config()
+                close_pop()
+
+        kp_frame = tk.Frame(container, bg="#ffffff")
+        kp_frame.pack(pady=10)
+        buttons = [
+            ('1', 0, 0), ('2', 0, 1), ('3', 0, 2),
+            ('4', 1, 0), ('5', 1, 1), ('6', 1, 2),
+            ('7', 2, 0), ('8', 2, 1), ('9', 2, 2),
+            ('CLR', 3, 0), ('0', 3, 1), ('DEL', 3, 2)
+        ]
+        for text, r, c in buttons:
+            if text == 'DEL': cmd = num_back; bg, fg = "#f97316", "white"
+            elif text == 'CLR': cmd = num_clear; bg, fg = "#dc2626", "white"
+            else: cmd = lambda x=text: num_press(x); bg, fg = "#f1f5f9", "#0f172a"
+            tk.Button(kp_frame, text=text, font=("Arial", 12, "bold"), width=6, height=2, bg=bg, fg=fg, bd=1, relief="raised", command=cmd).grid(row=r, column=c, padx=4, pady=4)
+
+        action_frame = tk.Frame(container, bg="#ffffff")
+        action_frame.pack(fill="x", pady=15)
+        tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#64748b", fg="white", width=12, height=2, command=close_pop).pack(side="left", padx=15)
+        tk.Button(action_frame, text="CONFIRM / NEXT", font=("Arial", 10, "bold"), bg="#0284c7", fg="white", width=16, height=2, command=num_confirm).pack(side="right", padx=15)
+
+    def select_user(idx):
+        nonlocal selected_user
+        selected_user = idx
+        for i, btn in enumerate(user_btns, 1):
+            if i == idx:
+                btn.config(bg="#0284c7", fg="white", relief="sunken")
+            else:
+                btn.config(bg="#cbd5e1", fg="#0f172a", relief="raised")
+        kp_clear()
+
+    # User 1 Button
+    u1_name = system_config.get("USER 1 Name", "Operator 1")
+    btn_u1 = tk.Button(user_frame, text=u1_name, font=("Arial", 11, "bold"), width=16, height=1, bd=1)
+    btn_u1.config(command=lambda: select_user(1))
+    btn_u1.pack(side="left", padx=10)
+    user_btns.append(btn_u1)
+
+    # User 2 Button
+    u2_name = system_config.get("USER 2 Name", "Operator 2")
+    btn_u2 = tk.Button(user_frame, text=u2_name, font=("Arial", 11, "bold"), width=16, height=1, bd=1)
+    btn_u2.config(command=lambda: select_user(2))
+    btn_u2.pack(side="left", padx=10)
+    user_btns.append(btn_u2)
+
+    # Operator Sub-actions
+    ops_frame = tk.Frame(main_container, bg="#ffffff")
+    ops_frame.pack(pady=5)
+    tk.Button(ops_frame, text=" RENAME USER", font=("Arial", 9, "bold"), bg="#64748b", fg="white", width=14, height=1, bd=1, relief="raised", command=rename_user_popup).pack(side="left", padx=5)
+    tk.Button(ops_frame, text=" CHANGE PIN", font=("Arial", 9, "bold"), bg="#64748b", fg="white", width=14, height=1, bd=1, relief="raised", command=change_pin_popup).pack(side="left", padx=5)
+
+    # Display entry for password
+    display_container = tk.Frame(main_container, bg="#ffffff")
+    display_container.pack(pady=10)
+
+    display_lbl = tk.Label(display_container, text="", font=("Arial", 20, "bold"), fg="#2e7d32", bg="#f1f5f9", width=12, relief="sunken", bd=2, anchor="center")
+    display_lbl.pack(side="left", padx=5)
+
+    def update_display():
+        if error_active: return
+        display_lbl.config(fg="#2e7d32", font=("Arial", 20, "bold"))
+        display_lbl.config(text=password_entered if show_password else "●" * len(password_entered))
+
+    def toggle_show_password():
+        nonlocal show_password
+        show_password = not show_password
+        eye_btn.config(text="HIDE" if show_password else "SHOW", bg="#0284c7" if show_password else "#64748b", fg="white")
+        update_display()
+
+    eye_btn = tk.Button(display_container, text="SHOW", font=("Arial", 10, "bold"), width=6, bg="#64748b", fg="white", bd=1, relief="raised", command=toggle_show_password)
+    eye_btn.pack(side="left", padx=5)
+
+    def kp_press(char):
+        nonlocal password_entered, error_active
+        if error_active: error_active = False; password_entered = ""
+        if len(password_entered) < 12:
+            password_entered += str(char)
+            update_display()
+
+    def kp_back():
+        nonlocal password_entered, error_active
+        if error_active: error_active = False; password_entered = ""
+        password_entered = password_entered[:-1]
+        update_display()
+
+    def kp_clear():
+        nonlocal password_entered, error_active
+        error_active = False; password_entered = ""
+        update_display()
+
+    def kp_confirm():
+        nonlocal password_entered, selected_user
+        if error_active: return
+        user_name = system_config.get(f"USER {selected_user} Name", f"Operator {selected_user}")
+        correct_password = str(system_config.get(f"USER {selected_user} PASSWORD", f"{selected_user}{selected_user}{selected_user}{selected_user}"))
+        master_pin = str(system_config.get("system_password", "1234")).strip()
+        if password_entered == correct_password or (master_pin and password_entered == master_pin):
+            log_auth_event(selected_user, user_name, "SUCCESS")
+            close_win()
+            on_success()
+        else:
+            log_auth_event(selected_user, user_name, "FAILED")
+            show_error_in_display("WRONG PIN")
+
+    kp_frame = tk.Frame(main_container, bg="#ffffff")
+    kp_frame.pack(pady=10)
+    buttons = [
+        ('1', 0, 0), ('2', 0, 1), ('3', 0, 2),
+        ('4', 1, 0), ('5', 1, 1), ('6', 1, 2),
+        ('7', 2, 0), ('8', 2, 1), ('9', 2, 2),
+        ('CLR', 3, 0), ('0', 3, 1), ('DEL', 3, 2)
+    ]
+    for text, r, c in buttons:
+        if text == 'DEL': cmd = kp_back; bg, fg = "#f97316", "white"
+        elif text == 'CLR': cmd = kp_clear; bg, fg = "#dc2626", "white"
+        else: cmd = lambda x=text: kp_press(x); bg, fg = "#f1f5f9", "#0f172a"
+        tk.Button(kp_frame, text=text, font=("Arial", 12, "bold"), width=6, height=2, bg=bg, fg=fg, bd=1, relief="raised", command=cmd).grid(row=r, column=c, padx=4, pady=4)
+
+    action_frame = tk.Frame(main_container, bg="#ffffff")
+    action_frame.pack(fill="x", side="bottom", pady=15, padx=20)
+    tk.Button(action_frame, text="CANCEL", font=("Arial", 10, "bold"), bg="#64748b", fg="white", width=12, height=2, bd=1, relief="raised", command=close_win).pack(side="left", padx=15)
+    tk.Button(action_frame, text="AUTHENTICATE", font=("Arial", 10, "bold"), bg="#0284c7", fg="white", width=14, height=2, bd=1, relief="raised", command=kp_confirm).pack(side="right", padx=15)
+
+    select_user(1)
+
+# -----------------------------------------------------------------------------
+# ALMORA KEYPAD & KEYBOARD (EXACT SENSOR_MONITOR2_ALMORA.PY IMPLEMENTATION)
+# -----------------------------------------------------------------------------
 def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphanumeric=False, mode=None):
     global keypad_modal
     if keypad_modal and keypad_modal.winfo_exists():
         keypad_modal.destroy()
 
+    # Auto-detect keypad mode if not explicitly specified
     if mode is None:
-        if is_alphanumeric: mode = "alphanumeric"
-        elif "Time" in title_text or "time" in title_text: mode = "time"
-        elif "Date" in title_text or "date" in title_text: mode = "calendar"
-        else: mode = "numeric"
+        if is_alphanumeric:
+            mode = "alphanumeric"
+        elif "Time" in title_text or "time" in title_text:
+            mode = "time"
+        elif "Date" in title_text or "date" in title_text:
+            mode = "calendar"
+        else:
+            mode = "numeric"
 
     keypad_modal = tk.Toplevel(root)
     make_modal_fullscreen(keypad_modal)
 
     kp_main = tk.Frame(keypad_modal, bg="white")
-    kp_main.pack(fill="both", expand=True, pady=(45, 30))
+    kp_main.pack(fill="both", expand=True, pady=(50, 35))
 
     add_logo(keypad_modal)
     add_top_left_exit(keypad_modal)
@@ -1823,8 +3094,18 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
 
     entered_val = str(initial_value)
 
+    type_badge = {
+        "numeric": "NUMERIC KEYPAD",
+        "time": "TIME KEYPAD (12-HR AM/PM)",
+        "calendar": "CALENDAR DATE KEYPAD (YYYY-MM-DD)",
+        "alphanumeric": "ALPHANUMERIC KEYBOARD"
+    }.get(mode, "NUMERIC KEYPAD")
+
+    lbl_badge = tk.Label(kp_main, text=type_badge, font=("Helvetica", 10, "bold"), fg="#64748b", bg="#f8fafc", padx=12, pady=3, bd=1, relief="solid")
+    lbl_badge.pack(pady=(4, 2))
+
     lbl_modal_title = tk.Label(kp_main, text=title_text, font=big, fg="#1565c0", bg="white")
-    lbl_modal_title.pack(pady=4)
+    lbl_modal_title.pack(pady=(2, 4))
 
     lbl_modal_disp = tk.Label(kp_main, text=entered_val, font=("Arial", 22, "bold"), fg="#0f172a", bg="#f1f5f9", width=24, relief="sunken", bd=2)
     lbl_modal_disp.pack(pady=4)
@@ -1854,9 +3135,13 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
         keypad_modal.destroy()
         callback_on_confirm(entered_val.strip())
 
+    def kp_cancel():
+        keypad_modal.destroy()
+
     kp_buttons_frame = tk.Frame(kp_main, bg="white")
     kp_buttons_frame.pack(pady=4)
 
+    # --- 1. NUMERIC KEYPAD MODE ---
     if mode == "numeric":
         num_grid = [
             ('7', 0, 0), ('8', 0, 1), ('9', 0, 2),
@@ -1869,12 +3154,15 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
                       activebackground="#0284c7", activeforeground="white", relief="flat", bd=1, cursor="hand2",
                       command=lambda x=t: kp_press(x)).grid(row=r, column=c, padx=6, pady=4)
 
+    # --- 2. TIME KEYPAD MODE (12-HR AM/PM) ---
     elif mode == "time":
         shortcut_f = tk.Frame(kp_buttons_frame, bg="white")
         shortcut_f.grid(row=0, column=0, columnspan=4, pady=(0, 4))
-        for ts in ["06:00 AM", "08:00 AM", "12:00 PM", "04:00 PM", "08:00 PM"]:
-            tk.Button(shortcut_f, text=ts, font=("Helvetica", 9, "bold"), bg="#e0f2fe", fg="#0369a1", relief="flat", padx=6, pady=3,
-                      command=lambda x=ts: kp_set_val(x)).pack(side="left", padx=2)
+
+        time_shortcuts = ["06:00 AM", "08:00 AM", "12:00 PM", "05:00 PM", "08:00 PM", "12:00 AM"]
+        for ts in time_shortcuts:
+            tk.Button(shortcut_f, text=ts, font=("Helvetica", 9, "bold"), bg="#e0f2fe", fg="#0369a1", relief="flat", bd=0, padx=6, pady=4, cursor="hand2",
+                      command=lambda x=ts: kp_set_val(x)).pack(side="left", padx=3)
 
         time_grid = [
             ('7', 1, 0), ('8', 1, 1), ('9', 1, 2), (':', 1, 3),
@@ -1883,80 +3171,63 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
             ('0', 4, 0), ('00', 4, 1), (' ', 4, 2), ('CLR', 4, 3)
         ]
         for t, r, c in time_grid:
-            cmd = kp_clear if t == 'CLR' else (lambda x=t: kp_press(x))
-            tk.Button(kp_buttons_frame, text=t, font=("Arial", 14, "bold"), width=6, height=1, bg="#f1f5f9", fg="#0f172a",
-                      activebackground="#0284c7", activeforeground="white", relief="flat", bd=1, cursor="hand2", command=cmd).grid(row=r, column=c, padx=4, pady=3)
+            if t == 'CLR':
+                btn_b = tk.Button(kp_buttons_frame, text="CLR", font=("Arial", 12, "bold"), bg="#dc2626", fg="white", width=6, height=1, relief="flat", bd=0, cursor="hand2", command=kp_clear)
+            elif t in ['AM', 'PM']:
+                btn_b = tk.Button(kp_buttons_frame, text=t, font=("Arial", 13, "bold"), bg="#0284c7", fg="white", width=6, height=1, relief="flat", bd=0, cursor="hand2",
+                                  command=lambda x=t: (kp_press(' ' + x) if 'AM' not in entered_val and 'PM' not in entered_val else None))
+            elif t == ' ':
+                btn_b = tk.Button(kp_buttons_frame, text="SPACE", font=("Arial", 10, "bold"), bg="#cbd5e1", fg="#1e293b", width=6, height=1, relief="flat", bd=0, cursor="hand2", command=lambda: kp_press(' '))
+            else:
+                btn_b = tk.Button(kp_buttons_frame, text=t, font=("Arial", 15, "bold"), bg="#f1f5f9", fg="#0f172a", width=6, height=1, relief="flat", bd=0, cursor="hand2", command=lambda x=t: kp_press(x))
+            btn_b.grid(row=r, column=c, padx=4, pady=3)
 
+    # --- 3. CALENDAR / DATE KEYPAD MODE (YYYY-MM-DD) ---
     elif mode == "calendar":
-        try:
-            curr_d = datetime.datetime.strptime(entered_val, "%Y-%m-%d")
-        except Exception:
-            curr_d = datetime.datetime.now()
+        shortcut_f = tk.Frame(kp_buttons_frame, bg="white")
+        shortcut_f.grid(row=0, column=0, columnspan=3, pady=(0, 4))
 
-        cal_year, cal_month = curr_d.year, curr_d.month
+        ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+        today_dt = datetime.datetime.now(ist_tz)
 
-        cal_header = tk.Frame(kp_buttons_frame, bg="white")
-        cal_header.grid(row=0, column=0, columnspan=7, pady=(0, 4))
-        lbl_month_year = tk.Label(cal_header, text=f"{datetime.date(cal_year, cal_month, 1).strftime('%B %Y')}", font=("Helvetica", 12, "bold"), fg="#1565c0", bg="white", width=18)
+        d_today = today_dt.strftime("%Y-%m-%d")
+        d_7 = (today_dt + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
+        d_14 = (today_dt + datetime.timedelta(days=14)).strftime("%Y-%m-%d")
+        d_30 = (today_dt + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
 
-        def change_month(delta):
-            nonlocal cal_year, cal_month
-            cal_month += delta
-            if cal_month > 12: cal_month = 1; cal_year += 1
-            elif cal_month < 1: cal_month = 12; cal_year -= 1
-            lbl_month_year.config(text=f"{datetime.date(cal_year, cal_month, 1).strftime('%B %Y')}")
-            render_days()
+        date_shortcuts = [("TODAY", d_today), ("+7 DAYS", d_7), ("+14 DAYS", d_14), ("+30 DAYS", d_30)]
+        for lbl, val in date_shortcuts:
+            tk.Button(shortcut_f, text=f"{lbl}", font=("Helvetica", 9, "bold"), bg="#dcfce7", fg="#15803d", relief="flat", bd=0, padx=6, pady=4, cursor="hand2",
+                      command=lambda x=val: kp_set_val(x)).pack(side="left", padx=3)
 
-        tk.Button(cal_header, text="◀ PREV", font=BTN_FONT_INLINE, bg="#cbd5e1", command=lambda: change_month(-1)).pack(side="left", padx=5)
-        lbl_month_year.pack(side="left", padx=5)
-        tk.Button(cal_header, text="NEXT ▶", font=BTN_FONT_INLINE, bg="#cbd5e1", command=lambda: change_month(1)).pack(side="left", padx=5)
-
-        days_frame = tk.Frame(kp_buttons_frame, bg="white")
-        days_frame.grid(row=1, column=0, columnspan=7, pady=2)
-
-        def render_days():
-            for w in days_frame.winfo_children(): w.destroy()
-            for ci, day_n in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]):
-                tk.Label(days_frame, text=day_n, font=("Helvetica", 9, "bold"), fg="#64748b", bg="white", width=4).grid(row=0, column=ci, padx=2, pady=1)
-
-            first_day = datetime.date(cal_year, cal_month, 1)
-            start_weekday = first_day.weekday()
-            next_m = datetime.date(cal_year + (1 if cal_month == 12 else 0), 1 if cal_month == 12 else cal_month + 1, 1)
-            num_days = (next_m - first_day).days
-
-            row_i, col_i = 1, start_weekday
-            for d_num in range(1, num_days + 1):
-                d_str = f"{cal_year:04d}-{cal_month:02d}-{d_num:02d}"
-                tk.Button(days_frame, text=str(d_num), font=("Helvetica", 10, "bold"), width=4, height=1, bg="#f1f5f9", relief="flat",
-                          command=lambda s=d_str: kp_set_val(s)).grid(row=row_i, column=col_i, padx=2, pady=2)
-                col_i += 1
-                if col_i > 6: col_i = 0; row_i += 1
-
-        render_days()
-
-    else:
-        # Alphanumeric Keyboard
-        keys_rows = [
-            list("1234567890-"),
-            list("QWERTYUIOP"),
-            list("ASDFGHJKL"),
-            list("ZXCVBNM_")
+        date_grid = [
+            ('7', 1, 0), ('8', 1, 1), ('9', 1, 2),
+            ('4', 2, 0), ('5', 2, 1), ('6', 2, 2),
+            ('1', 3, 0), ('2', 3, 1), ('3', 3, 2),
+            ('-', 4, 0), ('0', 4, 1), (':', 4, 2)
         ]
-        for ri, row_keys in enumerate(keys_rows):
-            rf = tk.Frame(kp_buttons_frame, bg="white"); rf.pack(pady=2)
-            for k in row_keys:
-                tk.Button(rf, text=k, font=("Arial", 12, "bold"), width=3, bg="#f1f5f9", relief="flat", command=lambda x=k: kp_press(x)).pack(side="left", padx=2)
-        rf_sp = tk.Frame(kp_buttons_frame, bg="white"); rf_sp.pack(pady=2)
-        tk.Button(rf_sp, text="SPACE", font=("Arial", 10, "bold"), width=15, bg="#f1f5f9", relief="flat", command=lambda: kp_press(" ")).pack(side="left", padx=2)
+        for t, r, c in date_grid:
+            tk.Button(kp_buttons_frame, text=t, font=("Arial", 15, "bold"), width=7, height=1, bg="#f1f5f9", fg="#0f172a",
+                      activebackground="#0284c7", activeforeground="white", relief="flat", bd=1, cursor="hand2",
+                      command=lambda x=t: kp_press(x)).grid(row=r, column=c, padx=6, pady=4)
 
-    # Action Controls Bottom
-    actions_f = tk.Frame(kp_main, bg="white")
-    actions_f.pack(pady=6)
+    # --- 4. ALPHANUMERIC KEYBOARD MODE ---
+    else:
+        rows = [list("1234567890"), list("QWERTYUIOP"), list("ASDFGHJKL:"), list("ZXCVBNM._- ")]
+        for ri, row_k in enumerate(rows):
+            r_f = tk.Frame(kp_buttons_frame, bg="white")
+            r_f.pack(pady=2)
+            for ch in row_k:
+                tk.Button(r_f, text=ch if ch != " " else "SPACE", font=("Arial", 12, "bold"), width=4 if ch != " " else 8, bg="#f1f5f9", fg="#0f172a",
+                          command=lambda x=ch: kp_press(x)).pack(side="left", padx=2)
 
-    tk.Button(actions_f, text="⌫ BACKSPACE", font=BTN_FONT_MAIN, width=14, height=1, bg="#94a3b8", fg="white", relief="flat", command=kp_back).pack(side="left", padx=4)
-    tk.Button(actions_f, text="CLEAR", font=BTN_FONT_MAIN, width=10, height=1, bg="#64748b", fg="white", relief="flat", command=kp_clear).pack(side="left", padx=4)
-    tk.Button(actions_f, text="CANCEL", font=BTN_FONT_MAIN, width=10, height=1, bg="#dc2626", fg="white", relief="flat", command=keypad_modal.destroy).pack(side="left", padx=4)
-    tk.Button(actions_f, text="✔ CONFIRM", font=BTN_FONT_MAIN, width=14, height=1, bg="#16a34a", fg="white", relief="flat", command=kp_confirm).pack(side="left", padx=4)
+    kp_actions_frame = tk.Frame(kp_main, bg="white")
+    kp_actions_frame.pack(pady=8)
+
+    tk.Button(kp_actions_frame, text="DEL", font=BTN_FONT_MAIN, bg="#f97316", fg="white", width=10, height=2, cursor="hand2", command=kp_back).pack(side="left", padx=6)
+    tk.Button(kp_actions_frame, text="CLEAR", font=BTN_FONT_MAIN, bg="#dc2626", fg="white", width=10, height=2, cursor="hand2", command=kp_clear).pack(side="left", padx=6)
+    tk.Button(kp_actions_frame, text="CONFIRM", font=BTN_FONT_MAIN, bg="#0284c7", fg="white", width=12, height=2, cursor="hand2", command=kp_confirm).pack(side="left", padx=6)
+    tk.Button(kp_actions_frame, text="CANCEL", font=BTN_FONT_MAIN, bg="#64748b", fg="white", width=10, height=2, cursor="hand2", command=kp_cancel).pack(side="left", padx=6)
 
 # -----------------------------------------------------------------------------
 # MAIN UI REFRESH LOOP
@@ -2040,6 +3311,11 @@ def update_ui():
                 text=" ⚠ ALARM: " + " | ".join(active_warnings[:2]),
                 bg="#c62828", fg="white"
             )
+        elif time.time() < setpoint_toast_expiry:
+            lbl_warning_bar.config(
+                text=f" {setpoint_toast_message} ",
+                bg="#0284c7", fg="white"
+            )
         else:
             pump_str = "RUNNING" if relay_states.get(RELAY_CH_COMMON_PUMP) else "IDLE"
             lbl_warning_bar.config(
@@ -2097,29 +3373,24 @@ def update_ui():
                 else:
                     txt_detail_data.insert("end", "INSTRUMENTATION OFFLINE\n\n", "red")
 
-                txt_detail_data.insert("end", f"OPERATING MODE : {sp_eval.get('mode', 'AUTO')}\n", "blue")
                 txt_detail_data.insert("end", f"TEMP TARGET: {sp_eval['target_temp']:.1f} °C  (Range: {sp_eval['T MIN']:.1f} - {sp_eval['T MAX']:.1f} °C)\n", "black")
                 txt_detail_data.insert("end", f"HUMI TARGET: {sp_eval['target_humi']:.1f} %   (Range: {sp_eval['H MIN']:.1f} - {sp_eval['H MAX']:.1f} %)\n\n", "black")
 
                 acf_s = "ON" if relay_states.get(RELAY_CH_ACF[skey]) else "OFF"
-                spr_s = "OPEN" if relay_states.get(RELAY_CH_SPRINKLER[skey]) else "CLOSED"
-                fog_s = "OPEN" if relay_states.get(RELAY_CH_FOGGER[skey]) else "CLOSED"
-                pump_s = "RUNNING" if relay_states.get(RELAY_CH_COMMON_PUMP) else "IDLE"
+                spr_s = "ON" if relay_states.get(RELAY_CH_SPRINKLER[skey]) else "OFF"
+                fog_s = "ON" if relay_states.get(RELAY_CH_FOGGER[skey]) else "OFF"
+                pump_s = "ON" if relay_states.get(RELAY_CH_COMMON_PUMP) else "OFF"
 
                 txt_detail_data.insert("end", "Air Circulation Fans (24 ACFs): ", "black")
                 txt_detail_data.insert("end", f"{acf_s}\n", "green" if acf_s == "ON" else "red")
                 txt_detail_data.insert("end", "Sprinkler Solenoid Valve:      ", "black")
-                txt_detail_data.insert("end", f"{spr_s}\n", "green" if spr_s == "OPEN" else "red")
+                txt_detail_data.insert("end", f"{spr_s}\n", "green" if spr_s == "ON" else "red")
                 txt_detail_data.insert("end", "Fogger Solenoid Valve:         ", "black")
-                txt_detail_data.insert("end", f"{fog_s}\n", "green" if fog_s == "OPEN" else "red")
+                txt_detail_data.insert("end", f"{fog_s}\n", "green" if fog_s == "ON" else "red")
                 txt_detail_data.insert("end", "Common Water Pump Motor:       ", "black")
-                txt_detail_data.insert("end", f"{pump_s}\n", "green" if pump_s == "RUNNING" else "grey")
+                txt_detail_data.insert("end", f"{pump_s}\n", "green" if pump_s == "ON" else "red")
 
             txt_detail_data.config(state="disabled")
-
-        # 4. Update Manual Screen if open
-        if frame_manual.winfo_ismapped():
-            refresh_manual_card()
 
     except Exception as e:
         print(f"UI Update Error: {e}")
@@ -2132,19 +3403,36 @@ def update_ui():
 load_config()
 load_setpoints()
 load_dli_history()
+load_trend_history_from_logs()
 
 if __name__ == "__main__":
     # Start background automation thread
     reader_thread = threading.Thread(target=sensor_reader, daemon=True)
     reader_thread.start()
 
+    # Start background offline telemetry backfill sync thread (Sections 16 & 17)
+    sync_thread = threading.Thread(target=sync_offline_thread, daemon=True)
+    sync_thread.start()
+
+    # Start Bluetooth serial terminal server & auto-trust daemon (WiFi provisioning)
+    bt_trust_thread = threading.Thread(target=auto_trust_devices, daemon=True)
+    bt_trust_thread.start()
+    bt_server_thread = threading.Thread(target=start_bluetooth_server, daemon=True)
+    bt_server_thread.start()
+
     # Build and start UI
     rebuild_grid()
     show(frame_main)
     root.after(500, update_clock_display)
     root.after(1000, update_ui)
-
+    print("[APP] Entering root.mainloop()...")
     try:
         root.mainloop()
+        print("[APP] root.mainloop returned normally.")
     except KeyboardInterrupt:
+        print("[APP] KeyboardInterrupt received.")
         quit_app()
+    except Exception as e:
+        print(f"[APP] Mainloop crashed: {e}")
+    finally:
+        print("[APP] Application exiting.")

@@ -77,3 +77,4 @@ except KeyboardInterrupt:
     print("\nExiting script...")
 finally:
     ser.close()
+

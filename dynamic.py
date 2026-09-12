@@ -38,7 +38,7 @@ DEFAULT_CONFIG = {
     "sensors": {
         "water": {
             "name": "Water Sensor (EC & pH)",
-            "path": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0",
+            "path": "/dev/serial/by-path/",
             "ec_slave_id": 31,
             "ph_slave_id": 32,
             "enabled": True
@@ -71,45 +71,6 @@ def load_system_config():
                         for skey, sval in loaded["sensors"].items():
                             if skey in system_config["sensors"]:
                                 system_config["sensors"][skey].update(sval)
-            "path": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0",
-            "slave_id": 1,
-            "enabled": True
-        }
-    },
-    "relays": {
-        "name": "Modbus Relays",
-        "path": "/dev/serial/by-path/",
-        "slave_id": 1,
-        "enabled": True
-    }
-}
-
-            "path": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0",
-            "slave_id": 1,
-            "enabled": True
-        }
-    },
-    "relays": {
-        "name": "Modbus Relays",
-        "path": "/dev/serial/by-path/",
-            "path": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0",
-            "slave_id": 1,
-            "enabled": True
-        }
-    },
-    "relays": {
-        "name": "Modbus Relays",
-        "path": "/dev/serial/by-path/",
-        "slave_id": 1,
-        "enabled": True
-    }
-}
-
-        "slave_id": 1,
-        "enabled": True
-    }
-}
-
                             else:
                                 system_config["sensors"][skey] = sval
                     if "relays" in loaded:

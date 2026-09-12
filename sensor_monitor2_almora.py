@@ -158,6 +158,7 @@ def generate_default_almora_schedule():
     return {
         "mode": "SCHEDULED", # "STATIC" or "SCHEDULED"
         "active_setting": "Setting A",
+        "program_name": "Default Program",
         "T MIN": 10.0,
         "T MAX": 30.0,
         "H MIN": 30.0,
@@ -247,6 +248,8 @@ def load_setpoints():
         if skey not in sensor_setpoints:
             sensor_setpoints[skey] = copy.deepcopy(generate_default_almora_schedule())
         else:
+            if "program_name" not in sensor_setpoints[skey]:
+                sensor_setpoints[skey]["program_name"] = "Default Program"
             if "settings" not in sensor_setpoints[skey]:
                 defaults = copy.deepcopy(generate_default_almora_schedule())
                 defaults.update(sensor_setpoints[skey])
@@ -300,7 +303,7 @@ def get_active_setpoints(skey):
     active_info = {
         "skey": skey,
         "setting_name": "STATIC",
-        "program_name": "Default Program",
+        "program_name": sp_data.get("program_name", "Default Program"),
         "stage_name": "Stage 1",
         "slot_id": 1,
         "start": "08:00 AM",
@@ -370,7 +373,7 @@ def get_active_setpoints(skey):
 
                 active_info.update({
                     "setting_name": setting.get("name", set_key),
-                    "program_name": setting.get("name", set_key),
+                    "program_name": sp_data.get("program_name", "Default Program"),
                     "stage_name": s_name,
                     "slot_id": slot.get("id", 1),
                     "start": slot.get("start", "08:00 AM"),
@@ -856,6 +859,160 @@ def add_bottom_right_clock(parent, bg_color="white"):
     clock_labels.append(lbl)
     return lbl
 
+# ==========================================
+# MODERN TOUCH NOTIFICATION & DIALOG SYSTEM
+# ==========================================
+active_notification_frame = None
+notification_timer_id = None
+
+def show_notification(title, message, ntype="success", duration_ms=3000):
+    """
+    Simple, clean touch notification popup with white background and black text.
+    """
+    global active_notification_frame, notification_timer_id
+
+    if notification_timer_id is not None:
+        try: root.after_cancel(notification_timer_id)
+        except Exception: pass
+        notification_timer_id = None
+
+    if active_notification_frame and active_notification_frame.winfo_exists():
+        try: active_notification_frame.destroy()
+        except Exception: pass
+        active_notification_frame = None
+
+    icons = {
+        "success": "✔",
+        "warning": "⚠",
+        "error": "✖",
+        "info": "ℹ"
+    }
+    icon_sym = icons.get(ntype, "ℹ")
+
+    # Simple white card with clean black border
+    toast = tk.Frame(root, bg="#000000", bd=0, padx=2, pady=2)
+    active_notification_frame = toast
+
+    inner = tk.Frame(toast, bg="#ffffff", padx=18, pady=12)
+    inner.pack(fill="both", expand=True)
+
+    # Icon indicator in black
+    badge_lbl = tk.Label(
+        inner,
+        text=f" {icon_sym} ",
+        font=("Helvetica", 14, "bold"),
+        bg="#ffffff",
+        fg="#000000",
+        padx=4,
+        pady=2
+    )
+    badge_lbl.pack(side="left", padx=(0, 10))
+
+    # Text Column in pure black
+    text_f = tk.Frame(inner, bg="#ffffff")
+    text_f.pack(side="left", fill="both", expand=True, padx=(0, 16))
+
+    lbl_t = tk.Label(
+        text_f,
+        text=title.upper(),
+        font=("Helvetica", 11, "bold"),
+        fg="#000000",
+        bg="#ffffff",
+        anchor="w"
+    )
+    lbl_t.pack(anchor="w")
+
+    lbl_m = tk.Label(
+        text_f,
+        text=message,
+        font=("Helvetica", 10, "bold"),
+        fg="#000000",
+        bg="#ffffff",
+        anchor="w",
+        wraplength=480,
+        justify="left"
+    )
+    lbl_m.pack(anchor="w", pady=(2, 0))
+
+    def dismiss():
+        global active_notification_frame, notification_timer_id
+        if notification_timer_id is not None:
+            try: root.after_cancel(notification_timer_id)
+            except Exception: pass
+            notification_timer_id = None
+        if toast and toast.winfo_exists():
+            try: toast.destroy()
+            except Exception: pass
+        active_notification_frame = None
+
+    btn_close = tk.Button(
+        inner,
+        text="✖",
+        font=("Helvetica", 11, "bold"),
+        bg="#ffffff",
+        fg="#000000",
+        activebackground="#f1f5f9",
+        activeforeground="#000000",
+        relief="flat",
+        bd=0,
+        cursor="hand2",
+        padx=8,
+        pady=4,
+        command=dismiss
+    )
+    btn_close.pack(side="right", padx=(4, 0))
+
+    for w in (toast, inner, badge_lbl, text_f, lbl_t, lbl_m):
+        w.bind("<Button-1>", lambda e: dismiss())
+
+    toast.place(relx=0.5, rely=0.03, anchor="n")
+    toast.lift()
+
+    if duration_ms > 0:
+        notification_timer_id = root.after(duration_ms, dismiss)
+
+def show_confirm_dialog(title, message, on_confirm, on_cancel=None):
+    """
+    Simple, clean confirmation dialog with white background and black text.
+    """
+    overlay = tk.Toplevel(root)
+    overlay.configure(bg="#000000")
+    overlay.transient(root)
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    overlay.geometry(f"{sw}x{sh}+0+0")
+    try: overlay.overrideredirect(True)
+    except Exception: pass
+    try: overlay.attributes("-fullscreen", True)
+    except Exception: pass
+    overlay.grab_set()
+
+    card_border = tk.Frame(overlay, bg="#000000", bd=0, padx=2, pady=2)
+    card_border.place(relx=0.5, rely=0.5, anchor="center")
+
+    card = tk.Frame(card_border, bg="#ffffff", padx=36, pady=26)
+    card.pack()
+
+    tk.Label(card, text="⚠", font=("Helvetica", 32, "bold"), fg="#000000", bg="#ffffff").pack(pady=(0, 6))
+    tk.Label(card, text=title.upper(), font=("Helvetica", 13, "bold"), fg="#000000", bg="#ffffff").pack(pady=(0, 8))
+    tk.Label(card, text=message, font=("Helvetica", 11), fg="#000000", bg="#ffffff", wraplength=480, justify="center").pack(pady=(0, 22))
+
+    btns = tk.Frame(card, bg="#ffffff")
+    btns.pack()
+
+    def _yes():
+        overlay.destroy()
+        if on_confirm: on_confirm()
+
+    def _no():
+        overlay.destroy()
+        if on_cancel: on_cancel()
+
+    tk.Button(btns, text="✔ YES, PROCEED", font=("Helvetica", 11, "bold"), bg="#000000", fg="#ffffff",
+              activebackground="#333333", activeforeground="#ffffff", relief="flat", bd=0, padx=18, pady=8, cursor="hand2", command=_yes).pack(side="left", padx=10)
+
+    tk.Button(btns, text="✖ CANCEL", font=("Helvetica", 11, "bold"), bg="#e2e8f0", fg="#000000",
+              activebackground="#cbd5e1", activeforeground="#000000", relief="flat", bd=0, padx=18, pady=8, cursor="hand2", command=_no).pack(side="left", padx=10)
+
 def show(frame):
     for f in [frame_main, frame_set, frame_schedule, frame_detail]:
         f.pack_forget()
@@ -864,6 +1021,8 @@ def show(frame):
     add_top_left_exit(frame)
     if frame != frame_main:
         add_bottom_right_clock(frame)
+    if active_notification_frame and active_notification_frame.winfo_exists():
+        active_notification_frame.lift()
 
 def get_sensor_display_name(skey):
     custom_names = system_config.get("sensor_names", {})
@@ -1002,8 +1161,9 @@ def update_ui():
                 disp_name = get_sensor_display_name(skey)
                 sp_eval = get_active_setpoints(skey)
                 
-                setting_nm = sp_eval['setting_name']
-                slot_id = sp_eval['slot_id']
+                prog_name = sp_eval.get('program_name') or 'Default Program'
+                setting_nm = sp_eval.get('setting_name') or 'Crop Stage 1'
+                slot_id = sp_eval.get('slot_id', 1)
                 t_min, t_max = sp_eval['T MIN'], sp_eval['T MAX']
                 h_min, h_max = sp_eval['H MIN'], sp_eval['H MAX']
                 t_target = sp_eval['target_temp']
@@ -1016,6 +1176,7 @@ def update_ui():
 
                     box_text = (
                         f"{disp_name}\n"
+                        f"{prog_name}\n"
                         f"[{setting_nm} - Slot {slot_id}]\n"
                         f"Temp: {t:.1f}°C (Set: {t_target:.1f}°C)\n"
                         f"Humi: {h:.1f}%  (Set: {h_target:.1f}%)\n"
@@ -1048,8 +1209,8 @@ def update_ui():
             )
 
         # Update Detail View if open
-        if frame_detail.winfo_ismapped() and active_detail_port in snap:
-            d = snap[active_detail_port]
+        if frame_detail.winfo_ismapped() and active_detail_port:
+            d = snap.get(active_detail_port)
             skey = next((k for k, v in SENSOR_MAP.items() if v == active_detail_port), "S1")
             sp_eval = get_active_setpoints(skey)
             idx = int(skey.replace('S', '')) - 1
@@ -1067,8 +1228,10 @@ def update_ui():
             t_min, t_max = sp_eval['T MIN'], sp_eval['T MAX']
             h_min, h_max = sp_eval['H MIN'], sp_eval['H MAX']
 
-            prog_name = sp_eval.get('program_name', sp_eval.get('setting_name', 'Default Program'))
-            stage_name = sp_eval.get('stage_name', f"Slot {sp_eval.get('slot_id', 1)}")
+            prog_name = sp_eval.get('program_name') or 'Default Program'
+            stage_name = sp_eval.get('setting_name') or 'Crop Stage 1'
+            slot_id = sp_eval.get('slot_id', 1)
+            slot_name = sp_eval.get('stage_name') or f"Slot {slot_id}"
 
             txt_detail_data.config(state="normal")
             txt_detail_data.delete("1.0", "end")
@@ -1098,12 +1261,15 @@ def update_ui():
                 txt_detail_data.insert("end", "CO2:  ", "black")
                 txt_detail_data.insert("end", "N/A\n\n", "red")
 
-            # 3. Program, Stage, Active Window (Black label, Blue value)
+            # 3. Program, Stage, Slot, Active Window (Black label, Blue value)
             txt_detail_data.insert("end", "Program: ", "black")
             txt_detail_data.insert("end", f"{prog_name}\n", "blue")
             
             txt_detail_data.insert("end", "Stage:   ", "black")
             txt_detail_data.insert("end", f"{stage_name}\n", "blue")
+
+            txt_detail_data.insert("end", "Slot:    ", "black")
+            txt_detail_data.insert("end", f"{slot_name}\n", "blue")
             
             txt_detail_data.insert("end", "Active Window: ", "black")
             txt_detail_data.insert("end", f"{slot_start} - {slot_stop}\n\n", "blue")
@@ -1148,7 +1314,7 @@ active_detail_port = None
 lbl_detail_title = tk.Label(frame_detail, text="COLD ROOM DATA", font=big, fg="#1565c0", bg="white")
 lbl_detail_title.pack(pady=5)
 
-txt_detail_data = tk.Text(frame_detail, font=font.Font(size=12, weight="bold"), bg="white", bd=0, highlightthickness=0, height=16, width=65)
+txt_detail_data = tk.Text(frame_detail, font=font.Font(size=12, weight="bold"), bg="white", bd=0, highlightthickness=0, height=18, width=65)
 txt_detail_data.pack(pady=5, expand=True, fill="both")
 txt_detail_data.tag_configure("black", foreground="#000000", justify="center")
 txt_detail_data.tag_configure("blue", foreground="#1565c0", justify="center")
@@ -1170,7 +1336,7 @@ def edit_active_room_name_detail():
             save_config()
             lbl_detail_title.config(text=new_name.strip())
             update_ui()
-            messagebox.showinfo("Renamed", f"Renamed {skey} to '{new_name.strip()}' successfully!")
+            show_notification("Room Renamed", f"Renamed {skey} to '{new_name.strip()}' successfully!", "success")
             
     open_almora_keypad(f"Rename Room ({skey})", curr_name, on_confirm, is_alphanumeric=True)
 
@@ -1459,6 +1625,7 @@ def open_system_settings_modal():
     def save_sys_settings():
         save_config()
         sett_win.destroy()
+        show_notification("Settings Saved", "System configuration saved successfully!", "success")
 
     btn_f = tk.Frame(s_main, bg="white"); btn_f.pack(pady=30)
     tk.Button(btn_f, text="SAVE SETTINGS", font=BTN_FONT_MAIN, bg="#2e7d32", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=save_sys_settings).pack(side="left", padx=15)
@@ -1595,7 +1762,7 @@ def edit_room_name():
             sensor_dropdown_btn.config(text=f"{skey} — {new_name.strip()} ▼")
             update_ui()
             load_schedule_form()
-            messagebox.showinfo("Renamed", f"Renamed {skey} to '{new_name.strip()}' successfully!")
+            show_notification("Room Renamed", f"Renamed {skey} to '{new_name.strip()}' successfully!", "success")
 
     open_almora_keypad(f"Rename Room ({skey})", curr_name, on_confirm, is_alphanumeric=True)
 
@@ -1688,7 +1855,7 @@ def select_num_stages(count):
     stages_count_menu_frame.place_forget()
     stages_count_dropdown_open = False
     load_schedule_form()
-    messagebox.showinfo("Stages Updated", f"Set number of active crop stages for {get_sensor_display_name(skey)} to {count}!")
+    show_notification("Stages Updated", f"Set number of active crop stages for {get_sensor_display_name(skey)} to {count}!", "success")
 
 stages_count_dropdown_btn = tk.Button(sched_row1, text="5 Stages ▼", font=("Helvetica", 11, "bold"), bg="#cbd5e1", fg="#1e293b",
                                       activebackground="#94a3b8", activeforeground="#1e293b", relief="flat", bd=0, padx=12, pady=6, cursor="hand2", command=toggle_stages_count_dropdown)
@@ -1701,7 +1868,12 @@ def update_preset_dropdown_text():
     skey = skey_combo.get()
     room_presets = get_room_crop_programs(skey)
     count = len(room_presets)
-    preset_dropdown_btn.config(text=f" Programs ({count}/20 Saved)▼")
+    sp = get_setpoints(skey)
+    active_p = sp.get("program_name", "Default Program")
+    if active_p and (active_p in room_presets or active_p != "Default Program"):
+        preset_dropdown_btn.config(text=f"{active_p} ▼", bg="#0284c7", fg="white")
+    else:
+        preset_dropdown_btn.config(text=f"Programs ({count}/20 Saved) ▼", bg="#cbd5e1", fg="#1e293b")
 
 def toggle_preset_dropdown():
     global sensor_dropdown_open, profile_dropdown_open, preset_dropdown_open, stages_count_dropdown_open
@@ -1729,12 +1901,14 @@ def toggle_preset_dropdown():
                     r_presets = get_room_crop_programs(curr_skey)
                     if name in r_presets:
                         sensor_setpoints[curr_skey]["settings"] = copy.deepcopy(r_presets[name])
+                        sensor_setpoints[curr_skey]["program_name"] = name
                         save_setpoints()
                         preset_menu_frame.place_forget()
                         preset_dropdown_open = False
-                        preset_dropdown_btn.config(text=f"{name} ▼")
                         load_schedule_form()
-                        messagebox.showinfo("Program Loaded", f"Applied program '{name}' to {get_sensor_display_name(curr_skey)}!")
+                        update_preset_dropdown_text()
+                        update_ui()
+                        show_notification("Program Loaded", f"Applied program '{name}' to {get_sensor_display_name(curr_skey)}!", "success")
 
                 def _delete(name=p_name):
                     curr_skey = skey_combo.get()
@@ -1742,8 +1916,14 @@ def toggle_preset_dropdown():
                     if name in r_presets:
                         del r_presets[name]
                         save_crop_programs()
+                        sp = get_setpoints(curr_skey)
+                        if sp.get("program_name") == name:
+                            sp["program_name"] = "Default Program"
+                            save_setpoints()
                         toggle_preset_dropdown()
                         update_preset_dropdown_text()
+                        update_ui()
+                        show_notification("Program Deleted", f"Deleted program '{name}'", "info")
 
                 btn_apply = tk.Button(item_f, text=f"{p_name}", font=("Helvetica", 11, "bold"), bg="white", fg="#1e293b",
                                       activebackground="#0284c7", activeforeground="white", relief="flat", bd=0, anchor="w", padx=12, pady=10, cursor="hand2", command=_apply)
@@ -1768,19 +1948,23 @@ def save_current_as_preset_inline():
     skey = skey_combo.get()
     room_presets = get_room_crop_programs(skey)
     if len(room_presets) >= 20:
-        open_almora_keypad("Limit Reached! Maximum 20 programs allowed.", "Delete a program first", lambda v: None, is_alphanumeric=True)
+        show_notification("Limit Reached", "Maximum 20 programs allowed. Delete a program first.", "warning")
         return
     default_name = f"Program {len(room_presets)+1}"
     def on_confirm_name(name):
-        if name:
+        if name and name.strip():
+            name = name.strip()
             curr_skey = skey_combo.get()
             r_presets = get_room_crop_programs(curr_skey)
             sp = get_setpoints(curr_skey)
             r_presets[name] = copy.deepcopy(sp.get("settings", {}))
             save_crop_programs()
+            sp["program_name"] = name
+            save_setpoints()
             update_preset_dropdown_text()
-            preset_dropdown_btn.config(text=f"{name} ▼")
-            messagebox.showinfo("Saved", f"Saved schedule as program '{name}' for {get_sensor_display_name(curr_skey)}")
+            load_schedule_form()
+            update_ui()
+            show_notification("Program Saved", f"Saved and activated program '{name}' for {get_sensor_display_name(curr_skey)}!", "success")
 
     open_almora_keypad(f"Program Name ({get_sensor_display_name(skey)})", default_name, on_confirm_name, is_alphanumeric=True)
 
@@ -2010,16 +2194,27 @@ def save_current_schedule_to_file(show_feedback=True):
         save_setpoints()
         print(f"Schedule for {skey} - {setting_nm} saved successfully!")
         
-        if show_feedback and 'btn_save_sched' in globals() and btn_save_sched.winfo_exists():
-            orig_txt = btn_save_sched.cget("text")
-            orig_bg = btn_save_sched.cget("bg")
-            btn_save_sched.config(text="SAVED ", bg="#15803d")
-            def _reset_btn():
-                try:
-                    if btn_save_sched.winfo_exists():
-                        btn_save_sched.config(text=orig_txt, bg=orig_bg)
-                except Exception: pass
-            root.after(1500, _reset_btn)
+        # If an active program is saved, also sync changes into crop_programs
+        act_prog = sp.get("program_name")
+        if act_prog and act_prog != "Default Program":
+            r_presets = get_room_crop_programs(skey)
+            if act_prog in r_presets:
+                r_presets[act_prog] = copy.deepcopy(sp.get("settings", {}))
+                save_crop_programs()
+
+        update_ui()
+        if show_feedback:
+            show_notification("Schedule Saved", f"Schedule for {get_sensor_display_name(skey)} ({setting_nm}) saved!", "success")
+            if 'btn_save_sched' in globals() and btn_save_sched.winfo_exists():
+                orig_txt = btn_save_sched.cget("text")
+                orig_bg = btn_save_sched.cget("bg")
+                btn_save_sched.config(text="SAVED ✔", bg="#15803d")
+                def _reset_btn():
+                    try:
+                        if btn_save_sched.winfo_exists():
+                            btn_save_sched.config(text=orig_txt, bg=orig_bg)
+                    except Exception: pass
+                root.after(1500, _reset_btn)
     except Exception as e:
         print(f"Schedule Save Error: {e}")
 
@@ -2050,7 +2245,7 @@ def delete_time_slot(slot_idx):
     st = sp.get("settings", {}).get(setting_nm, {})
     slots = st.get("time_slots", [])
     if len(slots) <= 1:
-        messagebox.showwarning("Warning", "At least one time slot is required!")
+        show_notification("Action Blocked", "At least one time slot is required!", "warning")
         return
     if 0 <= slot_idx < len(slots):
         slots.pop(slot_idx)
@@ -2067,13 +2262,14 @@ def delete_all_time_slots():
     st = sp.setdefault("settings", {}).setdefault(setting_nm, {})
     slots = st.get("time_slots", [])
     if not slots:
-        messagebox.showinfo("Info", "No time slots to delete!")
+        show_notification("Notice", "No time slots to delete!", "info")
         return
-    if messagebox.askyesno("Delete All Slots", f"Are you sure you want to clear all {len(slots)} time slots for {setting_nm}?"):
+    def _do_clear():
         st["time_slots"] = []
         save_setpoints()
         load_schedule_form()
-        messagebox.showinfo("Cleared", "All time slots have been deleted!")
+        show_notification("Cleared", "All time slots have been deleted!", "info")
+    show_confirm_dialog("Delete All Slots", f"Are you sure you want to clear all {len(slots)} time slots for {setting_nm}?", _do_clear)
 
 # Populate permanently packed bottom action buttons
 btn_save_sched = tk.Button(sched_btn_frame, text="SAVE SCHEDULE", font=BTN_FONT_MAIN, bg="#2e7d32", fg="white", width=FRAME_BTN_WIDTH, height=FRAME_BTN_HEIGHT, cursor="hand2", command=lambda: save_current_schedule_to_file(True))
@@ -2235,7 +2431,10 @@ def load_schedule_form():
         w_box.pack(fill="x", padx=10, pady=4)
         tk.Label(w_box, text=f" TIME SLOT OVERLAP DETECTED:\n" + "\n".join(overlaps), font=("Helvetica", 11, "bold"), fg="#b91c1c", bg="#fef2f2").pack(padx=10, pady=6)
 
-    temp_grid_frame.config(text="SCHEDULE TIME SLOTS (TEMP & HUMIDITY SETPOINTS)")
+    active_prog = sp.get("program_name", "Default Program")
+    if 'lbl_sched_title' in globals() and lbl_sched_title.winfo_exists():
+        lbl_sched_title.config(text=f"ALMORA SCHEDULE — PROGRAM: {active_prog.upper()}")
+    temp_grid_frame.config(text=f"SCHEDULE TIME SLOTS — PROGRAM: {active_prog.upper()} [{profile_disp_name.upper()}]")
     humi_grid_frame.pack_forget()
 
     temp_inner = tk.Frame(temp_grid_frame, bg="white")
@@ -2283,7 +2482,7 @@ def load_schedule_form():
         left_f = tk.Frame(row, bg="#f8fafc")
         left_f.pack(side="left", padx=(0, 15))
 
-        tk.Label(left_f, text=frame_name_v.upper(), font=card_title_font, fg="#1565c0", bg="#f8fafc", anchor="w").pack(anchor="w")
+        tk.Label(left_f, text=f"{frame_name_v.upper()}  [{active_prog}]", font=card_title_font, fg="#1565c0", bg="#f8fafc", anchor="w").pack(anchor="w")
         tk.Label(left_f, text=f"{start_v} - {stop_v}", font=card_time_font, fg="#334155", bg="#f8fafc", anchor="w").pack(anchor="w", pady=(2, 0))
 
         # RIGHT SIDE: Large Action Buttons (EDIT FRAME & DELETE)
@@ -2369,6 +2568,8 @@ def update_static_sp(key, value_str, label_widget):
         sp[key] = val
         label_widget.config(text=str(val))
         save_setpoints()
+        update_ui()
+        show_notification("Setpoint Updated", f"{key} set to {val} for {get_sensor_display_name(active_setup_skey)}", "success")
     except Exception as e: print(f"Set Error: {e}")
 
 tk.Button(frame_set, text="SAVE & RETURN", font=BTN_FONT_MAIN, bg="#1565c0", fg="white", 
@@ -2381,7 +2582,7 @@ def quit_app():
     print("Cleaning up relays...")
     relay_port = system_config.get('relay_port')
     if relay_port:
-        for ch in range(1, 17):
+        for ch in range(1, 23):
             set_relay(ch, False)
     root.destroy()
 

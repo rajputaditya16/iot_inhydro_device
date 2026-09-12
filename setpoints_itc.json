@@ -1,7 +1,7 @@
 {
     "PH-01": {
         "name": "POLYHOUSE 01",
-        "mode": "AUTO",
+        "mode": "CYCLIC",
         "temp_high": 28.0,
         "temp_low": 22.0,
         "temp_target": 25.0,
@@ -407,11 +407,26 @@
                 "type": "fogger",
                 "enabled": true
             }
-        ]
+        ],
+        "Timer1 Name": "ACF FANS",
+        "Timer1 Start": "00:00",
+        "Timer1 Stop": "23:59",
+        "Timer1 ON Min": 15,
+        "Timer1 OFF Min": 30,
+        "Timer2 Name": "SPRINKLER",
+        "Timer2 Start": "06:00",
+        "Timer2 Stop": "18:00",
+        "Timer2 ON Min": 2,
+        "Timer2 OFF Min": 30,
+        "Timer3 Name": "FOGGER",
+        "Timer3 Start": "08:00",
+        "Timer3 Stop": "17:00",
+        "Timer3 ON Min": 1,
+        "Timer3 OFF Min": 2
     },
     "PH-02": {
         "name": "POLYHOUSE 02",
-        "mode": "AUTO",
+        "mode": "MANUAL",
         "temp_high": 28.0,
         "temp_low": 22.0,
         "temp_target": 25.0,
@@ -817,7 +832,22 @@
                 "type": "fogger",
                 "enabled": true
             }
-        ]
+        ],
+        "Timer1 Name": "ACF FANS",
+        "Timer1 Start": "00:00",
+        "Timer1 Stop": "23:59",
+        "Timer1 ON Min": 15,
+        "Timer1 OFF Min": 30,
+        "Timer2 Name": "SPRINKLER",
+        "Timer2 Start": "06:00",
+        "Timer2 Stop": "18:00",
+        "Timer2 ON Min": 2,
+        "Timer2 OFF Min": 30,
+        "Timer3 Name": "FOGGER",
+        "Timer3 Start": "08:00",
+        "Timer3 Stop": "17:00",
+        "Timer3 ON Min": 1,
+        "Timer3 OFF Min": 2
     },
     "PH-03": {
         "name": "POLYHOUSE 03",
@@ -1227,7 +1257,22 @@
                 "type": "fogger",
                 "enabled": true
             }
-        ]
+        ],
+        "Timer1 Name": "ACF FANS",
+        "Timer1 Start": "00:00",
+        "Timer1 Stop": "23:59",
+        "Timer1 ON Min": 15,
+        "Timer1 OFF Min": 30,
+        "Timer2 Name": "SPRINKLER",
+        "Timer2 Start": "06:00",
+        "Timer2 Stop": "18:00",
+        "Timer2 ON Min": 2,
+        "Timer2 OFF Min": 30,
+        "Timer3 Name": "FOGGER",
+        "Timer3 Start": "08:00",
+        "Timer3 Stop": "17:00",
+        "Timer3 ON Min": 1,
+        "Timer3 OFF Min": 2
     },
     "PH-04": {
         "name": "POLYHOUSE 04",
@@ -1637,7 +1682,22 @@
                 "type": "fogger",
                 "enabled": true
             }
-        ]
+        ],
+        "Timer1 Name": "ACF FANS",
+        "Timer1 Start": "00:00",
+        "Timer1 Stop": "23:59",
+        "Timer1 ON Min": 15,
+        "Timer1 OFF Min": 30,
+        "Timer2 Name": "SPRINKLER",
+        "Timer2 Start": "06:00",
+        "Timer2 Stop": "18:00",
+        "Timer2 ON Min": 2,
+        "Timer2 OFF Min": 30,
+        "Timer3 Name": "FOGGER",
+        "Timer3 Start": "08:00",
+        "Timer3 Stop": "17:00",
+        "Timer3 ON Min": 1,
+        "Timer3 OFF Min": 2
     },
     "PH-05": {
         "name": "POLYHOUSE 05",
@@ -2047,7 +2107,22 @@
                 "type": "fogger",
                 "enabled": true
             }
-        ]
+        ],
+        "Timer1 Name": "ACF FANS",
+        "Timer1 Start": "00:00",
+        "Timer1 Stop": "23:59",
+        "Timer1 ON Min": 15,
+        "Timer1 OFF Min": 30,
+        "Timer2 Name": "SPRINKLER",
+        "Timer2 Start": "06:00",
+        "Timer2 Stop": "18:00",
+        "Timer2 ON Min": 2,
+        "Timer2 OFF Min": 30,
+        "Timer3 Name": "FOGGER",
+        "Timer3 Start": "08:00",
+        "Timer3 Stop": "17:00",
+        "Timer3 ON Min": 1,
+        "Timer3 OFF Min": 2
     },
     "PH-06": {
         "name": "POLYHOUSE 06 (MONITOR)",
