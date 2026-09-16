@@ -252,7 +252,7 @@ const DevicesPage = () => {
                 const deviceId = device._id || device.id;
                 const isBlocked = device.status === 'blocked';
                 return (
-                  <tr key={deviceId} className="border-b border-slate-700/30 transition-colors hover:bg-slate-800/50 cursor-pointer"  onClick={() => navigate(`/monitoring?device=${deviceId}`)}>
+                  <tr key={deviceId} className="border-b border-slate-700/30 transition-colors hover:bg-slate-800/50 cursor-pointer" >
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className={`rounded-lg p-2 ${isBlocked ? 'bg-red-500/10' : 'bg-green-500/10'}`}>

@@ -571,14 +571,14 @@ const LiveMonitoring = () => {
   const [isMqttConnected, setIsMqttConnected] = useState(false);
 
   const token = localStorage.getItem('token');
-  const API_BASE = import.meta.env.VITE_API_URL || '';
+  const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
   // ── Step 1: Fetch all devices from backend ─────────────────────────────────
   useEffect(() => {
     const fetchDevices = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/devices`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         const data = await res.json();
         if (data.success) {
@@ -649,16 +649,21 @@ const LiveMonitoring = () => {
       const ts = new Date(typeof liveDevice.lastUpdated === 'string' && liveDevice.lastUpdated.includes(' ') && !liveDevice.lastUpdated.includes('T') ? liveDevice.lastUpdated.replace(' ', 'T') : liveDevice.lastUpdated).getTime();
       if (!isNaN(ts)) {
         const diffMs = nowTime - ts;
-        return diffMs < FRESHNESS_THRESHOLD_MS && diffMs > -2 * 60 * 1000 && liveDevice.status === 'online';
+        if (diffMs < FRESHNESS_THRESHOLD_MS && diffMs > -2 * 60 * 1000) {
+          return liveDevice.status === 'online' || liveDevice.status === undefined;
+        }
       }
     }
 
-    // 2. Fallback: check deviceMeta.lastUpdated
-    if (deviceMeta?.lastUpdated) {
-      const ts = new Date(typeof deviceMeta.lastUpdated === 'string' && deviceMeta.lastUpdated.includes(' ') && !deviceMeta.lastUpdated.includes('T') ? deviceMeta.lastUpdated.replace(' ', 'T') : deviceMeta.lastUpdated).getTime();
+    // 2. Fallback: check deviceMeta.latestPacketTime or deviceMeta.lastUpdated
+    const metaTs = deviceMeta?.latestPacketTime || deviceMeta?.lastUpdated;
+    if (metaTs) {
+      const ts = new Date(typeof metaTs === 'string' && metaTs.includes(' ') && !metaTs.includes('T') ? metaTs.replace(' ', 'T') : metaTs).getTime();
       if (!isNaN(ts)) {
         const diffMs = nowTime - ts;
-        return diffMs < FRESHNESS_THRESHOLD_MS && diffMs > -2 * 60 * 1000 && deviceMeta.status === 'online';
+        if (diffMs < FRESHNESS_THRESHOLD_MS && diffMs > -2 * 60 * 1000) {
+          return deviceMeta.status === 'online' || deviceMeta.status === undefined;
+        }
       }
     }
 
@@ -1721,7 +1726,7 @@ const LiveMonitoring = () => {
     [candidateIdentifiers, deviceMeta, selectedDeviceId]
   );
 
-  // ── Step 3A: Direct Private Broker MQTT Connection (WebSocket fallback/fast-path) ──
+  // ── Step 3A: Direct Private Broker MQTT Connection (Fast-path when available) ──
   useEffect(() => {
     if (!selectedDeviceId || candidateIdentifiers.length === 0) return;
 
@@ -1774,6 +1779,78 @@ const LiveMonitoring = () => {
       setIsMqttConnected(false);
     };
   }, [selectedDeviceId, candidateIdentifiers, handleBatchedPackets]);
+
+  // ── Step 3B: Server-Sent Events (SSE) Live Telemetry Stream (Guaranteed for HTTPS & Production Deployments) ──
+  useEffect(() => {
+    if (!selectedDeviceId) return;
+
+    let eventSource = null;
+    let retryTimer = null;
+
+    const connectSSE = () => {
+      try {
+        const queryParams = new URLSearchParams();
+        queryParams.set('deviceId', selectedDeviceId);
+        if (targetMqttId) queryParams.set('mqttId', targetMqttId);
+
+        const sseUrl = `${API_BASE}/api/devices/stream?${queryParams.toString()}`;
+        eventSource = new EventSource(sseUrl);
+
+        eventSource.onopen = () => {
+          setIsMqttConnected(true);
+        };
+
+        eventSource.onmessage = (event) => {
+          try {
+            if (!event.data || event.data === ': connected' || event.data.startsWith(':')) return;
+            const packet = JSON.parse(event.data);
+            if (packet && (packet.data || packet.telemetry || packet.sensors)) {
+              handleBatchedPackets([packet]);
+            }
+          } catch (err) {
+            // Heartbeat or malformed non-json
+          }
+        };
+
+        eventSource.onerror = () => {
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+          if (!retryTimer) {
+            retryTimer = setTimeout(() => {
+              retryTimer = null;
+              connectSSE();
+            }, 3000);
+          }
+        };
+      } catch (err) {
+        console.warn('[LiveMonitoring] SSE stream setup skipped:', err);
+      }
+    };
+
+    connectSSE();
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    };
+  }, [selectedDeviceId, targetMqttId, API_BASE, handleBatchedPackets]);
+
+  // ── Step 3C: Periodic Heartbeat / Analytics Fallback Poll (Keeps data active even if streams disconnect) ──
+  useEffect(() => {
+    if (!selectedDeviceId) return;
+    const interval = setInterval(() => {
+      fetchLiveData();
+    }, 12000); // Poll every 12 seconds
+    return () => clearInterval(interval);
+  }, [fetchLiveData, selectedDeviceId]);
 
   const handleRefresh = () => {
     setLoading(true);
