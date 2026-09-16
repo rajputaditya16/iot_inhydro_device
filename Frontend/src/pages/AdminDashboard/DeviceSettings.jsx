@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, AlertCircle, CheckCircle2, RefreshCw, Cpu, ChevronDown, Radio } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle2, RefreshCw, Cpu, ChevronDown, Radio, Sprout, Layers } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
 const defaultSetpoints = {
+  "Crop Name": "Standard Hydroponic Crop",
+  "Setup Name": "Hydroponic Channel Setup",
   "EC MIN": 1200,
   "EC MAX": 1800,
   "PH LOW": 5.8,
@@ -248,19 +250,24 @@ const DeviceSettings = () => {
         delete payload["WRITE API KEY"];
       }
 
-      if (isSuperadmin) {
-        const dbPayload = {
-          thingspeak: {
-            clientId: payload["CLIENT ID"],
-            username: payload["USERNAME"],
-            password: payload["PASSWORD"],
-            channelId: payload["CHANNEL ID"],
-            port: Number(payload["PORT"]),
-            readApiKey: payload["READ API KEY"],
-            writeApiKey: payload["WRITE API KEY"]
-          }
-        };
+      // Sync to MongoDB Device document
+      const dbPayload = {};
+      if (payload["Crop Name"]) dbPayload.cropName = payload["Crop Name"];
+      if (payload["Setup Name"]) dbPayload.setupName = payload["Setup Name"];
 
+      if (isSuperadmin) {
+        dbPayload.thingspeak = {
+          clientId: payload["CLIENT ID"],
+          username: payload["USERNAME"],
+          password: payload["PASSWORD"],
+          channelId: payload["CHANNEL ID"],
+          port: Number(payload["PORT"]),
+          readApiKey: payload["READ API KEY"],
+          writeApiKey: payload["WRITE API KEY"]
+        };
+      }
+
+      if (Object.keys(dbPayload).length > 0) {
         fetch(`${API_BASE}/api/devices/${selectedDeviceId}`, {
           method: 'PUT',
           headers: {
@@ -411,9 +418,22 @@ const DeviceSettings = () => {
 
       {/* Configuration Forms */}
       <div className="space-y-6">
-        {/* Core Environmental */}
+        {/* Core Environmental & Crop Profile */}
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
-          <h4 className="mb-4 text-sm font-semibold text-green-400">Core Environmental Setpoints</h4>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4 pb-3 border-b border-slate-700/40">
+            <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2">
+              <Sprout className="h-4 w-4 text-emerald-400" />
+              Core Environmental Setpoints &amp; Profile
+            </h4>
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+              <div className="w-full sm:w-56">
+                <InputRow data={setpoints} onChange={handleChange} label="Target Crop Name" objKey="Crop Name" type="text" />
+              </div>
+              <div className="w-full sm:w-56">
+                <InputRow data={setpoints} onChange={handleChange} label="Setup / System Name" objKey="Setup Name" type="text" />
+              </div>
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <InputRow data={setpoints} onChange={handleChange} label="EC Minimum (µS/cm)" objKey="EC MIN" />
             <InputRow data={setpoints} onChange={handleChange} label="EC Maximum (µS/cm)" objKey="EC MAX" />

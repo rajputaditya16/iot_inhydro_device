@@ -1,26 +1,9 @@
 import { motion } from 'framer-motion';
-import { Thermometer, Wifi, WifiOff } from 'lucide-react';
-import { getStatusBg, getStatusDot, getMetricStatus, getMetricColor, formatTimestamp } from '../utils/helpers';
-import { useAnimatedCounter } from '../hooks/useAnimatedCounter';
+import { Wifi, WifiOff } from 'lucide-react';
+import { getStatusBg, getStatusDot,  formatTimestamp } from '../utils/helpers';
 
-const MetricValue = ({ type, baseValue, unit, icon: Icon }) => {
-  const safeValue = Number.isFinite(baseValue) ? baseValue : 0;
-  const animated = useAnimatedCounter(safeValue);
-  const status = getMetricStatus(type, safeValue);
-  const color = getMetricColor(status);
 
-  return (
-    <div className="flex items-center gap-2">
-      <Icon className={`h-4 w-4 ${color}`} />
-      <span className={`text-sm font-semibold tabular-nums ${color}`}>
-        {baseValue === 0 || baseValue === undefined ? '--' : typeof animated === 'number' ? animated.toFixed(1) : '--'}
-      </span>
-      <span className="text-[10px] text-slate-500">{unit}</span>
-    </div>
-  );
-};
-
-const DeviceCard = ({ device, onClick, hasNewData = true }) => {
+const DeviceCard = ({ device, onClick }) => {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -43,18 +26,6 @@ const DeviceCard = ({ device, onClick, hasNewData = true }) => {
           {device.status}
         </span>
       </div>
-
-      {/* Metrics Grid */}
-      {/* <div className="grid grid-cols-2 gap-3">
-        <MetricValue type="temp" baseValue={device.temp} unit="°C" icon={Thermometer} />
-        <MetricValue type="moisture" baseValue={device.moisture} unit="%" icon={Droplets} />
-        <MetricValue type="ec" baseValue={device.ec} unit="mS/cm" icon={Zap} />
-        <MetricValue type="ph" baseValue={device.ph} unit="pH" icon={FlaskConical} />
-      </div> */}
-
-      {!hasNewData && (
-        <p className="mt-3 text-[10px] font-medium text-amber-300/90">No new sensor change yet</p>
-      )}
 
       {/* Footer */}
       <div className="mt-4 flex items-center justify-between border-t border-slate-700/50 pt-3">

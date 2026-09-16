@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, AlertCircle, CheckCircle2, RefreshCw, Cpu, ChevronDown, Radio, Thermometer, Droplets, Activity, Gauge } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle2, RefreshCw, Cpu, ChevronDown, Radio, Thermometer, Droplets, Activity, Gauge, Sprout, Layers } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
 const defaultSetpoints = {
+  "Crop Name": "Tomato / Lettuce",
+  "Setup Name": "Main Climate & Dosing Setup",
   "EC MIN": 1.2,
   "EC MAX": 1.8,
   "PH LOW": 5.8,
@@ -535,9 +537,22 @@ const ControllingDeviceSettings = () => {
       <div className="space-y-6">
         {configSubTab === 'env' && (
           <div className="space-y-6">
-            {/* Core Environmental */}
+            {/* Core Environmental & Crop Profile */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
-              <h4 className="mb-4 text-sm font-semibold text-green-400">Nutrient Setpoints</h4>
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4 pb-3 border-b border-slate-700/40">
+                <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2">
+                  <Sprout className="h-4 w-4 text-emerald-400" />
+                  Nutrient Setpoints &amp; Profile
+                </h4>
+                <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                  <div className="w-full sm:w-56">
+                    <InputRow data={setpoints} onChange={handleChange} label="Target Crop Name" objKey="Crop Name" type="text" />
+                  </div>
+                  <div className="w-full sm:w-56">
+                    <InputRow data={setpoints} onChange={handleChange} label="Setup / System Name" objKey="Setup Name" type="text" />
+                  </div>
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                 <InputRow data={setpoints} onChange={handleChange} label="EC Minimum (µS/cm)" objKey="EC MIN" />
                 <InputRow data={setpoints} onChange={handleChange} label="EC Maximum (µS/cm)" objKey="EC MAX" />

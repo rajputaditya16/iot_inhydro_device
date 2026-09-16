@@ -52,9 +52,19 @@ const deviceSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    cropName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    setupName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     lastUpdated: {
       type: Date,
-      default: Date.now,
+      default: null,
     },
   },
   {

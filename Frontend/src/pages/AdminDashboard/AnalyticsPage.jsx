@@ -13,26 +13,30 @@ const getDateRange = (filter, customStartDate = null, customEndDate = null, dura
 
   switch (filter) {
     case 'today': {
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
       break;
     }
     case 'yesterday': {
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0);
-      end.setTime(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59).getTime());
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0);
+      end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
       break;
     }
     case 'week': {
       const dayOfWeek = now.getDay();
       const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset, 0, 0, 0);
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset, 0, 0, 0, 0);
       break;
     }
     case 'month': {
-      start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+      start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
       break;
     }
     case 'three_months': {
-      start = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate(), 0, 0, 0);
+      start = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate(), 0, 0, 0, 0);
+      break;
+    }
+    case 'all': {
+      start = new Date(0);
       break;
     }
     case 'duration': {
@@ -53,13 +57,16 @@ const getDateRange = (filter, customStartDate = null, customEndDate = null, dura
         end = new Date(customEndDate);
       } else if (customStartDate) {
         start = new Date(customStartDate);
+      } else if (customEndDate) {
+        start = new Date(new Date(customEndDate).getTime() - 7 * 24 * 60 * 60 * 1000);
+        end = new Date(customEndDate);
       } else {
-        start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+        start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       }
       break;
     }
     default:
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
   }
   return { start, end };
 };
@@ -186,6 +193,29 @@ const sanitizeFileName = (name) => {
 };
 
 // Download helpers
+const normalizeMetricName = (name) => {
+  if (!name) return '';
+  return name.replace(/\bsoil\b/gi, 'Water');
+};
+
+const formatCSVTimestamp = (dateInput) => {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput);
+
+  const pad = (n) => String(n).padStart(2, '0');
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  let hours = d.getHours();
+  const minutes = pad(d.getMinutes());
+  const seconds = pad(d.getSeconds());
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const hours12 = pad(hours % 12 || 12);
+
+  return `${year}-${month}-${day} ${hours12}:${minutes}:${seconds} ${ampm}`;
+};
+
 const downloadCSV = (feeds, channelFields, filterLabel, deviceName = 'Device', isBoth = false) => {
   if (!feeds || feeds.length === 0) return;
   
@@ -194,15 +224,17 @@ const downloadCSV = (feeds, channelFields, filterLabel, deviceName = 'Device', i
     headers.push('Room');
   }
   channelFields.forEach(f => {
-    headers.push(`${f.name} (${getFieldMeta(f.name).unit || ''})`);
+    const cleanName = normalizeMetricName(f.name);
+    headers.push(`${cleanName} (${getFieldMeta(cleanName).unit || ''})`);
   });
   
   const headerLine = headers.join(',') + '\n';
   
   const rows = feeds.map((f) => {
-    const rowCells = [f.created_at];
+    const readableTime = formatCSVTimestamp(f.created_at);
+    const rowCells = [`"${readableTime}"`];
     if (isBoth) {
-      rowCells.push(f.room || 'room1');
+      rowCells.push(`"${f.room || 'room1'}"`);
     }
     channelFields.forEach(cfg => {
       rowCells.push(f[cfg.key] !== undefined && f[cfg.key] !== null ? f[cfg.key] : '');
@@ -224,12 +256,13 @@ const downloadCSV = (feeds, channelFields, filterLabel, deviceName = 'Device', i
 const downloadJSON = (feeds, channelFields, filterLabel, deviceName = 'Device', isBoth = false) => {
   if (!feeds || feeds.length === 0) return;
   const data = feeds.map((f) => {
-    const obj = { timestamp: f.created_at };
+    const obj = { timestamp: formatCSVTimestamp(f.created_at), rawTimestamp: f.created_at };
     if (isBoth) {
       obj.room = f.room || 'room1';
     }
     channelFields.forEach(cfg => {
-      obj[cfg.name] = parseRobustFloat(f[cfg.key]);
+      const cleanName = normalizeMetricName(cfg.name);
+      obj[cleanName] = parseRobustFloat(f[cfg.key]);
     });
     return obj;
   });
@@ -252,10 +285,12 @@ const AnalyticsPage = () => {
   const [customEndDate, setCustomEndDate] = useState('');
   const [rawFeeds, setRawFeeds] = useState([]);
   const [totalDbPoints, setTotalDbPoints] = useState(0);
+  const [totalCollectionDocs, setTotalCollectionDocs] = useState(0);
   const [channelFields, setChannelFields] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Device selector state
   const [allDevices, setAllDevices] = useState([]);
@@ -327,38 +362,72 @@ const AnalyticsPage = () => {
       // Backend already returns correct date-filtered feeds
       const exactFeeds = result.feeds || [];
       const cFields = [];
-      const isMonitDevice = selectedDevice?.deviceType === 'monit' || selectedDevice?.deviceType === 'monnet' || selectedDevice?.name?.toLowerCase().includes('monit') || selectedDevice?.name?.toLowerCase().includes('monnet');
 
       for (let i = 1; i <= 17; i++) {
         const key = `field${i}`;
-        const fieldName = result.channel?.[key] || `Field ${i}`;
+        const rawFieldName = result.channel?.[key] || `Field ${i}`;
+        const fieldName = normalizeMetricName(rawFieldName);
 
-        // Exclude Water Temp and Water Moisture for Monit devices
-        if (isMonitDevice) {
-          const lower = fieldName.toLowerCase();
-          if (lower.includes('water temp') || lower.includes('water moisture') || fieldName === 'Water Temp' || fieldName === 'Water Moisture') {
-            continue;
-          }
-        }
-
-        const hasData = exactFeeds.some(f => f[key] != null && f[key] !== '' && f[key] !== 'null');
-        if (hasData || (result.channel?.[key] && !result.channel?.[key].startsWith('Field '))) {
+        const hasData = exactFeeds.some(f => f[key] != null && f[key] !== '' && f[key] !== 'null' && f[key] !== 'undefined');
+        if (hasData) {
           cFields.push({ key, name: fieldName });
         }
       }
       setChannelFields(cFields);
       setRawFeeds(exactFeeds);
-      setTotalDbPoints(result.totalDbPoints || exactFeeds.length);
+      setTotalDbPoints(result.totalFeeds !== undefined ? result.totalFeeds : (result.totalDbPoints || exactFeeds.length));
+      setTotalCollectionDocs(result.totalCollectionDocs || 0);
     } catch (err) {
       console.error('Analytics API error:', err);
       setError(err.message || 'Failed to fetch data');
       setRawFeeds([]);
       setTotalDbPoints(0);
+      setTotalCollectionDocs(0);
       setChannelFields([]);
     } finally {
       setLoading(false);
     }
   }, [filter, customStartDate, customEndDate, durationVal, durationUnit, selectedDeviceId, token, API_BASE, selectedRoom, selectedDevice?.deviceType]);
+
+  const handleFullExport = async (format = 'csv') => {
+    if (!selectedDeviceId) return;
+    setIsExporting(true);
+    setShowDownloadMenu(false);
+    try {
+      const { start, end } = getDateRange(filter, customStartDate, customEndDate, durationVal, durationUnit);
+      const roomParam = selectedDevice?.deviceType === 'office_control' ? `&room=${selectedRoom}` : '';
+      const exportLabel = filterLabel;
+      const deviceSlug = sanitizeFileName(selectedDevice?.name || 'Device');
+      const dateStr = new Date().toISOString().split('T')[0];
+      const filename = `${deviceSlug}_Analytics_${exportLabel}_${dateStr}.${format}`;
+
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
+      const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics?start=${start.toISOString()}&end=${end.toISOString()}&export=true&format=${format}&timezone=${encodeURIComponent(tz)}${roomParam}`;
+
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(url, { headers });
+      if (!res.ok) throw new Error(`Export request failed with status ${res.status}`);
+
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error('Export error, falling back to loaded feeds:', err);
+      if (format === 'csv') {
+        downloadCSV(rawFeeds, channelFields, filterLabel, selectedDevice?.name || 'Device', selectedRoom === 'both');
+      } else {
+        downloadJSON(rawFeeds, channelFields, filterLabel, selectedDevice?.name || 'Device', selectedRoom === 'both');
+      }
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   useEffect(() => {
     fetchData();
@@ -433,6 +502,8 @@ const AnalyticsPage = () => {
         return 'This Month';
       case 'three_months':
         return 'Last 3 Months';
+      case 'all':
+        return 'All History';
       case 'duration':
         return `Last ${durationVal} ${durationUnit}`;
       case 'custom':
@@ -460,6 +531,7 @@ const AnalyticsPage = () => {
     { key: 'week', label: 'This Week' },
     { key: 'month', label: 'This Month' },
     { key: 'three_months', label: '3 Months' },
+    { key: 'all', label: 'All History' },
     { key: 'custom', label: 'Custom Range' },
   ];
 
@@ -526,7 +598,10 @@ const AnalyticsPage = () => {
             )}
 
             <span className="text-xs text-slate-400">
-              &bull; <strong className="text-slate-200">{rawFeeds.length.toLocaleString()}</strong> data points loaded {totalDbPoints > rawFeeds.length ? `(downsampled from ${totalDbPoints.toLocaleString()} DB records)` : ''} ({chartSubtitle})
+              &bull; <strong className="text-slate-200 font-bold">{totalDbPoints.toLocaleString()}</strong> Rows in Range {selectedDevice?.deviceType === 'office_control' ? `(${selectedRoom === 'both' ? 'All Rooms' : selectedRoom === 'room1' ? 'Room 1' : selectedRoom === 'room2' ? 'Room 2' : 'Room 3'})` : ''} &bull; <span className="text-emerald-400 font-semibold">{chartSubtitle}</span>
+              {totalCollectionDocs > 0 && totalCollectionDocs !== totalDbPoints && (
+                <span className="text-slate-500 font-normal"> (All-Time Packets: {totalCollectionDocs.toLocaleString()})</span>
+              )}
             </span>
           </div>
 
@@ -546,30 +621,46 @@ const AnalyticsPage = () => {
             <div className="relative">
               <button
                 onClick={() => setShowDownloadMenu(!showDownloadMenu)}
-                disabled={rawFeeds.length === 0}
+                disabled={rawFeeds.length === 0 || isExporting}
                 className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-medium text-slate-300 transition-all hover:bg-slate-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <Download className="h-3.5 w-3.5" /> Export
+                {isExporting ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                    <span>Exporting {totalDbPoints.toLocaleString()} Rows...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-3.5 w-3.5" />
+                    <span>Export ({totalDbPoints.toLocaleString()})</span>
+                  </>
+                )}
               </button>
-              {showDownloadMenu && rawFeeds.length > 0 && (
+              {showDownloadMenu && rawFeeds.length > 0 && !isExporting && (
                 <motion.div
                   initial={{ opacity: 0, y: 5 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="absolute right-0 top-full z-20 mt-2 w-48 rounded-xl border border-slate-700 bg-slate-900 p-1 shadow-2xl backdrop-blur-xl"
+                  className="absolute right-0 top-full z-20 mt-2 w-64 rounded-xl border border-slate-700 bg-slate-900 p-1.5 shadow-2xl backdrop-blur-xl space-y-1"
                 >
                   <button
-                    onClick={() => { downloadCSV(rawFeeds, channelFields, filterLabel, selectedDevice?.name || 'Device', selectedRoom === 'both'); setShowDownloadMenu(false); }}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                    onClick={() => handleFullExport('csv')}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
                   >
-                    <span>Download CSV</span>
-                    <span className="text-[10px] text-slate-500 font-mono">.csv</span>
+                    <span className="flex flex-col text-left">
+                      <span className="font-semibold text-white">Download CSV</span>
+                      <span className="text-[10px] text-slate-400">{totalDbPoints.toLocaleString()} records ({chartSubtitle})</span>
+                    </span>
+                    <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">.csv</span>
                   </button>
                   <button
-                    onClick={() => { downloadJSON(rawFeeds, channelFields, filterLabel, selectedDevice?.name || 'Device', selectedRoom === 'both'); setShowDownloadMenu(false); }}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                    onClick={() => handleFullExport('json')}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
                   >
-                    <span>Download JSON</span>
-                    <span className="text-[10px] text-slate-500 font-mono">.json</span>
+                    <span className="flex flex-col text-left">
+                      <span className="font-semibold text-white">Download JSON</span>
+                      <span className="text-[10px] text-slate-400">{totalDbPoints.toLocaleString()} records ({chartSubtitle})</span>
+                    </span>
+                    <span className="text-[10px] text-sky-400 font-mono font-bold bg-sky-500/10 border border-sky-500/20 px-1.5 py-0.5 rounded">.json</span>
                   </button>
                 </motion.div>
               )}
@@ -585,13 +676,19 @@ const AnalyticsPage = () => {
                 key={btn.key}
                 onClick={() => {
                   setFilter(btn.key);
-                  if (btn.key !== 'custom') {
-                    setCustomStartDate('');
-                    setCustomEndDate('');
+                  if (btn.key === 'custom') {
+                    if (!customStartDate || !customEndDate) {
+                      const now = new Date();
+                      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                      const pad = (n) => String(n).padStart(2, '0');
+                      const formatIso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                      setCustomStartDate(formatIso(sevenDaysAgo));
+                      setCustomEndDate(formatIso(now));
+                    }
                   }
                 }}
                 className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${filter === btn.key
-                    ? 'bg-green-500/20 text-green-400 border border-green-500/30 font-semibold shadow-sm'
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-sm'
                     : 'text-slate-400 hover:text-white'
                   }`}
               >
@@ -614,12 +711,12 @@ const AnalyticsPage = () => {
                 max="999"
                 value={durationVal}
                 onChange={(e) => setDurationVal(e.target.value)}
-                className="w-16 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-white text-center outline-none focus:border-green-500 font-semibold"
+                className="w-16 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-white text-center outline-none focus:border-emerald-500 font-semibold"
               />
               <select
                 value={durationUnit}
                 onChange={(e) => setDurationUnit(e.target.value)}
-                className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-white outline-none cursor-pointer focus:border-green-500"
+                className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-white outline-none cursor-pointer focus:border-emerald-500"
               >
                 <option value="seconds">Seconds</option>
                 <option value="minutes">Minutes</option>
@@ -642,7 +739,7 @@ const AnalyticsPage = () => {
                     onClick={() => { setDurationVal(preset.val); setDurationUnit(preset.unit); }}
                     className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all ${
                       durationVal === preset.val && durationUnit === preset.unit
-                        ? 'bg-green-500/20 text-green-400 border border-green-500/30 font-semibold shadow-sm'
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-sm'
                         : 'text-slate-400 hover:text-white hover:bg-slate-700/40'
                     }`}
                   >
@@ -657,23 +754,27 @@ const AnalyticsPage = () => {
             <motion.div
               initial={{ opacity: 0, y: -5 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex items-center gap-2 rounded-xl border border-slate-700/60 bg-slate-900/40 p-2"
+              className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-700/60 bg-slate-900/40 p-2"
             >
-              <input
-                type="datetime-local"
-                value={customStartDate}
-                onChange={(e) => setCustomStartDate(e.target.value)}
-                className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-white outline-none focus:border-green-500 transition-colors"
-              />
-              <span className="text-xs text-slate-400">to</span>
-              <input
-                type="datetime-local"
-                value={customEndDate}
-                onChange={(e) => setCustomEndDate(e.target.value)}
-                min={customStartDate}
-                className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-white outline-none focus:border-green-500 transition-colors disabled:opacity-50"
-                disabled={!customStartDate}
-              />
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-400">From:</span>
+                <input
+                  type="datetime-local"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500 transition-colors"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-400">To:</span>
+                <input
+                  type="datetime-local"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  min={customStartDate}
+                  className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500 transition-colors"
+                />
+              </div>
             </motion.div>
           )}
         </div>

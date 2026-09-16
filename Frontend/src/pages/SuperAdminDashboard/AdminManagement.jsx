@@ -925,7 +925,7 @@ const AdminManagement = () => {
                         </thead>
                         <tbody>
                           {assignedDevices.map((d) => {
-                            const isOnline = d.status === 'online' || d.status === 'active';
+                            const isOnline = d.status === 'online';
                             return (
                               <tr key={d._id || d.id} className="border-b border-slate-700/20 hover:bg-slate-800/30">
                                 <td className="py-3 px-4">

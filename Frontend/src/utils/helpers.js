@@ -62,7 +62,9 @@ export const getMetricColor = (status) => {
 };
 
 export const formatTimestamp = (isoString) => {
+  if (!isoString) return 'Never connected';
   const date = new Date(isoString);
+  if (isNaN(date.getTime()) || date.getTime() === 0) return 'Never connected';
   return date.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',

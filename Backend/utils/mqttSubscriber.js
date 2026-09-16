@@ -111,11 +111,20 @@ const startMqttSubscriber = () => {
         const now = Date.now();
         const isFresh = !isRetain && packetTimestamp && (now - packetTimestamp.getTime() < 2 * 60 * 1000);
 
-        if (deviceId && isFresh) {
-          Device.findByIdAndUpdate(deviceId, {
-            status: 'online',
-            lastUpdated: packetTimestamp
-          }).catch(() => { });
+        if (deviceId) {
+          const updateFields = {};
+          if (isFresh) {
+            updateFields.status = 'online';
+            updateFields.lastUpdated = packetTimestamp;
+          }
+          const incomingCrop = payloadData?.crop_name || payloadData?.['Crop Name'] || payloadData?.cropName;
+          const incomingSetup = payloadData?.setup_name || payloadData?.['Setup Name'] || payloadData?.['Setup Details'] || payloadData?.setupName;
+          if (incomingCrop) updateFields.cropName = incomingCrop;
+          if (incomingSetup) updateFields.setupName = incomingSetup;
+
+          if (Object.keys(updateFields).length > 0) {
+            Device.findByIdAndUpdate(deviceId, updateFields).catch(() => { });
+          }
         }
         telemetryEmitter.emit('telemetry', {
           deviceId: deviceId ? String(deviceId) : null,

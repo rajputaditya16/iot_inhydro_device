@@ -30,7 +30,7 @@ exports.getDevices = async (req, res) => {
 
     const updatedDevices = await Promise.all(
       devices.map(async (device) => {
-        // Fetch latest telemetry packet from the dynamic collection
+        // Fetch latest telemetry packet from the dynamic collection or TelemetryLog
         const mqttId = device.mqttId || device._id.toString();
         let latestPacket = null;
         try {
@@ -46,10 +46,23 @@ exports.getDevices = async (req, res) => {
           console.warn(`[DeviceController] Could not fetch latest packet for ${mqttId}: ${e.message}`);
         }
 
-        const lastSeenTime = latestPacket?.timestamp || device.lastUpdated;
-        const diffMs = lastSeenTime ? (now - new Date(lastSeenTime)) : Infinity;
-        // 2 minutes threshold for considering device online (active telemetry sending)
-        const isOnline = diffMs >= 0 && diffMs < 2 * 60 * 1000;
+        if (!latestPacket) {
+          try {
+            latestPacket = await TelemetryLog.findOne({
+              $or: [
+                { deviceId: device._id },
+                { mqttId: device.mqttId },
+                { mqttId: device.mqttId?.toLowerCase() },
+                device.deviceType === 'office_control' ? { mqttId: 'system2' } : null
+              ].filter(Boolean)
+            }).sort({ timestamp: -1 });
+          } catch (e) { }
+        }
+
+        const lastSeenTime = latestPacket ? latestPacket.timestamp : null;
+        const diffMs = lastSeenTime ? (now - new Date(lastSeenTime).getTime()) : Infinity;
+        // Device is online ONLY if it has an actual telemetry packet within 2 minutes
+        const isOnline = Boolean(latestPacket && diffMs >= 0 && diffMs < 2 * 60 * 1000);
 
         let status = device.status;
         if (device.status !== 'blocked') {
@@ -223,6 +236,23 @@ exports.pushDeviceConfig = async (req, res) => {
     } else {
       // Push updated setpoints / config to device
       const payload = req.body;
+
+      // Persist cropName and setupName to DB if present in payload
+      const incomingCrop = payload.cropName || payload.crop_name || payload['Crop Name'];
+      const incomingSetup = payload.setupName || payload.setup_name || payload['Setup Name'] || payload['Setup Details'];
+      let shouldSave = false;
+      if (incomingCrop && device.cropName !== incomingCrop) {
+        device.cropName = incomingCrop;
+        shouldSave = true;
+      }
+      if (incomingSetup && device.setupName !== incomingSetup) {
+        device.setupName = incomingSetup;
+        shouldSave = true;
+      }
+      if (shouldSave) {
+        await device.save();
+      }
+
       if (device.deviceType === 'office_control' || device.deviceType === 'system2') {
         const room = req.query.room || req.body.room || 1;
         await publishToDevice(`inhydro/${deviceRoot}/room${room}/setpoints/update`, payload);
@@ -261,8 +291,14 @@ exports.getDeviceAnalytics = async (req, res) => {
     }
 
     // Parse date filters, default to last 24 hours
-    const start = req.query.start ? new Date(req.query.start) : new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const end = req.query.end ? new Date(req.query.end) : new Date();
+    let start, end;
+    if (req.query.all === 'true' || req.query.filter === 'all' || req.query.start === 'all') {
+      start = new Date(0); // Epoch 1970
+      end = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    } else {
+      start = req.query.start ? new Date(req.query.start) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+      end = req.query.end ? new Date(req.query.end) : new Date();
+    }
     const room = req.query.room || 'room1'; // 'room1', 'room2', 'room3' or 'both'
 
     // Map Mongoose documents to standard telemetry feeds format
@@ -284,21 +320,47 @@ exports.getDeviceAnalytics = async (req, res) => {
     };
 
     let packets = [];
+    let targetModel = null;
+    let totalCollectionDocs = 0;
 
-    // 1. Try candidate dynamic telemetry collections
+    // 1. Identify which dynamic collection belongs to this device
     for (const mId of candidateMqttIds) {
       try {
         const TelemetryModel = getTelemetryModel(mId);
-        packets = await TelemetryModel.find({
-          timestamp: { $gte: start, $lte: end }
-        }).sort({ timestamp: 1 });
-        if (packets.length > 0) break;
+        const count = await TelemetryModel.estimatedDocumentCount();
+        if (count > 0) {
+          targetModel = TelemetryModel;
+          totalCollectionDocs = count;
+          break;
+        }
       } catch (e) { }
     }
 
-    // 2. Fallback to main TelemetryLog collection if dynamic collection has no data
-    if (packets.length === 0) {
-      packets = await TelemetryLog.find(query).sort({ timestamp: 1 });
+    // 2. Query within the date range from the target collection or fallback to TelemetryLog
+    if (targetModel) {
+      packets = await targetModel.find({
+        timestamp: { $gte: start, $lte: end }
+      }).sort({ timestamp: 1 }).lean();
+
+      if (packets.length === 0) {
+        try {
+          const fallbackPackets = await TelemetryLog.find(query).sort({ timestamp: 1 }).lean();
+          if (fallbackPackets && fallbackPackets.length > 0) {
+            packets = fallbackPackets;
+          }
+        } catch (e) { }
+      }
+    } else {
+      packets = await TelemetryLog.find(query).sort({ timestamp: 1 }).lean();
+      try {
+        totalCollectionDocs = await TelemetryLog.countDocuments({
+          $or: [
+            { deviceId: device._id },
+            { mqttId: device.mqttId || '' },
+            { mqttId: 'system2' },
+          ].filter(c => c.deviceId || c.mqttId)
+        });
+      } catch (e) { }
     }
 
     const totalDbCount = packets.length;
@@ -483,12 +545,14 @@ exports.getDeviceAnalytics = async (req, res) => {
         mappedFeeds.push({
           created_at: p.timestamp.toISOString(),
           entry_id: mappedFeeds.length + 1,
-          field1: null,
-          field2: null,
-          field3: d.ec !== undefined && d.ec !== null ? String(d.ec) : null,
-          field4: d.ph !== undefined && d.ph !== null ? String(d.ph) : null,
-          field5: d.room_temp !== undefined && d.room_temp !== null ? String(d.room_temp) : null,
-          field6: d.room_humi !== undefined && d.room_humi !== null ? String(d.room_humi) : null,
+          field1: d.temp != null ? String(d.temp) : (d.water_temp != null ? String(d.water_temp) : (d.soil_temp != null ? String(d.soil_temp) : null)),
+          field2: d.moist != null ? String(d.moist) : (d.moisture != null ? String(d.moisture) : (d.soil_moisture != null ? String(d.soil_moisture) : null)),
+          field3: d.ec != null ? String(d.ec) : (d.soil_ec != null ? String(d.soil_ec) : null),
+          field4: d.ph != null ? String(d.ph) : (d.soil_ph != null ? String(d.soil_ph) : null),
+          field5: d.room_temp != null ? String(d.room_temp) : (d.temperature != null ? String(d.temperature) : null),
+          field6: d.room_humi != null ? String(d.room_humi) : (d.humidity != null ? String(d.humidity) : null),
+          field7: d.orp != null ? String(d.orp) : null,
+          field8: d.co2 != null ? String(d.co2) : null,
         });
       } else {
         // Standard / system2 / almora mapping
@@ -496,8 +560,8 @@ exports.getDeviceAnalytics = async (req, res) => {
         mappedFeeds.push({
           created_at: p.timestamp.toISOString(),
           entry_id: mappedFeeds.length + 1,
-          field1: tel.water_temp !== undefined && tel.water_temp !== null ? String(tel.water_temp) : null,
-          field2: tel.moisture !== undefined && tel.moisture !== null ? String(tel.moisture) : null,
+          field1: tel.water_temp !== undefined && tel.water_temp !== null ? String(tel.water_temp) : (tel.temp !== undefined && tel.temp !== null ? String(tel.temp) : null),
+          field2: tel.moisture !== undefined && tel.moisture !== null ? String(tel.moisture) : (tel.moist !== undefined && tel.moist !== null ? String(tel.moist) : null),
           field3: tel.ec !== undefined && tel.ec !== null ? String(tel.ec) : null,
           field4: tel.ph !== undefined && tel.ph !== null ? String(tel.ph) : null,
           field5: tel.room_temp !== undefined && tel.room_temp !== null ? String(tel.room_temp) : null,
@@ -509,8 +573,9 @@ exports.getDeviceAnalytics = async (req, res) => {
     });
 
     // ── Downsampling / Stride Sampling for large datasets (Post-mapping per room) ──
-    const MAX_ANALYTICS_POINTS = parseInt(req.query.limit) || 2500;
-    if (mappedFeeds.length > MAX_ANALYTICS_POINTS) {
+    const isExport = req.query.export === 'true' || req.query.raw === 'true' || req.query.limit === '0' || req.query.limit === 'all';
+    const MAX_ANALYTICS_POINTS = parseInt(req.query.limit) || 3500;
+    if (!isExport && mappedFeeds.length > MAX_ANALYTICS_POINTS) {
       const stride = Math.ceil(mappedFeeds.length / MAX_ANALYTICS_POINTS);
       const sampled = [];
       for (let i = 0; i < mappedFeeds.length; i += stride) {
@@ -528,14 +593,14 @@ exports.getDeviceAnalytics = async (req, res) => {
     let channelData = {
       id: device.mqttId || device._id.toString(),
       name: device.name,
-      field1: 'Field 1',
-      field2: 'Field 2',
-      field3: 'Field 3',
-      field4: 'Field 4',
-      field5: 'Field 5',
-      field6: 'Field 6',
-      field7: 'Field 7',
-      field8: 'Field 8',
+      field1: 'Water Temp',
+      field2: 'Water Moisture',
+      field3: 'Water EC',
+      field4: 'Water pH',
+      field5: 'Room Temp',
+      field6: 'Room Humidity',
+      field7: 'ORP',
+      field8: 'CO2',
     };
 
     // Apply default deviceType-based labels
@@ -568,10 +633,10 @@ exports.getDeviceAnalytics = async (req, res) => {
         channelData.field7 = 'Field 7';
         channelData.field8 = 'CO2 Level';
       } else {
-        channelData.field1 = 'Soil Temp';
-        channelData.field2 = 'Soil Moisture';
-        channelData.field3 = 'Soil EC';
-        channelData.field4 = 'Soil pH';
+        channelData.field1 = 'Water Temp';
+        channelData.field2 = 'Water Moisture';
+        channelData.field3 = 'Water EC';
+        channelData.field4 = 'Water pH';
         channelData.field5 = 'Room Temp';
         channelData.field6 = 'Room Humidity';
         channelData.field7 = 'ORP Level';
@@ -587,8 +652,8 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field7 = 'Cold Room 7 Temp';
       channelData.field8 = 'Field 8';
     } else if (device.deviceType === 'monit' || device.deviceType === 'monnet') {
-      channelData.field1 = 'Field 1';
-      channelData.field2 = 'Field 2';
+      channelData.field1 = 'Water Temp';
+      channelData.field2 = 'Water Moisture';
       channelData.field3 = 'Water EC';
       channelData.field4 = 'Water pH';
       channelData.field5 = 'Room Temp';
@@ -604,11 +669,132 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field8 = 'CO2';
     }
 
+const formatHumanReadableDate = (dateInput, tz = 'Asia/Kolkata') => {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput);
+  
+  try {
+    const formatter = new Intl.DateTimeFormat('en-IN', {
+      timeZone: tz || 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
+    const parts = formatter.formatToParts(d);
+    const getPart = (type) => parts.find(p => p.type === type)?.value || '';
+    const year = getPart('year');
+    const month = getPart('month').padStart(2, '0');
+    const day = getPart('day').padStart(2, '0');
+    const hour = getPart('hour').padStart(2, '0');
+    const minute = getPart('minute').padStart(2, '0');
+    const second = getPart('second').padStart(2, '0');
+    const dayPeriod = (getPart('dayPeriod') || '').toUpperCase();
+    
+    return `${year}-${month}-${day} ${hour}:${minute}:${second} ${dayPeriod}`.trim();
+  } catch (e) {
+    const pad = (n) => String(n).padStart(2, '0');
+    const year = d.getFullYear();
+    const month = pad(d.getMonth() + 1);
+    const day = pad(d.getDate());
+    let hours = d.getHours();
+    const minutes = pad(d.getMinutes());
+    const seconds = pad(d.getSeconds());
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const hours12 = pad(hours % 12 || 12);
+    return `${year}-${month}-${day} ${hours12}:${minutes}:${seconds} ${ampm}`;
+  }
+};
+
+    if (req.query.format === 'csv') {
+      const isBoth = room === 'both';
+      const timezone = req.query.timezone || 'Asia/Kolkata';
+      const headers = ['Timestamp'];
+      if (isBoth) headers.push('Room');
+      
+      const activeFields = [];
+      for (let i = 1; i <= 17; i++) {
+        const key = `field${i}`;
+        const rawName = (channelData[key] || `Field ${i}`).replace(/\bSoil\b/gi, 'Water');
+        const hasData = mappedFeeds.some(f => f[key] != null && f[key] !== '' && f[key] !== 'null');
+        if (hasData) {
+          let unit = '';
+          const lower = rawName.toLowerCase();
+          if (lower.includes('temp')) unit = ' (°C)';
+          else if (lower.includes('moist') || lower.includes('hum')) unit = ' (%)';
+          else if (lower.includes('ec')) unit = ' (mS/cm)';
+          else if (lower.includes('ph')) unit = ' (pH)';
+          else if (lower.includes('co2')) unit = ' (PPM)';
+          else if (lower.includes('vpd')) unit = ' (kPa)';
+          else if (lower.includes('dli')) unit = ' (mol/m²/d)';
+          else if (lower.includes('wind_speed') || lower.includes('wind speed')) unit = ' (m/s)';
+          else if (lower.includes('wind_dir') || lower.includes('wind direction')) unit = ' (°)';
+          else if (lower.includes('dissolved oxygen') || lower.includes('do')) unit = ' (mg/L)';
+          else if (lower.includes('ppfd')) unit = ' (µmol/m²/s)';
+          else if (lower.includes('nitrogen') || lower.includes('(n)')) unit = ' (mg/kg)';
+          else if (lower.includes('phosphorus') || lower.includes('(p)')) unit = ' (mg/kg)';
+          else if (lower.includes('potassium') || lower.includes('(k)')) unit = ' (mg/kg)';
+          
+          activeFields.push({ key, name: `${rawName}${unit}` });
+          headers.push(`"${rawName}${unit}"`);
+        }
+      }
+
+      const rows = mappedFeeds.map(f => {
+        const readableTime = formatHumanReadableDate(f.created_at, timezone);
+        const rowCells = [`"${readableTime}"`];
+        if (isBoth) rowCells.push(`"${f.room || 'room1'}"`);
+        activeFields.forEach(af => {
+          const val = f[af.key] !== undefined && f[af.key] !== null ? f[af.key] : '';
+          rowCells.push(val !== '' ? val : '');
+        });
+        return rowCells.join(',');
+      });
+
+      const csvContent = headers.join(',') + '\n' + rows.join('\n');
+      const safeSlug = String(device.name || 'Device').replace(/[^a-z0-9_-]/gi, '_');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeSlug}_Analytics.csv"`);
+      return res.status(200).send(csvContent);
+    }
+
+    if (req.query.format === 'json' && isExport) {
+      const isBoth = room === 'both';
+      const timezone = req.query.timezone || 'Asia/Kolkata';
+      const activeFields = [];
+      for (let i = 1; i <= 17; i++) {
+        const key = `field${i}`;
+        const rawName = (channelData[key] || `Field ${i}`).replace(/\bSoil\b/gi, 'Water');
+        const hasData = mappedFeeds.some(f => f[key] != null && f[key] !== '' && f[key] !== 'null');
+        if (hasData) {
+          activeFields.push({ key, name: rawName });
+        }
+      }
+      const exportJson = mappedFeeds.map(f => {
+        const readableTime = formatHumanReadableDate(f.created_at, timezone);
+        const obj = { timestamp: readableTime, rawTimestamp: f.created_at };
+        if (isBoth) obj.room = f.room || 'room1';
+        activeFields.forEach(af => {
+          obj[af.name] = f[af.key] !== undefined && f[af.key] !== null && f[af.key] !== '' ? parseFloat(f[af.key]) || f[af.key] : null;
+        });
+        return obj;
+      });
+      const safeSlug = String(device.name || 'Device').replace(/[^a-z0-9_-]/gi, '_');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeSlug}_Analytics.json"`);
+      return res.status(200).json(exportJson);
+    }
+
     res.status(200).json({
       success: true,
       channel: channelData,
       feeds: feeds,
       totalDbPoints: totalDbCount,
+      totalCollectionDocs: totalCollectionDocs,
       totalFeeds: mappedFeeds.length,
     });
   } catch (err) {

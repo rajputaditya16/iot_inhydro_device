@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Edit3, Radio } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Edit3, Radio, Sprout, Layers } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
-const defaultSetpointsRoom12 = {
+const defaultSetpointsRoom1 = {
+  "Crop Name": "Room 1 - Lettuce / Greens",
+  "Setup Name": "Room 1 Hydroponics Setup",
   "EC MIN": 1.2, "EC MAX": 1.8,
   "PH LOW": 5.8, "PH HIGH": 6.5,
   "D T Max": 35.0, "DT Min": 15.0,
@@ -18,7 +20,26 @@ const defaultSetpointsRoom12 = {
   "Timer4 N_Start": "17:05", "Timer4 N_Stop": "09:55", "Timer4 N_ON Min": 15, "Timer4 N_OFF Min": 30,
 };
 
+const defaultSetpointsRoom2 = {
+  "Crop Name": "Room 2 - Herbs / Greens",
+  "Setup Name": "Room 2 Hydroponics Setup",
+  "EC MIN": 1.2, "EC MAX": 1.8,
+  "PH LOW": 5.8, "PH HIGH": 6.5,
+  "D T Max": 35.0, "DT Min": 15.0,
+  "N T Max": 35.0, "N T Min": 15.0,
+  "H Max": 80.0, "H Min": 30.0,
+  "Timer1 Name": "TIMER 1", "Timer1 Start": "10:00", "Timer1 Stop": "17:00", "Timer1 ON Min": 15, "Timer1 OFF Min": 30,
+  "Timer2 Name": "TIMER 2", "Timer2 Start": "10:00", "Timer2 Stop": "17:00", "Timer2 ON Min": 15, "Timer2 OFF Min": 30,
+  "Timer3 Name": "TIMER 3",
+  "Timer3 D_Start": "10:00", "Timer3 D_Stop": "17:00", "Timer3 D_ON Min": 15, "Timer3 D_OFF Min": 30,
+  "Timer3 N_Start": "17:05", "Timer3 N_Stop": "09:55", "Timer3 N_ON Min": 15, "Timer3 N_OFF Min": 30,
+  "Timer4 Name": "AC TIMER",
+  "Timer4 D_Start": "10:00", "Timer4 D_Stop": "17:00", "Timer4 D_ON Min": 15, "Timer4 D_OFF Min": 30,
+  "Timer4 N_Start": "17:05", "Timer4 N_Stop": "09:55", "Timer4 N_ON Min": 15, "Timer4 N_OFF Min": 30,
+};
 const defaultSetpointsRoom3 = {
+  "Crop Name": "Room 3 - Climate Crop",
+  "Setup Name": "Room 3 Climate Setup",
   "Timer1 Name": "TIMER 1", "Timer1 Start": "10:00", "Timer1 Stop": "17:00", "Timer1 ON Min": 15, "Timer1 OFF Min": 30,
   "Timer2 Name": "TIMER 2", "Timer2 Start": "10:00", "Timer2 Stop": "17:00", "Timer2 ON Min": 15, "Timer2 OFF Min": 30,
   "Timer3 Name": "TIMER 3",
@@ -169,7 +190,7 @@ const OfficeControlSettings = () => {
   const [deviceRoot, setDeviceRoot] = useState('');
   const [activeRoom, setActiveRoom] = useState(1);
 
-  const [setpoints, setSetpoints] = useState({ 1: { ...defaultSetpointsRoom12 }, 2: { ...defaultSetpointsRoom12 }, 3: { ...defaultSetpointsRoom3 } });
+  const [setpoints, setSetpoints] = useState({ 1: { ...defaultSetpointsRoom1 }, 2: { ...defaultSetpointsRoom2 }, 3: { ...defaultSetpointsRoom3 } });
 
   useEffect(() => {
     console.log('--- Current Setpoints State (All Rooms) ---', setpoints);
@@ -179,6 +200,7 @@ const OfficeControlSettings = () => {
   const [liveTelemetry, setLiveTelemetry] = useState({ 1: null, 2: null, 3: null });
   const [loading, setLoading] = useState(true);
   const [client, setClient] = useState(null);
+  const [machineOnline, setMachineOnline] = useState(false);
   const [toast, setToast] = useState({ show: false, type: 'success', message: '' });
 
   const showToast = (type, message) => {
@@ -227,6 +249,7 @@ const OfficeControlSettings = () => {
 
   useEffect(() => {
     setTempName(selectedDevice?.name || 'Office Control');
+    setMachineOnline(selectedDevice?.status === 'online');
     setIsEditingName(false);
     console.log('--- Active Selected Device from Database ---', selectedDevice);
   }, [deviceRoot, selectedDevice]);
@@ -261,8 +284,8 @@ const OfficeControlSettings = () => {
     setStatus('disconnected');
 
     const initialSetpoints = {
-      1: { ...defaultSetpointsRoom12 },
-      2: { ...defaultSetpointsRoom12 },
+      1: { ...defaultSetpointsRoom1 },
+      2: { ...defaultSetpointsRoom2 },
       3: { ...defaultSetpointsRoom3 }
     };
     if (isSuperadmin && selectedDevice && selectedDevice.thingspeak) {
@@ -323,6 +346,7 @@ const OfficeControlSettings = () => {
             ...prev,
             [room]: incomingTelemetry
           }));
+          setMachineOnline(true);
         } catch (e) {
           console.error("Error parsing telemetry", e);
         }
@@ -561,32 +585,43 @@ const OfficeControlSettings = () => {
             )}
           </div>
 
-          <div className="min-w-[140px] flex justify-end">
-            {status === 'connected' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
-              </span>
-            )}
-            {status !== 'connected' && status !== 'saving' && status !== 'saved' && status !== 'error' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
-              </span>
-            )}
-            {status === 'saving' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400">
-                <RefreshCw className="h-4 w-4 animate-spin" /> Pushing...
-              </span>
-            )}
-            {status === 'saved' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                <CheckCircle2 className="h-4 w-4" /> Live Successfully
-              </span>
-            )}
-            {status === 'error' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
-                <AlertCircle className="h-4 w-4" /> Connection Error
-              </span>
-            )}
+          {/* Differentiated Status Indicators: Broker vs Machine */}
+          <div className="flex items-center gap-2.5">
+            {/* Broker Status */}
+            <div className="flex items-center gap-1.5 rounded-lg bg-slate-900/60 border border-slate-700/50 px-2.5 py-1 text-xs">
+              <span className="text-slate-400">Broker:</span>
+              {status === 'connected' ? (
+                <span className="flex items-center gap-1 font-semibold text-emerald-400">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 " /> Connected
+                </span>
+              ) : status === 'saving' ? (
+                <span className="flex items-center gap-1 font-semibold text-green-400">
+                  <RefreshCw className="h-3 w-3 animate-spin" /> Pushing...
+                </span>
+              ) : status === 'saved' ? (
+                <span className="flex items-center gap-1 font-semibold text-emerald-400">
+                  <CheckCircle2 className="h-3 w-3" /> Pushed
+                </span>
+              ) : status === 'error' ? (
+                <span className="flex items-center gap-1 font-semibold text-red-400">
+                  <AlertCircle className="h-3 w-3" /> Error
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 font-semibold text-slate-400">
+                  <span className="h-2 w-2 rounded-full bg-slate-600" /> Connecting...
+                </span>
+              )}
+            </div>
+
+            {/* Machine Hardware Status */}
+            <div className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold ${
+              machineOnline
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                : 'border-slate-700/50 bg-slate-900/60 text-slate-400'
+            }`}>
+              <span className={`h-2 w-2 rounded-full ${machineOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+              {machineOnline ? 'Machine Online' : 'Machine Offline'}
+            </div>
           </div>
         </div>
       </div>
@@ -596,27 +631,62 @@ const OfficeControlSettings = () => {
           onClick={() => setActiveRoom(1)}
           className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeRoom === 1 ? 'border-b-2 border-green-500 text-green-400' : 'text-slate-400 hover:text-white'}`}
         >
-          Room 1 (Zone 1)
+          {setpoints[1]?.["Setup Name"] || 'Room 1 (Zone 1)'}
         </button>
         <button
           onClick={() => setActiveRoom(2)}
           className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeRoom === 2 ? 'border-b-2 border-green-500 text-green-400' : 'text-slate-400 hover:text-white'}`}
         >
-          Room 2 (Zone 2)
+          {setpoints[2]?.["Setup Name"] || 'Room 2 (Zone 2)'}
         </button>
         <button
           onClick={() => setActiveRoom(3)}
           className={`flex-1 py-3 text-sm font-semibold transition-colors ${activeRoom === 3 ? 'border-b-2 border-green-500 text-green-400' : 'text-slate-400 hover:text-white'}`}
         >
-          Room 3 (Zone 3)
+          {setpoints[3]?.["Setup Name"] || 'Room 3 (Zone 3)'}
         </button>
       </div>
 
       <div className="space-y-6">
+        {/* Machine Offline Retained-Message Notice */}
+        {!machineOnline && (
+          <div className="flex items-center gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5 text-xs text-amber-300/90 shadow-sm">
+            <AlertCircle className="h-4 w-4 shrink-0 text-amber-400" />
+            <span>
+              Physical machine <strong>"{selectedDevice?.name || deviceRoot}"</strong> is currently offline/standby. Any setpoints updated here will be <strong>retained on the Private Mosquitto Broker</strong> and automatically synced to the machine as soon as it powers on.
+            </span>
+          </div>
+        )}
+
+        {/* Room Header, Crop & Setup Identifier */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-xl border border-slate-700/50 bg-slate-800/20 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Sprout className="h-4 w-4 text-emerald-400" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Crop Name:</span>
+              <span className="text-sm font-bold text-white">{currentSetpoints["Crop Name"] || `Room ${activeRoom} Crop Name`}</span>
+            </div>
+            <div className="hidden sm:block h-4 w-px bg-slate-700" />
+            <div className="flex items-center gap-2">
+              <Layers className="h-4 w-4 text-blue-400" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Setup Name:</span>
+              <span className="text-sm font-bold text-white">{currentSetpoints["Setup Name"] || `Room ${activeRoom} Setup`}</span>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+            <div className="w-full sm:w-48">
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label={`Room ${activeRoom} Target Crop Name`} objKey="Crop Name" type="text" />
+            </div>
+            <div className="w-full sm:w-48">
+              <InputRow data={currentSetpoints} onChange={(k, v) => handleChange(activeRoom, k, v)} label={`Room ${activeRoom} Setup Name`} objKey="Setup Name" type="text" />
+            </div>
+          </div>
+        </div>
+
         {activeRoom !== 3 && (
           <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4 pb-4 border-b border-slate-700/50">
-              <h4 className="text-sm font-semibold text-green-400">Core Limits</h4>
+              <h4 className="text-sm font-semibold text-green-400">Core Limits & Nutrient Thresholds</h4>
 
               {/* Real-time Relay and Dosing Statuses */}
               {selectedDevice && selectedDevice.status === 'online' && (

@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react';
-import { 
-  Save, CheckCircle2, RefreshCw, ChevronDown, Server, 
-  Thermometer, Droplets, Zap, Clock, ShieldCheck, Activity, Sliders, 
-  Power, FlaskConical, AlertCircle, Wind, Fan, RotateCw, Edit3
+import {
+  Save, CheckCircle2, RefreshCw, ChevronDown, Server,
+  Thermometer, Droplets, Zap, Clock, ShieldCheck, Activity, Sliders,
+  Power, FlaskConical, AlertCircle, Wind, Fan, RotateCw, Edit3, Sprout, Layers
 } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
 const defaultSetpoints = {
+  // Agricultural Profile & Identification
+  "Crop Name": "Hydroponic Crop",
+  "Setup Name": "Monit Automated Dosing & Climate Setup",
+
   // Nutrients & pH
   "EC MIN": 1.2,
   "EC MAX": 1.8,
@@ -96,6 +100,7 @@ const MonitSettings = () => {
   const [loading, setLoading] = useState(true);
   const [client, setClient] = useState(null);
   const [liveData, setLiveData] = useState(null);
+  const [machineOnline, setMachineOnline] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -146,6 +151,7 @@ const MonitSettings = () => {
 
   useEffect(() => {
     setTempName(selectedDevice?.name || 'Monnet Device');
+    setMachineOnline(selectedDevice?.status === 'online');
     setIsEditingName(false);
   }, [deviceRoot, selectedDevice]);
 
@@ -193,6 +199,7 @@ const MonitSettings = () => {
           const parsed = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
           const payload = Array.isArray(parsed) ? parsed[parsed.length - 1] : parsed;
           setLiveData(payload);
+          setMachineOnline(true);
         } catch (e) { }
       }
       else if (topic === `inhydro/${deviceRoot}/setpoints/current` || topic?.includes('/setpoints/')) {
@@ -233,7 +240,7 @@ const MonitSettings = () => {
           setStatus('connected');
           handleIncomingPacket(packet.topic, packet.data);
         }
-      } catch (e) {}
+      } catch (e) { }
     };
 
     return () => {
@@ -331,8 +338,9 @@ const MonitSettings = () => {
     );
   }
 
-  const ecVal = Number(liveData?.ec !== undefined ? liveData.ec : null);
-  const tdsPpm = Number.isFinite(ecVal) && ecVal > 0 ? Math.round(ecVal * 500) : null;
+  const isMachineOnline = machineOnline;
+  const ecVal = isMachineOnline && liveData?.ec != null && Number(liveData.ec) > 0 ? Number(liveData.ec) : null;
+  const tdsPpm = isMachineOnline && Number.isFinite(ecVal) && ecVal > 0 ? Math.round(ecVal * 500) : null;
 
   // List of all 13 relays according to monit.py
   const relaysList = [
@@ -510,26 +518,56 @@ const MonitSettings = () => {
             <RefreshCw className="h-4 w-4 text-slate-400" /> Sync Device
           </button>
 
-          {/* Broker Status Badge */}
-          <div className="min-w-[140px] flex justify-end">
-            {status === 'connected' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" /> Connected
-              </span>
-            )}
-            {status !== 'connected' && status !== 'error' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-                <span className="h-2 w-2 rounded-full bg-slate-600" /> Not Connected
-              </span>
-            )}
-            {status === 'error' && (
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400">
-                <AlertCircle className="h-4 w-4" /> Connection Error
-              </span>
-            )}
+          {/* Differentiated Status Indicators: Broker vs Machine */}
+          <div className="flex items-center gap-2.5">
+            {/* Broker Status */}
+            <div className="flex items-center gap-1.5 rounded-lg bg-slate-900/60 border border-slate-700/50 px-2.5 py-1 text-xs">
+              <span className="text-slate-400">Broker:</span>
+              {status === 'connected' ? (
+                <span className="flex items-center gap-1 font-semibold text-emerald-400">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400" /> Connected
+                </span>
+              ) : status === 'saving' ? (
+                <span className="flex items-center gap-1 font-semibold text-green-400">
+                  <RefreshCw className="h-3 w-3 animate-spin" /> Pushing...
+                </span>
+              ) : status === 'saved' || saveSuccess ? (
+                <span className="flex items-center gap-1 font-semibold text-emerald-400">
+                  <CheckCircle2 className="h-3 w-3" /> Pushed
+                </span>
+              ) : status === 'error' ? (
+                <span className="flex items-center gap-1 font-semibold text-red-400">
+                  <AlertCircle className="h-3 w-3" /> Error
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 font-semibold text-slate-400">
+                  <span className="h-2 w-2 rounded-full bg-slate-600" /> Connecting...
+                </span>
+              )}
+            </div>
+
+            {/* Machine Hardware Status */}
+            <div className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold ${
+              machineOnline
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                : 'border-slate-700/50 bg-slate-900/60 text-slate-400'
+            }`}>
+              <span className={`h-2 w-2 rounded-full ${machineOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+              {machineOnline ? 'Machine Online' : 'Machine Offline'}
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Machine Offline Retained-Message Notice */}
+      {!machineOnline && (
+        <div className="flex items-center gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5 text-xs text-amber-300/90 shadow-sm">
+          <AlertCircle className="h-4 w-4 shrink-0 text-amber-400" />
+          <span>
+            Physical machine <strong>"{selectedDevice?.name || deviceRoot}"</strong> is currently offline/standby. Any setpoints updated here will be <strong>retained on the Private Mosquitto Broker</strong> and automatically synced to the machine as soon as it powers on.
+          </span>
+        </div>
+      )}
 
       {/* Mode Tabs */}
       <div className="flex border-b border-slate-700">
@@ -550,8 +588,47 @@ const MonitSettings = () => {
       {/* SECTION 1: SYSTEM SETPOINTS CONFIGURATION */}
       {viewMode === 'setpoints' && (
         <div className="space-y-6">
+          {/* Active Crop & Setup Profile Bar */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-xl border border-slate-700/50 bg-slate-800/30 p-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Sprout className="h-4 w-4 text-emerald-400" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Active Crop:</span>
+                <span className="text-sm font-bold text-white">{setpoints["Crop Name"] || "Hydroponic Crop"}</span>
+              </div>
+              <div className="hidden sm:block h-4 w-px bg-slate-700" />
+              <div className="flex items-center gap-2">
+                <Layers className="h-4 w-4 text-blue-400" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Setup:</span>
+                <span className="text-sm font-bold text-white">{setpoints["Setup Name"] || "Monit Setup"}</span>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+              <div className="w-full sm:w-56 flex flex-col gap-1">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Active Crop Name</label>
+                <input
+                  type="text"
+                  value={setpoints["Crop Name"] ?? ""}
+                  onChange={(e) => handleInputChange("Crop Name", e.target.value)}
+                  placeholder="e.g. Lettuce, Tomato"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white font-semibold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                />
+              </div>
+              <div className="w-full sm:w-56 flex flex-col gap-1">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Setup / System Name</label>
+                <input
+                  type="text"
+                  value={setpoints["Setup Name"] ?? ""}
+                  onChange={(e) => handleInputChange("Setup Name", e.target.value)}
+                  placeholder="e.g. Dosing Bay 1"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white font-semibold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
+
             {/* LEFT COLUMN: NUTRIENTS & PH + FOGGER HUMIDIFIER DAY/NIGHT */}
             <div className="space-y-6">
               {/* Nutrients & pH Limits Card */}
@@ -975,22 +1052,22 @@ const MonitSettings = () => {
                 <div className="space-y-2.5 text-xs font-mono">
                   <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
                     <span className="text-slate-400">Water EC</span>
-                    <span className={`font-bold ${liveData?.ec !== undefined ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {liveData?.ec !== undefined ? `${liveData.ec} mS/cm` : 'ERROR'}
+                    <span className={`font-bold ${isMachineOnline && liveData?.ec != null && Number(liveData.ec) > 0 ? 'text-emerald-400' : 'text-slate-400 font-mono text-xs'}`}>
+                      {isMachineOnline && liveData?.ec != null && Number(liveData.ec) > 0 ? `${liveData.ec} mS/cm` : 'N/A'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
                     <span className="text-slate-400">Water pH</span>
-                    <span className={`font-bold ${liveData?.ph !== undefined ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {liveData?.ph !== undefined ? `${liveData.ph} pH` : 'ERROR'}
+                    <span className={`font-bold ${isMachineOnline && liveData?.ph != null && Number(liveData.ph) > 0 ? 'text-emerald-400' : 'text-slate-400 font-mono text-xs'}`}>
+                      {isMachineOnline && liveData?.ph != null && Number(liveData.ph) > 0 ? `${liveData.ph} pH` : 'N/A'}
                     </span>
                   </div>
-                  {tdsPpm !== null && (
-                    <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
-                      <span className="text-slate-400">Calculated TDS</span>
-                      <span className="font-bold ">{tdsPpm} PPM</span>
-                    </div>
-                  )}
+                  <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
+                    <span className="text-slate-400">Calculated TDS</span>
+                    <span className={`font-bold ${isMachineOnline && tdsPpm !== null ? 'text-white' : 'text-slate-400 font-mono text-xs'}`}>
+                      {isMachineOnline && tdsPpm !== null ? `${tdsPpm} PPM` : 'N/A'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -1002,14 +1079,14 @@ const MonitSettings = () => {
                 <div className="space-y-2.5 text-xs font-mono">
                   <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
                     <span className="text-slate-400">Room Temp</span>
-                    <span className={`font-bold ${liveData?.room_temp !== undefined && liveData.room_temp !== null ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {liveData?.room_temp !== undefined && liveData.room_temp !== null ? `${liveData.room_temp} °C` : 'ERROR'}
+                    <span className={`font-bold ${isMachineOnline && liveData?.room_temp != null && Number(liveData.room_temp) > 0 ? 'text-emerald-400' : 'text-slate-400 font-mono text-xs'}`}>
+                      {isMachineOnline && liveData?.room_temp != null && Number(liveData.room_temp) > 0 ? `${liveData.room_temp} °C` : 'N/A'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
                     <span className="text-slate-400">Room Humidity</span>
-                    <span className={`font-bold ${liveData?.room_humi !== undefined && liveData.room_humi !== null ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {liveData?.room_humi !== undefined && liveData.room_humi !== null ? `${liveData.room_humi} %` : 'ERROR'}
+                    <span className={`font-bold ${isMachineOnline && liveData?.room_humi != null && Number(liveData.room_humi) > 0 ? 'text-emerald-400' : 'text-slate-400 font-mono text-xs'}`}>
+                      {isMachineOnline && liveData?.room_humi != null && Number(liveData.room_humi) > 0 ? `${liveData.room_humi} %` : 'N/A'}
                     </span>
                   </div>
                 </div>

@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, AlertCircle, CheckCircle2, RefreshCw, Zap, Radio, ChevronDown, X } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle2, RefreshCw, Zap, Radio, ChevronDown, X, Sprout, Layers } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 import DimmableLightControl from '../../components/DimmableLightControl';
 
 const DEFAULT_CONFIG = {
+  crop_name: 'Leafy Greens / Seedlings',
+  setup_name: 'Dimmable LED Array Setup',
   relays: {
     light: { pin: 4, mode: 'manual', manual_state: 0, brightness: 100, start_time: '08:00', end_time: '20:00', on_min: 0, off_min: 0, days: [1, 1, 1, 1, 1, 1, 1] }
   }
@@ -25,7 +27,7 @@ const DimmableLightSettings = () => {
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
   // Unsaved changes check
-  const isDirty = JSON.stringify(config.relays.light) !== JSON.stringify(savedConfig.relays.light);
+  const isDirty = JSON.stringify(config) !== JSON.stringify(savedConfig);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -92,6 +94,8 @@ const DimmableLightSettings = () => {
           const incoming = JSON.parse(message.toString());
           if (incoming.relays && incoming.relays.light) {
             const merged = {
+              crop_name: incoming.crop_name || DEFAULT_CONFIG.crop_name,
+              setup_name: incoming.setup_name || DEFAULT_CONFIG.setup_name,
               relays: {
                 light: {
                   ...DEFAULT_CONFIG.relays.light,
@@ -138,6 +142,20 @@ const DimmableLightSettings = () => {
     }));
   };
 
+  const updateCropName = (name) => {
+    setConfig(prev => ({
+      ...prev,
+      crop_name: name
+    }));
+  };
+
+  const updateSetupName = (name) => {
+    setConfig(prev => ({
+      ...prev,
+      setup_name: name
+    }));
+  };
+
   const handlePushConfig = () => {
     if (!client || !client.connected) {
       setStatus('error');
@@ -147,6 +165,8 @@ const DimmableLightSettings = () => {
     setStatus('saving');
 
     const payload = {
+      crop_name: config.crop_name,
+      setup_name: config.setup_name,
       relays: {
         light: config.relays.light
       }
@@ -285,6 +305,45 @@ const DimmableLightSettings = () => {
             <span className="text-slate-600">Light Telemetry Topic: </span>
             <span className="font-mono text-blue-600">inhydro/{deviceRoot}/config/current</span>
           </p>
+        </div>
+
+        {/* Active Crop & Setup Profile */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-xl border border-slate-700/50 bg-slate-800/30 p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <Sprout className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-white">Target Plant & Setup Profile</h4>
+              <p className="text-xs text-slate-400">Associate dimming duty cycle and PPFD photoperiod with crop and setup</p>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+            <div className="w-full sm:w-56">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Active Crop Name</label>
+                <input
+                  type="text"
+                  value={config.crop_name ?? ''}
+                  onChange={e => updateCropName(e.target.value)}
+                  placeholder="e.g. Leafy Greens, Herbs"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40 transition-all"
+                />
+              </div>
+            </div>
+            <div className="w-full sm:w-56">
+              <div className="flex flex-col gap-1">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Setup / System Name</label>
+                <input
+                  type="text"
+                  value={config.setup_name ?? ''}
+                  onChange={e => updateSetupName(e.target.value)}
+                  placeholder="e.g. Rack Light Array A"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40 transition-all"
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Dynamic Light Card */}

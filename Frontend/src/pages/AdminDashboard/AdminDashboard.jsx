@@ -41,15 +41,17 @@ const AdminDashboard = () => {
         // Step 2: Map backend devices containing MongoDB-backed live metrics
         const allDevices = dbDevices.map((d) => {
           const stats = d.liveStats || { temp: 0, moisture: 0, ph: 0, ec: 0 };
-          const lastUpdatedTime = d.latestPacketTime || d.lastUpdated || d.updatedAt;
+          const lastUpdatedTime = d.latestPacketTime || null;
           const diffMs = lastUpdatedTime ? (Date.now() - new Date(lastUpdatedTime).getTime()) : Infinity;
-          const isDbOnline = d.status === 'online' || diffMs < 5 * 60 * 1000;
+          // Device is online ONLY if not blocked, backend says online, and fresh telemetry packet exists
+          const isFreshTelemetry = Boolean(lastUpdatedTime && diffMs >= 0 && diffMs < 2 * 60 * 1000);
+          const computedStatus = d.status === 'blocked' ? 'blocked' : (d.status === 'online' && isFreshTelemetry ? 'online' : 'offline');
 
           return {
             id: d._id,
             name: d.name,
             location: d.location,
-            status: d.status === 'blocked' ? 'blocked' : (isDbOnline ? 'online' : 'offline'),
+            status: computedStatus,
             temp: stats.temp,
             moisture: stats.moisture,
             ph: stats.ph,
@@ -59,13 +61,11 @@ const AdminDashboard = () => {
         });
 
         // Check if data changed
-        const currentKey = JSON.stringify(allDevices.map((d) => ({ t: d.temp, m: d.moisture, e: d.ec, p: d.ph })));
+        const currentKey = JSON.stringify(allDevices.map((d) => ({ t: d.temp, m: d.moisture, e: d.ec, p: d.ph, s: d.status })));
         const changed = previousMetricsRef.current !== currentKey;
         setHasNewData(changed);
-        if (changed) {
-          previousMetricsRef.current = currentKey;
-          setDevices(allDevices);
-        }
+        previousMetricsRef.current = currentKey;
+        setDevices(allDevices);
 
         setLoading(false);
       } catch (err) {
@@ -77,7 +77,7 @@ const AdminDashboard = () => {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 10000);
+    const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, [token]);
 
@@ -195,7 +195,7 @@ const AdminDashboard = () => {
             className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
           >
             {filteredDevices.map((device) => (
-              <DeviceCard key={device.id} device={device} onClick={handleDeviceClick} hasNewData={hasNewData} />
+              <DeviceCard key={device.id} device={device} onClick={handleDeviceClick} />
             ))}
           </motion.div>
         )}

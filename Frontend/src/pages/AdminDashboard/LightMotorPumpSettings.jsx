@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, AlertCircle, CheckCircle2, RefreshCw, Zap, Wifi, Radio, ToggleLeft, ToggleRight, Clock, ChevronDown, X } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle2, RefreshCw, Zap, Wifi, Radio, ToggleLeft, ToggleRight, Clock, ChevronDown, X, Sprout, Layers } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
 // ─── Day picker ───────────────────────────────────────────────────────────────
@@ -174,6 +174,8 @@ const SuccessToast = ({ onClose }) => (
 
 // ─── Default config ───────────────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
+  crop_name: 'Hydroponic Crop',
+  setup_name: 'Lighting & Irrigation Setup',
   ssid: '',
   password: '',
   device_id: '',
@@ -349,7 +351,7 @@ const LightMotorPumpSettings = () => {
   const handleConfirmSave = async () => {
     setStatus('saving');
 
-    const payload = isSuperadmin ? { ...config } : { relays: config.relays };
+    const payload = isSuperadmin ? { ...config } : { relays: config.relays, crop_name: config.crop_name, setup_name: config.setup_name };
 
     // Sync ThingSpeak keys to DB for superadmin
     if (isSuperadmin && selectedDevice) {
@@ -539,6 +541,27 @@ const LightMotorPumpSettings = () => {
               ⚠️ Device has no mqttId set in DB — using DB _id as topic root. Ensure device_id in config.json matches: <span className="font-mono">{deviceRoot}</span>
             </p>
           )}
+        </div>
+
+        {/* ── Active Crop & Setup Profile ── */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-xl border border-slate-700/50 bg-slate-800/30 p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+              <Sprout className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-white">Target Crop & Setup Profile</h4>
+              <p className="text-xs text-slate-400">Specify crop variety and system setup to optimize automation cycle</p>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+            <div className="w-full sm:w-56">
+              <Field label="Active Crop Name" value={config.crop_name} onChange={v => updateTop('crop_name', v)} placeholder="e.g. Lettuce, Microgreens" />
+            </div>
+            <div className="w-full sm:w-56">
+              <Field label="Setup / System Name" value={config.setup_name} onChange={v => updateTop('setup_name', v)} placeholder="e.g. Rack A, Greenhouse 1" />
+            </div>
+          </div>
         </div>
 
         {/* ── Relay Cards ── */}

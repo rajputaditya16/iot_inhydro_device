@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Edit3, Sliders, ShieldCheck } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle2, RefreshCw, ChevronDown, Server, Edit3, Sliders, ShieldCheck, Sprout, Layers } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
 const defaultSetpoints = {
+  "Crop Name": "Hydroponic Crop",
+  "Setup Name": "Almora Dosing Unit Setup",
   "EC MIN": 1200,
   "EC MAX": 1800,
   "PH LOW": 5.8,
@@ -406,17 +408,25 @@ const AlmoraSettings = () => {
 
         {/* Core Environmental & Dosing Limits */}
         <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 pb-3 border-b border-slate-700/40">
             <h4 className="flex items-center gap-2 text-sm font-semibold text-green-400">
-              <Sliders className="h-4 w-4" /> Core Nutrient & pH Dosing Limits
+              <Sprout className="h-4 w-4 text-emerald-400" /> Core Nutrient &amp; pH Limits ({setpoints["Crop Name"] || "Hydroponic"})
             </h4>
-            <button
-              onClick={handleSyncRequest}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-green-500 hover:text-green-400 transition-colors"
-              title="Request active setpoints from physical edge machine"
-            >
-              <RefreshCw className="h-3.5 w-3.5" /> Sync from Machine
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="w-44">
+                <InputRow data={setpoints} onChange={handleChange} label="Target Crop Name" objKey="Crop Name" type="text" />
+              </div>
+              <div className="w-44">
+                <InputRow data={setpoints} onChange={handleChange} label="Setup / System Name" objKey="Setup Name" type="text" />
+              </div>
+              <button
+                onClick={handleSyncRequest}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-medium text-slate-300 hover:border-green-500 hover:text-green-400 transition-colors mt-auto"
+                title="Request active setpoints from physical edge machine"
+              >
+                <RefreshCw className="h-3.5 w-3.5" /> Sync from Machine
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <InputRow data={setpoints} onChange={handleChange} label="EC Minimum (µS/cm)" objKey="EC MIN" />
@@ -427,7 +437,7 @@ const AlmoraSettings = () => {
         </div>
 
         {/* Private Broker Active Routing Card */}
-        <div className="rounded-xl border border-slate-700/50 bg-slate-800/20 p-5 shadow-lg shadow-emerald-500/5 transition-all">
+        {/* <div className="rounded-xl border border-slate-700/50 bg-slate-800/20 p-5 shadow-lg shadow-emerald-500/5 transition-all">
           <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-400">
             <ShieldCheck className="h-4 w-4" /> Private Broker & Edge Communication
           </h4>
@@ -445,7 +455,7 @@ const AlmoraSettings = () => {
               <span className="font-mono text-blue-400">inhydro/{deviceRoot}/telemetry/live</span>
             </div>
           </div>
-        </div>
+        </div> */}
       </div>
 
       <div className="pt-4 flex items-center gap-3">

@@ -31,14 +31,9 @@ const areEqual = (prevProps, nextProps) => {
   if (prevProps.title !== nextProps.title) return false;
   if (prevProps.unit !== nextProps.unit) return false;
   if (prevProps.color !== nextProps.color) return false;
-  if (prevProps.data === nextProps.data) return true;
-  if (!Array.isArray(prevProps.data) || !Array.isArray(nextProps.data)) return false;
-  if (prevProps.data.length !== nextProps.data.length) return false;
-  if (prevProps.data.length === 0) return true;
-
-  const prevLast = prevProps.data[prevProps.data.length - 1];
-  const nextLast = nextProps.data[nextProps.data.length - 1];
-  return prevLast?.time === nextLast?.time && prevLast?.value === nextLast?.value && prevLast?.room1Value === nextLast?.room1Value;
+  if (prevProps.subtitle !== nextProps.subtitle) return false;
+  if (prevProps.data !== nextProps.data) return false;
+  return true;
 };
 
 const LiveChart = memo(({ data = [], type = 'temperature', title, unit, subtitle = 'Last 24 hours', color }) => {

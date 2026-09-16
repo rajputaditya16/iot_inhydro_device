@@ -18,6 +18,8 @@ const EMPTY_FORM = {
   model: '',
   unit: '',
   nicknameByClient: '',
+  cropName: '',
+  setupName: '',
   thingspeak: {
     port: 1883,
   },
@@ -82,7 +84,7 @@ const DevicesPage = () => {
     if (device) {
       setEditingDevice(device);
       setFormData({
-        name: device.name,
+       name: device.name,
         location: device.location,
         status: device.status,
         deviceType: device.deviceType,
@@ -92,6 +94,8 @@ const DevicesPage = () => {
         model: device.model || '',
         unit: device.unit || '',
         nicknameByClient: device.nicknameByClient || '',
+        cropName: device.cropName || '',
+        setupName: device.setupName || '',
         thingspeak: {
           port: device.thingspeak?.port || 1883,
         },
@@ -238,7 +242,7 @@ const DevicesPage = () => {
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Device</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Location</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Status</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Device ID / MQTT ID</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Device ID </th>
                 <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Last Updated</th>
                 <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">Actions</th>
               </tr>
@@ -247,17 +251,15 @@ const DevicesPage = () => {
               {filtered.map((device) => {
                 const deviceId = device._id || device.id;
                 const isBlocked = device.status === 'blocked';
-                const hasThingspeak = device.thingspeak?.channelId || device.thingspeak?.tempChannelId;
                 return (
-                  <tr key={deviceId} className="border-b border-slate-700/30 transition-colors hover:bg-slate-800/50">
+                  <tr key={deviceId} className="border-b border-slate-700/30 transition-colors hover:bg-slate-800/50 cursor-pointer"  onClick={() => navigate(`/monitoring?device=${deviceId}`)}>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className={`rounded-lg p-2 ${isBlocked ? 'bg-red-500/10' : 'bg-green-500/10'}`}>
                           <Cpu className={`h-4 w-4 ${isBlocked ? 'text-red-400' : 'text-green-400'}`} />
                         </div>
                         <div>
-                          <p className={`font-medium ${isBlocked ? 'text-slate-400 line-through' : 'text-white'}`}>{device.name}</p>
-                          <p className="text-[10px] text-slate-500 font-mono">{deviceId.substring(0, 8)}...</p>
+                          <p className={`font-medium ${isBlocked ? 'text-slate-400 line-through' : 'text-white'}`}>{device.name}</p>     
                         </div>
                       </div>
                     </td>
@@ -286,9 +288,6 @@ const DevicesPage = () => {
                           onClick={() => {
                             setSelectedDeviceIdDetails(deviceId);
                             setShowDetailsModal(true);
-                            setShowDetailsPassword(false);
-                            setShowDetailsWriteKey(false);
-                            setShowDetailsReadKey(false);
                           }}
                           className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-blue-500/10 hover:text-blue-400"
                           title="View Device Details"
@@ -417,6 +416,29 @@ const DevicesPage = () => {
                     className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
                     placeholder="Must match device_id.txt on Raspberry Pi"
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-300">Active Crop Name</label>
+                    <input
+                      type="text"
+                      value={formData.cropName || ''}
+                      onChange={(e) => setFormData({ ...formData, cropName: e.target.value })}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                      placeholder="e.g. Strawberry, Lettuce"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-300">Setup / System Name</label>
+                    <input
+                      type="text"
+                      value={formData.setupName || ''}
+                      onChange={(e) => setFormData({ ...formData, setupName: e.target.value })}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                      placeholder="e.g. NFT Rack 1, Cold Room A"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -602,6 +624,16 @@ const DevicesPage = () => {
                       <span className="text-white font-mono text-xs bg-slate-900/40 px-2 py-0.5 rounded border border-slate-700/30">
                         {selectedDeviceDetails.mqttId || 'Not set'}
                       </span>
+                    </div>
+
+                    <div className="flex justify-between items-center border-t border-slate-800/60 pt-2.5">
+                      <span className="text-slate-400 font-medium">Active Crop Name</span>
+                      <span className="text-emerald-400 font-semibold">{selectedDeviceDetails.cropName || 'Not set'}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center border-t border-slate-800/60 pt-2.5">
+                      <span className="text-slate-400 font-medium">Setup / System Name</span>
+                      <span className="text-sky-400 font-semibold">{selectedDeviceDetails.setupName || 'Not set'}</span>
                     </div>
 
                     <div className="flex justify-between items-center border-t border-slate-800/60 pt-2.5">
