@@ -1137,22 +1137,39 @@ const LiveMonitoring = () => {
 
             // Extract initial relay states if present in latestFeed
             const rawRelays = latestFeed.relay_states || latestFeed.relays;
-            if (rawRelays && typeof rawRelays === 'object') {
-              const mappedRelays = {};
-              for (let i = 1; i <= 7; i++) {
-                const sKey = `S${i}`;
-                const idx = i - 1;
-                const chCooling = String((idx * 3) + 1);
-                const chHumi = String((idx * 3) + 2);
-                const chLight = String((idx * 3) + 3);
-                mappedRelays[sKey] = {
-                  cooling: Boolean(rawRelays[chCooling] ?? rawRelays[Number(chCooling)]),
-                  humi: Boolean(rawRelays[chHumi] ?? rawRelays[Number(chHumi)]),
-                  light: Boolean(rawRelays[chLight] ?? rawRelays[Number(chLight)]),
-                };
-              }
-              setMultiSensorRelays((prev) => ({ ...prev, ...mappedRelays }));
+            const mappedRelays = {};
+            for (let i = 1; i <= 7; i++) {
+              const sKey = `S${i}`;
+              const idx = i - 1;
+              const chCooling = String((idx * 3) + 1);
+              const chHumi = String((idx * 3) + 2);
+              const chLight = String((idx * 3) + 3);
+              const roomObj = latestFeed.rooms?.[sKey] || latestFeed.sensor_data?.[sKey] || latestFeed[sKey];
+              mappedRelays[sKey] = {
+                cooling: Boolean(
+                  rawRelays?.[chCooling] ??
+                  rawRelays?.[Number(chCooling)] ??
+                  roomObj?.relays?.cooling ??
+                  roomObj?.cooling ??
+                  false
+                ),
+                humi: Boolean(
+                  rawRelays?.[chHumi] ??
+                  rawRelays?.[Number(chHumi)] ??
+                  roomObj?.relays?.humidifier ??
+                  roomObj?.humidifier ??
+                  false
+                ),
+                light: Boolean(
+                  rawRelays?.[chLight] ??
+                  rawRelays?.[Number(chLight)] ??
+                  roomObj?.relays?.grow_lights ??
+                  roomObj?.grow_lights ??
+                  false
+                ),
+              };
             }
+            setMultiSensorRelays((prev) => ({ ...prev, ...mappedRelays }));
 
             // Extract initial setpoints if present in latestFeed
             const rawSp = latestFeed.sensor_setpoints || latestFeed.setpoints;
@@ -1299,22 +1316,39 @@ const LiveMonitoring = () => {
         if (isMultiSensor) {
           // 1. Extract Relay States (24 relays total, 3 channels per cold storage room)
           const rawRelays = rawPayload.relay_states || rawPayload.relays;
-          if (rawRelays && typeof rawRelays === 'object') {
-            const mappedRelays = {};
-            for (let i = 1; i <= 7; i++) {
-              const sKey = `S${i}`;
-              const idx = i - 1;
-              const chCooling = String((idx * 3) + 1);
-              const chHumi = String((idx * 3) + 2);
-              const chLight = String((idx * 3) + 3);
-              mappedRelays[sKey] = {
-                cooling: Boolean(rawRelays[chCooling] ?? rawRelays[Number(chCooling)]),
-                humi: Boolean(rawRelays[chHumi] ?? rawRelays[Number(chHumi)]),
-                light: Boolean(rawRelays[chLight] ?? rawRelays[Number(chLight)]),
-              };
-            }
-            setMultiSensorRelays((prev) => ({ ...prev, ...mappedRelays }));
+          const mappedRelays = {};
+          for (let i = 1; i <= 7; i++) {
+            const sKey = `S${i}`;
+            const idx = i - 1;
+            const chCooling = String((idx * 3) + 1);
+            const chHumi = String((idx * 3) + 2);
+            const chLight = String((idx * 3) + 3);
+            const roomObj = rawPayload.rooms?.[sKey] || rawPayload.sensor_data?.[sKey] || rawPayload[sKey];
+            mappedRelays[sKey] = {
+              cooling: Boolean(
+                rawRelays?.[chCooling] ??
+                rawRelays?.[Number(chCooling)] ??
+                roomObj?.relays?.cooling ??
+                roomObj?.cooling ??
+                false
+              ),
+              humi: Boolean(
+                rawRelays?.[chHumi] ??
+                rawRelays?.[Number(chHumi)] ??
+                roomObj?.relays?.humidifier ??
+                roomObj?.humidifier ??
+                false
+              ),
+              light: Boolean(
+                rawRelays?.[chLight] ??
+                rawRelays?.[Number(chLight)] ??
+                roomObj?.relays?.grow_lights ??
+                roomObj?.grow_lights ??
+                false
+              ),
+            };
           }
+          setMultiSensorRelays((prev) => ({ ...prev, ...mappedRelays }));
 
           // 2. Extract Active Warnings / Alarms
           if (Array.isArray(rawPayload.active_warnings)) {
@@ -1345,7 +1379,7 @@ const LiveMonitoring = () => {
 
           // 5. Normalize Probe Telemetry Data (S1..S7)
           let normalizedSensors = {};
-          const rawSensors = rawPayload.sensor_data || (rawPayload.S1 || rawPayload.s1 || rawPayload.S2 || rawPayload.s2 ? rawPayload : null);
+          const rawSensors = rawPayload.sensor_data || rawPayload.rooms || (rawPayload.S1 || rawPayload.s1 || rawPayload.S2 || rawPayload.s2 ? rawPayload : null);
 
           if (rawSensors && typeof rawSensors === 'object') {
             Object.entries(rawSensors).forEach(([key, probe]) => {

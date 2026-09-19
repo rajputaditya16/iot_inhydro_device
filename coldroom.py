@@ -536,11 +536,34 @@ def broadcast_current_state():
                 "H MAX": sp_eval.get("H MAX", 80.0)
             }
 
+        sensor_data_dict = {}
+        for skey, r_data in norm_rooms.items():
+            sensor_data_dict[skey] = {
+                "t": r_data["temp"],
+                "h": r_data["humi"],
+                "co2": r_data["co2"],
+                "temp": r_data["temp"],
+                "humi": r_data["humi"],
+                "status": r_data["status"]
+            }
+
         state_payload = {
             "device_id": DEVICE_NAME,
             "timestamp": ts_str,
             "source": "device",
             "rooms": norm_rooms,
+            "sensor_data": sensor_data_dict,
+            "relay_states": { str(k): bool(v) for k, v in relay_states.items() },
+            "relays": { str(k): bool(v) for k, v in relay_states.items() },
+            "room_paused_states": { str(k): bool(v) for k, v in room_paused_states.items() },
+            "active_warnings": list(active_warnings) if 'active_warnings' in globals() else [],
+            "S1": sensor_data_dict.get("S1"),
+            "S2": sensor_data_dict.get("S2"),
+            "S3": sensor_data_dict.get("S3"),
+            "S4": sensor_data_dict.get("S4"),
+            "S5": sensor_data_dict.get("S5"),
+            "S6": sensor_data_dict.get("S6"),
+            "S7": sensor_data_dict.get("S7"),
             "sensor_setpoints": sensor_setpoints,
             "system_config": system_config,
             "crop_programs": crop_programs
@@ -548,6 +571,9 @@ def broadcast_current_state():
         try:
             control_client.publish(f"inhydro/{DEVICE_NAME}/state", json.dumps(state_payload), retain=True)
             control_client.publish(f"inhydro/{DEVICE_NAME}/setpoints/current", json.dumps(state_payload), retain=True)
+            control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", json.dumps(state_payload), retain=False)
+            if DEVICE_NAME != DEVICE_NAME.lower():
+                control_client.publish(f"inhydro/{DEVICE_NAME.lower()}/telemetry/live", json.dumps(state_payload), retain=False)
         except Exception as e:
             print(f"[BROADCAST ERROR] {e}")
 

@@ -280,7 +280,7 @@ const ColdStorageSettings = () => {
   const [devices, setDevices] = useState([]);
   const [selectedMqttId, setSelectedMqttId] = useState(paramMqtt || 'cold_room');
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState('disconnected');
+  const [status, setStatus] = useState('connected');
   const [statusMsg, setStatusMsg] = useState('');
   const [client, setClient] = useState(null);
   const [isMachineOnline, setIsMachineOnline] = useState(false);
@@ -331,19 +331,46 @@ const ColdStorageSettings = () => {
   const token = localStorage.getItem('token');
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
-  // Active 3-second heartbeat watchdog without causing root re-renders unless online status actually flips
+  const selectedDevice = devices.find(d => (d.mqttId || d._id) === selectedMqttId || d.mqttId === selectedMqttId || d._id === selectedMqttId);
+  const targetDevId = selectedDevice?.mqttId || selectedDevice?._id || selectedMqttId || 'cold_room';
+
+  const candidateIdsStr = useMemo(() => {
+    return Array.from(
+      new Set(
+        [
+          selectedMqttId,
+          selectedDevice?.mqttId,
+          selectedDevice?._id,
+          selectedDevice?.deviceId,
+          selectedMqttId ? String(selectedMqttId).toLowerCase() : null,
+          selectedDevice?.mqttId ? String(selectedDevice.mqttId).toLowerCase() : null,
+          selectedDevice?._id ? String(selectedDevice._id).toLowerCase() : null,
+          'cold_room',
+          'cold_storage',
+          'control123'
+        ].filter(Boolean)
+      )
+    ).join(',');
+  }, [selectedMqttId, selectedDevice?.mqttId, selectedDevice?._id, selectedDevice?.deviceId]);
+
+  const candidateIdentifiers = useMemo(() => {
+    return candidateIdsStr ? candidateIdsStr.split(',') : [];
+  }, [candidateIdsStr]);
+
+  // Active heartbeat watchdog: checks device status & telemetry freshness without false offline flips
   useEffect(() => {
     const ticker = setInterval(() => {
       const uploadSec = Number(systemConfig.upload_frequency_sec) || (Number(systemConfig.upload_frequency_min) * 60) || 1;
-      const allowedTimeoutMs = Math.max(120000, (uploadSec * 2.5 + 60) * 1000);
+      const allowedTimeoutMs = Math.max(300000, (uploadSec * 2.5 + 60) * 1000);
 
-      const isFresh = Boolean(
+      const hasRecentTelemetry = Boolean(
         lastTelemetryTimeRef.current && (Date.now() - lastTelemetryTimeRef.current < allowedTimeoutMs)
       );
-      setIsMachineOnline((prev) => (prev !== isFresh ? isFresh : prev));
-    }, 3000);
+      const isOnline = Boolean(hasRecentTelemetry || selectedDevice?.status === 'online');
+      setIsMachineOnline((prev) => (prev !== isOnline ? isOnline : prev));
+    }, 5000);
     return () => clearInterval(ticker);
-  }, [systemConfig.upload_frequency_sec, systemConfig.upload_frequency_min]);
+  }, [systemConfig.upload_frequency_sec, systemConfig.upload_frequency_min, selectedDevice?.status]);
 
   useEffect(() => {
     if (commandCooldown <= 0) return;
@@ -485,32 +512,6 @@ const ColdStorageSettings = () => {
     fetchDevices();
   }, [token, API_BASE, paramMqtt, paramDev]);
 
-  const selectedDevice = devices.find(d => (d.mqttId || d._id) === selectedMqttId || d.mqttId === selectedMqttId || d._id === selectedMqttId);
-  const targetDevId = selectedDevice?.mqttId || selectedDevice?._id || selectedMqttId || 'cold_room';
-
-  const candidateIdsStr = useMemo(() => {
-    return Array.from(
-      new Set(
-        [
-          selectedMqttId,
-          selectedDevice?.mqttId,
-          selectedDevice?._id,
-          selectedDevice?.deviceId,
-          selectedMqttId ? String(selectedMqttId).toLowerCase() : null,
-          selectedDevice?.mqttId ? String(selectedDevice.mqttId).toLowerCase() : null,
-          selectedDevice?._id ? String(selectedDevice._id).toLowerCase() : null,
-          'cold_room',
-          'cold_storage',
-          'control123'
-        ].filter(Boolean)
-      )
-    ).join(',');
-  }, [selectedMqttId, selectedDevice?.mqttId, selectedDevice?._id, selectedDevice?.deviceId]);
-
-  const candidateIdentifiers = useMemo(() => {
-    return candidateIdsStr ? candidateIdsStr.split(',') : [];
-  }, [candidateIdsStr]);
-
   // Directly fetch latest crop_programs.json and setpoints_<devId>.json from device disk
   const fetchDiskStateDirectly = useCallback(async () => {
     const devTarget = targetDevId || selectedMqttId || selectedDevice?.mqttId || selectedDevice?._id || 'cold_room';
@@ -645,12 +646,39 @@ const ColdStorageSettings = () => {
         return updated;
       });
     }
-    if (payload.relay_states) {
+    const rawRelayStates = payload.relay_states || payload.relays;
+    if (rawRelayStates && typeof rawRelayStates === 'object') {
       setRelayStates(prev => {
-        if (JSON.stringify(prev) === JSON.stringify(payload.relay_states)) return prev;
-        return payload.relay_states;
+        if (JSON.stringify(prev) === JSON.stringify(rawRelayStates)) return prev;
+        return { ...prev, ...rawRelayStates };
       });
     }
+
+    if (payload.rooms && typeof payload.rooms === 'object') {
+      const roomRelayMap = {};
+      Object.entries(payload.rooms).forEach(([rk, rObj]) => {
+        if (!rObj || typeof rObj !== 'object') return;
+        const m = rk.match(/\d+/);
+        if (m) {
+          const idx = parseInt(m[0], 10) - 1;
+          const cCh = (idx * 3) + 1;
+          const hCh = (idx * 3) + 2;
+          const lCh = (idx * 3) + 3;
+          if (rObj.relays?.cooling !== undefined) roomRelayMap[cCh] = Boolean(rObj.relays.cooling);
+          else if (rObj.cooling !== undefined) roomRelayMap[cCh] = Boolean(rObj.cooling);
+
+          if (rObj.relays?.humidifier !== undefined) roomRelayMap[hCh] = Boolean(rObj.relays.humidifier);
+          else if (rObj.humidifier !== undefined) roomRelayMap[hCh] = Boolean(rObj.humidifier);
+
+          if (rObj.relays?.grow_lights !== undefined) roomRelayMap[lCh] = Boolean(rObj.relays.grow_lights);
+          else if (rObj.grow_lights !== undefined) roomRelayMap[lCh] = Boolean(rObj.grow_lights);
+        }
+      });
+      if (Object.keys(roomRelayMap).length > 0) {
+        setRelayStates(prev => ({ ...prev, ...roomRelayMap }));
+      }
+    }
+
     if (payload.room_paused_states) {
       setRoomPausedStates(prev => {
         if (JSON.stringify(prev) === JSON.stringify(payload.room_paused_states)) return prev;
@@ -670,7 +698,7 @@ const ColdStorageSettings = () => {
     }
 
     // 2. Normalize sensor readings to S1..S7
-    const rawSensors = payload.sensor_data || (payload.S1 ? payload : null);
+    const rawSensors = payload.sensor_data || payload.rooms || (payload.S1 ? payload : null);
 
     if (rawSensors && typeof rawSensors === 'object') {
       const normalized = {};
@@ -742,7 +770,6 @@ const ColdStorageSettings = () => {
   // --- DUAL-CHANNEL REAL-TIME SYNC (MQTT WEBSOCKET + SSE FALLBACK) ---
   useEffect(() => {
     if (loading || !candidateIdsStr) return;
-    setStatus('disconnected');
 
     const idsList = candidateIdsStr.split(',');
     const mqttClient = createMqttClient();
@@ -759,6 +786,7 @@ const ColdStorageSettings = () => {
     mqttClient.on('message', (topic, message) => {
       try {
         const payload = JSON.parse(message.toString());
+        setStatus('connected');
         processTelemetryRef.current(payload);
       } catch (err) {
         console.debug('MQTT parse error', err);
@@ -766,7 +794,7 @@ const ColdStorageSettings = () => {
     });
 
     mqttClient.on('error', () => {
-      setStatus('error');
+      // Direct WS error is expected when direct broker is disabled; fallback to SSE stream
     });
 
     setClient(mqttClient);
@@ -775,14 +803,20 @@ const ColdStorageSettings = () => {
     let eventSource = null;
     try {
       eventSource = new EventSource(sseUrl);
-      eventSource.onopen = () => setStatus('connected');
+      eventSource.onopen = () => {
+        setStatus('connected');
+      };
       eventSource.onmessage = (event) => {
         try {
           if (!event.data || event.data.startsWith(':')) return;
           const packet = JSON.parse(event.data);
+          setStatus('connected');
           const pData = packet.data || packet.telemetry || packet;
           processTelemetryRef.current(pData);
         } catch { }
+      };
+      eventSource.onerror = () => {
+        // SSE reconnects automatically
       };
     } catch (e) { }
 
@@ -2077,9 +2111,27 @@ const ColdStorageSettings = () => {
               const humiCh = (rIdx * 3) + 2;
               const lightCh = (rIdx * 3) + 3;
 
-              const isCoolOn = !!relayStates[coolCh];
-              const isHumiOn = !!relayStates[humiCh];
-              const isLightOn = !!relayStates[lightCh];
+              const isCoolOn = Boolean(
+                relayStates[coolCh] ??
+                relayStates[String(coolCh)] ??
+                relayStates[`CH${coolCh}`] ??
+                liveData[sKey]?.relays?.cooling ??
+                liveData[sKey]?.cooling
+              );
+              const isHumiOn = Boolean(
+                relayStates[humiCh] ??
+                relayStates[String(humiCh)] ??
+                relayStates[`CH${humiCh}`] ??
+                liveData[sKey]?.relays?.humidifier ??
+                liveData[sKey]?.humidifier
+              );
+              const isLightOn = Boolean(
+                relayStates[lightCh] ??
+                relayStates[String(lightCh)] ??
+                relayStates[`CH${lightCh}`] ??
+                liveData[sKey]?.relays?.grow_lights ??
+                liveData[sKey]?.grow_lights
+              );
               const coolLabel = sKey === 'S7' ? 'Fanpad Cooling' : 'AC Cooling';
 
               return (
