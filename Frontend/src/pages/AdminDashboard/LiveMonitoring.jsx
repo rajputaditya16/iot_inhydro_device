@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, memo, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Thermometer,
@@ -28,6 +28,7 @@ import {
   Sprout,
   Tag,
   Box,
+  Sliders,
 } from 'lucide-react';
 import LiveChart from '../../components/LiveChart';
 import { SkeletonCard } from '../../components/Skeleton';
@@ -51,23 +52,23 @@ const DEFAULT_ROOM_NAMES = {
 };
 
 export const DEFAULT_COLD_ROOM_CROPS = {
-  S1: 'Room 1 - Strawberry',
-  S2: 'Room 2 - Blueberry',
-  S3: 'Room 3 - Apples / Pears',
-  S4: 'Room 4 - Leafy Greens',
-  S5: 'Room 5 - Herbs & Microgreens',
-  S6: 'Room 6 - Vegetables',
-  S7: 'Greenhouse - Flowers & Seedlings',
+  S1: 'Cold Room 1 Program',
+  S2: 'Cold Room 2 Program',
+  S3: 'Cold Room 3 Program',
+  S4: 'Cold Room 4 Program',
+  S5: 'Cold Room 5 Program',
+  S6: 'Cold Room 6 Program',
+  S7: 'Greenhouse Program',
 };
 
 export const DEFAULT_COLD_ROOM_SETUPS = {
-  S1: 'Cold Room 1 Storage Setup',
-  S2: 'Cold Room 2 Storage Setup',
-  S3: 'Cold Room 3 Storage Setup',
-  S4: 'Cold Room 4 Storage Setup',
-  S5: 'Cold Room 5 Storage Setup',
-  S6: 'Cold Room 6 Storage Setup',
-  S7: 'Greenhouse Hydroponic Setup',
+  S1: 'Cold Room 1 Setup',
+  S2: 'Cold Room 2 Setup',
+  S3: 'Cold Room 3 Setup',
+  S4: 'Cold Room 4 Setup',
+  S5: 'Cold Room 5 Setup',
+  S6: 'Cold Room 6 Setup',
+  S7: 'Greenhouse Setup',
 };
 
 export const DEFAULT_OFFICE_ROOM_CROPS = {
@@ -96,6 +97,55 @@ const getProbeName = (sensorId, deviceMeta, customNames = {}) => {
     deviceMeta?.sensorNames?.[upper];
   if (custom) return custom;
   return DEFAULT_ROOM_NAMES[upper] || `Cold Room ${upper.replace('S', '')}`;
+};
+
+export const resolveRoomSetpointInfo = (setpoints, sensorId) => {
+  if (!setpoints) {
+    return {
+      targetTemp: null,
+      targetHumi: null,
+      tempMin: null,
+      tempMax: null,
+      humiMin: null,
+      humiMax: null,
+      cropName: DEFAULT_ROOM_NAMES[sensorId] ? `${DEFAULT_ROOM_NAMES[sensorId]} Program` : 'Storage Program',
+      stageName: null,
+      setupName: DEFAULT_ROOM_NAMES[sensorId] ? `${DEFAULT_ROOM_NAMES[sensorId]} Setup` : 'Storage Setup',
+    };
+  }
+
+  // Find active setting stage if nested in .settings
+  const activeSettingKey = setpoints.active_setting || (setpoints.settings ? Object.keys(setpoints.settings)[0] : null);
+  const activeStage = activeSettingKey && setpoints.settings?.[activeSettingKey]
+    ? setpoints.settings[activeSettingKey]
+    : (setpoints.time_slots ? setpoints : null);
+
+  // Find active slot (or first slot)
+  const slot = activeStage?.time_slots?.[0] || setpoints?.time_slots?.[0] || {};
+
+  const targetTemp = setpoints.target_temp ?? slot.t_set ?? setpoints.temp ?? null;
+  const targetHumi = setpoints.target_humi ?? slot.h_set ?? setpoints.humi ?? null;
+
+  const tempMin = slot.t_min ?? setpoints.t_min ?? setpoints['T MIN'] ?? null;
+  const tempMax = slot.t_max ?? setpoints.t_max ?? setpoints['T MAX'] ?? null;
+  const humiMin = slot.h_min ?? setpoints.h_min ?? setpoints['H MIN'] ?? null;
+  const humiMax = slot.h_max ?? setpoints.h_max ?? setpoints['H MAX'] ?? null;
+
+  const cropName = setpoints.program_name || setpoints.crop_name || activeStage?.crop_name || setpoints['Crop Name'] || (DEFAULT_ROOM_NAMES[sensorId] ? `${DEFAULT_ROOM_NAMES[sensorId]} Program` : 'Storage Program');
+  const stageName = activeStage?.name || setpoints.stage_name || null;
+  const setupName = setpoints.setup_name || activeStage?.setup_name || (DEFAULT_ROOM_NAMES[sensorId] ? `${DEFAULT_ROOM_NAMES[sensorId]} Setup` : 'Storage Setup');
+
+  return {
+    targetTemp: targetTemp != null ? Number(targetTemp).toFixed(1) : null,
+    targetHumi: targetHumi != null ? Number(targetHumi).toFixed(1) : null,
+    tempMin: tempMin != null ? Number(tempMin).toFixed(1) : null,
+    tempMax: tempMax != null ? Number(tempMax).toFixed(1) : null,
+    humiMin: humiMin != null ? Number(humiMin).toFixed(1) : null,
+    humiMax: humiMax != null ? Number(humiMax).toFixed(1) : null,
+    cropName,
+    stageName,
+    setupName,
+  };
 };
 
 // ── Smooth SVG Sparkline Component (Theme-Aware) ─────────────────────────────
@@ -311,6 +361,8 @@ const ColdRoomProbeCard = memo(
     const hVal = isOnline && data?.h != null && Number(data.h) > 0 ? Number(data.h).toFixed(1) : null;
     const co2Val = isOnline && data?.co2 != null && Number(data.co2) > 0 ? Number(data.co2).toFixed(0) : null;
 
+    const spInfo = resolveRoomSetpointInfo(setpoints, sensorId);
+
     // Calculate min and max from history
     const tHistoryValues = (history?.t || [])
       .map((d) => (typeof d === 'object' && d !== null ? d.value : Number(d)))
@@ -338,29 +390,30 @@ const ColdRoomProbeCard = memo(
 
         {/* Card Header: Port Badge, Room Name, Status */}
         <div className="mb-3.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="shrink-0 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] font-mono font-bold text-emerald-400">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="shrink-0 rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-xs font-mono font-black text-emerald-400">
               {sensorId}
             </span>
             <div className="min-w-0">
-              <h4 className="text-sm font-semibold text-white group-hover:text-emerald-300 transition-colors truncate">
+              <h4 className="text-sm font-bold text-white group-hover:text-emerald-300 transition-colors truncate tracking-tight">
                 {roomName || `Cold Room ${sensorId.toUpperCase().replace('S', '')}`}
               </h4>
-              <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-slate-400 font-medium truncate mt-0.5">
-                <span className="text-emerald-400 font-semibold truncate max-w-[130px]">
-                  {setpoints?.crop_name || setpoints?.['Crop Name'] || DEFAULT_COLD_ROOM_CROPS[sensorId] || 'Storage'}
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-400 font-medium truncate mt-0.5">
+                <span className="text-emerald-400 font-semibold truncate max-w-[130px] flex items-center gap-1">
+                  <Sprout className="h-3 w-3" />
+                  {spInfo.cropName}
                 </span>
-                {setpoints?.stage_name && (
+                {spInfo.stageName && (
                   <>
                     <span className="text-slate-600">•</span>
-                    <span className="text-slate-400 truncate">{setpoints.stage_name}</span>
+                    <span className="text-slate-400 truncate">{spInfo.stageName}</span>
                   </>
                 )}
               </div>
             </div>
           </div>
           <span
-            className={`shrink-0 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${isOnline
+            className={`shrink-0 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${isOnline
               ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
               : 'bg-slate-800 text-slate-400 border border-slate-700'
               }`}
@@ -377,24 +430,26 @@ const ColdRoomProbeCard = memo(
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
             {/* Temperature Tile */}
-            <div className="rounded-xl bg-slate-950/50 border border-slate-800/60 p-3 transition-colors group-hover:border-slate-800">
+            <div className="rounded-xl bg-slate-950/70 border border-amber-500/20 p-3 transition-colors group-hover:border-amber-500/40">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-[10px] font-medium text-slate-400 flex items-center gap-1">
-                  <Thermometer className="h-3 w-3 text-emerald-400" /> Temp
+                <p className="text-[10px] font-bold uppercase tracking-wider text-amber-400/90 flex items-center gap-1">
+                  <Thermometer className="h-3.5 w-3.5 text-amber-400" /> Temp
                 </p>
-                {setpoints?.target_temp != null && (
-                  <span className="text-[9px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
-                    Set: {setpoints.target_temp}°
+                {spInfo.targetTemp != null ? (
+                  <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                    Set: {spInfo.targetTemp}°C
                   </span>
+                ) : (
+                  <span className="text-[9px] font-mono text-slate-400">Set: --</span>
                 )}
               </div>
               <div className="flex items-baseline gap-1">
                 {tVal !== null ? (
                   <>
-                    <span className="text-xl sm:text-2xl font-bold tabular-nums text-white group-hover:text-emerald-400 transition-colors">
+                    <span className="text-2xl font-black font-mono tabular-nums text-white group-hover:text-amber-400 transition-colors">
                       {tVal}
                     </span>
-                    <span className="text-xs font-normal text-slate-500">°C</span>
+                    <span className="text-xs font-semibold text-slate-400">°C</span>
                   </>
                 ) : (
                   <span className="text-base font-semibold text-slate-400 font-mono tracking-wider">
@@ -402,27 +457,34 @@ const ColdRoomProbeCard = memo(
                   </span>
                 )}
               </div>
+              {spInfo.tempMin != null && spInfo.tempMax != null && (
+                <div className="mt-1 text-[9px] font-mono text-slate-400 truncate">
+                  Band: {spInfo.tempMin}° - {spInfo.tempMax}°C
+                </div>
+              )}
             </div>
 
             {/* Humidity Tile */}
-            <div className="rounded-xl bg-slate-950/50 border border-slate-800/60 p-3 transition-colors group-hover:border-slate-800">
+            <div className="rounded-xl bg-slate-950/70 border border-sky-500/20 p-3 transition-colors group-hover:border-sky-500/40">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-[10px] font-medium text-slate-400 flex items-center gap-1">
-                  <Droplets className="h-3 w-3 text-emerald-400" /> Humidity
+                <p className="text-[10px] font-bold uppercase tracking-wider text-sky-400/90 flex items-center gap-1">
+                  <Droplets className="h-3.5 w-3.5 text-sky-400" /> Humidity
                 </p>
-                {setpoints?.target_humi != null && (
-                  <span className="text-[9px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
-                    Set: {setpoints.target_humi}%
+                {spInfo.targetHumi != null ? (
+                  <span className="text-[10px] font-mono font-bold text-sky-300 bg-sky-500/10 px-1.5 py-0.2 rounded border border-sky-500/20">
+                    Set: {spInfo.targetHumi}%
                   </span>
+                ) : (
+                  <span className="text-[9px] font-mono text-slate-400">Set: --</span>
                 )}
               </div>
               <div className="flex items-baseline gap-1">
                 {hVal !== null ? (
                   <>
-                    <span className="text-xl sm:text-2xl font-bold tabular-nums text-white group-hover:text-emerald-300 transition-colors">
+                    <span className="text-2xl font-black font-mono tabular-nums text-white group-hover:text-sky-300 transition-colors">
                       {hVal}
                     </span>
-                    <span className="text-xs font-normal text-slate-500">%</span>
+                    <span className="text-xs font-semibold text-slate-400">%</span>
                   </>
                 ) : (
                   <span className="text-base font-semibold text-slate-400 font-mono tracking-wider">
@@ -430,26 +492,30 @@ const ColdRoomProbeCard = memo(
                   </span>
                 )}
               </div>
+              {spInfo.humiMin != null && spInfo.humiMax != null && (
+                <div className="mt-1 text-[9px] font-mono text-slate-400 truncate">
+                  Band: {spInfo.humiMin}% - {spInfo.humiMax}%
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Chamber CO2 (if present) */}
-          {co2Val != null && (
-            <div className="flex items-center justify-between rounded-xl bg-slate-950/60 border border-slate-800/80 px-3 py-1.5 text-xs">
-              <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1.5">
-                <Activity className="h-3 w-3 text-emerald-400" /> Chamber CO2
-              </span>
-              <span className="font-mono font-bold text-emerald-400">
-                {co2Val} <span className="text-[10px] font-normal text-slate-500">ppm</span>
-              </span>
-            </div>
-          )}
+          {/* Chamber CO2 */}
+          <div className="flex items-center justify-between rounded-xl bg-slate-950/60 border border-slate-800/80 px-3 py-1.5 text-xs">
+            <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+              <Activity className="h-3.5 w-3.5 text-emerald-400" /> Chamber CO2
+            </span>
+            <span className="font-mono font-black text-emerald-300">
+              {co2Val != null ? `${co2Val} ` : '-- '}
+              <span className="text-[10px] font-normal text-slate-400">ppm</span>
+            </span>
+          </div>
 
           {/* Hardware Relays Mini Status Bar */}
           {relays && (
             <div className="grid grid-cols-3 gap-1.5 pt-0.5">
               <div
-                className={`rounded-lg px-2 py-1 text-[10px] font-semibold text-center border transition-all ${relays.cooling
+                className={`rounded-xl px-2 py-1 text-[10px] font-semibold text-center border transition-all ${relays.cooling
                   ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
                   : 'bg-slate-950/40 border-slate-800/60 text-slate-500'
                   }`}
@@ -457,7 +523,7 @@ const ColdRoomProbeCard = memo(
                 {coolingLabel}: <strong className={relays.cooling ? 'text-emerald-400' : 'text-slate-400'}>{relays.cooling ? 'ON' : 'OFF'}</strong>
               </div>
               <div
-                className={`rounded-lg px-2 py-1 text-[10px] font-semibold text-center border transition-all ${relays.humi
+                className={`rounded-xl px-2 py-1 text-[10px] font-semibold text-center border transition-all ${relays.humi
                   ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
                   : 'bg-slate-950/40 border-slate-800/60 text-slate-500'
                   }`}
@@ -465,7 +531,7 @@ const ColdRoomProbeCard = memo(
                 Humi: <strong className={relays.humi ? 'text-sky-400' : 'text-slate-400'}>{relays.humi ? 'ON' : 'OFF'}</strong>
               </div>
               <div
-                className={`rounded-lg px-2 py-1 text-[10px] font-semibold text-center border transition-all ${relays.light
+                className={`rounded-xl px-2 py-1 text-[10px] font-semibold text-center border transition-all ${relays.light
                   ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
                   : 'bg-slate-950/40 border-slate-800/60 text-slate-500'
                   }`}
@@ -477,8 +543,8 @@ const ColdRoomProbeCard = memo(
 
           {/* SVG Trend Sparkline */}
           <div className="pt-1">
-            <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
-              <span>Telemetry Sparkline</span>
+            <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+              <span className="font-medium">Temperature Sparkline</span>
               {minT !== 'N/A' && minT !== maxT && (
                 <span className="font-mono text-slate-400">
                   {minT}° - {maxT}°C
@@ -491,7 +557,7 @@ const ColdRoomProbeCard = memo(
 
         {/* Card Footer: Action Bar */}
         <div className="mt-3.5 flex items-center justify-between border-t border-slate-800/60 pt-3 text-[11px] text-slate-400">
-          <span className="group-hover:text-emerald-400 transition-colors flex items-center gap-1 font-medium">
+          <span className="group-hover:text-emerald-400 transition-colors flex items-center gap-1 font-semibold">
             Inspect Analytics & Charts
           </span>
           <ChevronRight className="h-4 w-4 text-slate-500 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all" />
@@ -510,12 +576,12 @@ const ColdRoomProbeCard = memo(
     prev.relays?.cooling === next.relays?.cooling &&
     prev.relays?.humi === next.relays?.humi &&
     prev.relays?.light === next.relays?.light &&
-    prev.setpoints?.target_temp === next.setpoints?.target_temp &&
-    prev.setpoints?.target_humi === next.setpoints?.target_humi &&
+    prev.setpoints === next.setpoints &&
     (prev.history?.t?.length || 0) === (next.history?.t?.length || 0)
 );
 
 const LiveMonitoring = () => {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [initLoading, setInitLoading] = useState(true);
@@ -548,9 +614,7 @@ const LiveMonitoring = () => {
   const [multiSensorRelays, setMultiSensorRelays] = useState({});
   const [activeWarnings, setActiveWarnings] = useState([]);
   const [customSensorNames, setCustomSensorNames] = useState({});
-  const [sortBy, setSortBy] = useState('id'); // 'id', 'temp', 'humi'
-  const [selectedSensor, setSelectedSensor] = useState(null);
-  const [activeMultiTab, setActiveMultiTab] = useState('all'); // 'all' or 'S1'..'S7'
+  const [activeMultiTab, setActiveMultiTab] = useState('S1'); // 'S1'..'S7'
 
   // ── Office Control Dual Room Live States ────────────────────────────────────
   const [officeControlData, setOfficeControlData] = useState({ 1: null, 2: null, 3: null });
@@ -612,6 +676,12 @@ const LiveMonitoring = () => {
     const type = String(deviceMeta.deviceType || '').toLowerCase();
     const name = String(deviceMeta.name || '').toLowerCase();
     const mqttId = String(deviceMeta.mqttId || '').toLowerCase();
+
+    // STRICTLY EXCLUDE single Almora devices (almora1, almora2, almora3, sensor1, type almora/almora2)
+    if (type === 'almora' || type === 'almora2' || mqttId.startsWith('almora') || mqttId === 'sensor1') {
+      return false;
+    }
+
     return (
       type === 'multi_sensor' ||
       type === 'cold_storage' ||
@@ -619,8 +689,7 @@ const LiveMonitoring = () => {
       type === 'coldroom' ||
       name.includes('cold') ||
       name.includes('storage') ||
-      mqttId.includes('cold') ||
-      mqttId === 'control122'
+      name.includes('room')
     );
   }, [deviceMeta]);
 
@@ -641,16 +710,16 @@ const LiveMonitoring = () => {
   const isDeviceOnline = useMemo(() => {
     if (deviceMeta?.status === 'blocked') return false;
 
-    // Telemetry freshness window: 2 minutes (120,000 ms) with clock tolerance
-    const FRESHNESS_THRESHOLD_MS = 2 * 60 * 1000;
+    // Telemetry freshness window: 180 seconds or backend DB online state
+    const FRESHNESS_THRESHOLD_MS = 180 * 1000;
 
-    // 1. If we have liveDevice with a lastUpdated timestamp
+    // 1. Check liveDevice lastUpdated timestamp
     if (liveDevice?.lastUpdated) {
       const ts = new Date(typeof liveDevice.lastUpdated === 'string' && liveDevice.lastUpdated.includes(' ') && !liveDevice.lastUpdated.includes('T') ? liveDevice.lastUpdated.replace(' ', 'T') : liveDevice.lastUpdated).getTime();
       if (!isNaN(ts)) {
-        const diffMs = nowTime - ts;
-        if (diffMs < FRESHNESS_THRESHOLD_MS && diffMs > -2 * 60 * 1000) {
-          return liveDevice.status === 'online' || liveDevice.status === undefined;
+        const diffMs = Math.abs(nowTime - ts);
+        if (diffMs < FRESHNESS_THRESHOLD_MS || liveDevice.status === 'online') {
+          return true;
         }
       }
     }
@@ -660,32 +729,18 @@ const LiveMonitoring = () => {
     if (metaTs) {
       const ts = new Date(typeof metaTs === 'string' && metaTs.includes(' ') && !metaTs.includes('T') ? metaTs.replace(' ', 'T') : metaTs).getTime();
       if (!isNaN(ts)) {
-        const diffMs = nowTime - ts;
-        if (diffMs < FRESHNESS_THRESHOLD_MS && diffMs > -2 * 60 * 1000) {
-          return deviceMeta.status === 'online' || deviceMeta.status === undefined;
+        const diffMs = Math.abs(nowTime - ts);
+        if (diffMs < FRESHNESS_THRESHOLD_MS || deviceMeta.status === 'online') {
+          return true;
         }
       }
     }
 
-    return false;
+    return deviceMeta?.status === 'online';
   }, [nowTime, liveDevice, deviceMeta]);
 
   // ── Multi-Sensor Facility Aggregates (Summary KPI Cards) ───────────────────
   const multiSensorSummary = useMemo(() => {
-    if (!isDeviceOnline) {
-      return {
-        onlineCount: 0,
-        totalProbes: 7,
-        avgTemp: 'N/A',
-        minTemp: 'N/A',
-        maxTemp: 'N/A',
-        avgHumi: 'N/A',
-        minHumi: 'N/A',
-        maxHumi: 'N/A',
-        co2: 'N/A',
-      };
-    }
-
     let tempSum = 0, tempCount = 0, minT = Infinity, maxT = -Infinity;
     let humiSum = 0, humiCount = 0, minH = Infinity, maxH = -Infinity;
     let co2Val = null;
@@ -694,7 +749,8 @@ const LiveMonitoring = () => {
     DEFAULT_PROBE_PORTS.forEach((sKey) => {
       const probe = multiSensorData[sKey];
       if (!probe) return;
-      const isProbeOnline = isDeviceOnline && (probe.status === 'OK' || probe.status === 'online');
+      const hasValidData = (probe.t != null && Number(probe.t) > 0) || (probe.h != null && Number(probe.h) > 0);
+      const isProbeOnline = (isDeviceOnline || hasValidData) && (probe.status === 'OK' || probe.status === 'online' || hasValidData);
       if (isProbeOnline) online++;
 
       if (probe.t != null && Number(probe.t) > 0) {
@@ -717,7 +773,7 @@ const LiveMonitoring = () => {
     });
 
     return {
-      onlineCount: online,
+      onlineCount: isDeviceOnline ? Math.max(online, 1) : online,
       totalProbes: 7,
       avgTemp: tempCount > 0 ? (tempSum / tempCount).toFixed(1) : 'N/A',
       minTemp: minT !== Infinity ? minT.toFixed(1) : 'N/A',
@@ -740,7 +796,7 @@ const LiveMonitoring = () => {
     setChartData({});
     setActiveMetrics({});
     setActiveFields([]);
-    setActiveMultiTab('all');
+    setActiveMultiTab('S1');
     setMultiSensorData({});
     setSensorHistory({});
     setMultiSensorSetpoints({});
@@ -776,15 +832,9 @@ const LiveMonitoring = () => {
   const fetchLiveData = useCallback(() => {
     if (!selectedDeviceId) return;
 
-    const isOfficeControl = deviceMeta?.deviceType === 'office_control';
-    const isMultiSensor =
-      deviceMeta?.deviceType === 'multi_sensor' ||
-      deviceMeta?.deviceType === 'cold_storage' ||
-      deviceMeta?.deviceType === 'cold_room' ||
-      deviceMeta?.deviceType === 'coldroom' ||
-      (deviceMeta?.name && (deviceMeta.name.toLowerCase().includes('cold') || deviceMeta.name.toLowerCase().includes('storage'))) ||
-      deviceMeta?.mqttId === 'control122';
-    const isControlling = deviceMeta?.deviceType === 'controlling';
+    const isOfficeControl = isOfficeControlDevice;
+    const isMultiSensor = isMultiSensorDevice;
+    const isControlling = isControllingDevice;
 
     const url = isOfficeControl
       ? `${API_BASE}/api/devices/${selectedDeviceId}/analytics?room=both`
@@ -792,8 +842,21 @@ const LiveMonitoring = () => {
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
     fetch(url, { headers })
-      .then((res) => res.json())
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const text = await res.text();
+        if (!text || !text.trim()) return null;
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      })
       .then((result) => {
+        if (!result) {
+          setLoading(false);
+          return;
+        }
         const channel = result?.channel || {};
         const feeds = result?.feeds || [];
         const latestFeed = feeds[feeds.length - 1];
@@ -1147,29 +1210,24 @@ const LiveMonitoring = () => {
           deviceMeta?.name,
           deviceMeta?.deviceType === 'office_control' ? 'system2' : null,
           deviceMeta?.deviceType === 'controlling' ? 'controlling' : null,
+          isMultiSensorDevice ? 'cold_room' : null,
+          isMultiSensorDevice ? 'cold_storage' : null,
+          isMultiSensorDevice ? 'control123' : null,
           deviceMeta?.id,
           deviceMeta?._id,
           selectedDeviceId,
         ].filter(Boolean)
       )
     );
-  }, [deviceMeta, selectedDeviceId]);
+  }, [deviceMeta, selectedDeviceId, isMultiSensorDevice]);
 
   const handleBatchedPackets = useCallback(
     (packets) => {
       if (!packets || packets.length === 0) return;
 
-      const isMultiSensor =
-        deviceMeta?.deviceType === 'multi_sensor' ||
-        deviceMeta?.deviceType === 'cold_storage' ||
-        deviceMeta?.deviceType === 'cold_room' ||
-        deviceMeta?.deviceType === 'coldroom' ||
-        (deviceMeta?.name &&
-          (deviceMeta.name.toLowerCase().includes('cold') ||
-            deviceMeta.name.toLowerCase().includes('storage'))) ||
-        deviceMeta?.mqttId === 'control122';
-      const isOfficeControl = deviceMeta?.deviceType === 'office_control';
-      const isControlling = deviceMeta?.deviceType === 'controlling';
+      const isMultiSensor = isMultiSensorDevice;
+      const isOfficeControl = isOfficeControlDevice;
+      const isControlling = isControllingDevice;
 
       let latestTelemetryTimestamp = null;
       let hasMatchingTelemetry = false;
@@ -1190,27 +1248,30 @@ const LiveMonitoring = () => {
       packets.forEach((packet) => {
         if (!packet || !packet.data) return;
 
+        const payload = packet.data;
+        const rawPayload = payload.data || payload;
+
         // Verify that this packet belongs to the currently selected device or candidate identifiers
         const packetMqttId = String(packet.mqttId || '').toLowerCase();
         const packetDevId = String(packet.deviceId || '').toLowerCase();
         const topic = String(packet.topic || '').toLowerCase();
+        const pMqtt = String(rawPayload?.device || rawPayload?.device_id || rawPayload?.devId || packetMqttId || '').toLowerCase();
 
         const matchesDevice =
           (selectedDeviceId && packetDevId === String(selectedDeviceId).toLowerCase()) ||
+          candidateIdentifiers.length === 0 ||
           candidateIdentifiers.some(
             (cid) =>
               cid &&
               (packetMqttId === String(cid).toLowerCase() ||
                 packetDevId === String(cid).toLowerCase() ||
+                (pMqtt && pMqtt === String(cid).toLowerCase()) ||
                 topic.includes(String(cid).toLowerCase()))
           );
 
         if (!matchesDevice && candidateIdentifiers.length > 0) {
           return; // Skip packets belonging to other devices
         }
-
-        const payload = packet.data;
-        const rawPayload = payload.data || payload;
 
         // Parse genuine packet timestamp
         const rawTs =
@@ -1352,16 +1413,20 @@ const LiveMonitoring = () => {
               const newHist = { ...prev };
               Object.keys(normalizedSensors).forEach((sId) => {
                 const sensor = normalizedSensors[sId];
-                if (sensor.t > 0 || sensor.h > 0) {
+                if (sensor && (sensor.t !== undefined || sensor.h !== undefined)) {
                   const prevState =
                     newHist[sId] && typeof newHist[sId] === 'object' ? newHist[sId] : { t: [], h: [], co2: [] };
                   const prevT = Array.isArray(prevState.t) ? prevState.t : [];
                   const prevH = Array.isArray(prevState.h) ? prevState.h : [];
                   const prevCo2 = Array.isArray(prevState.co2) ? prevState.co2 : [];
 
-                  const newT = sensor.t > 0 ? [...prevT, { time: timeStr, value: sensor.t }].slice(-24) : prevT;
-                  const newH = sensor.h > 0 ? [...prevH, { time: timeStr, value: sensor.h }].slice(-24) : prevH;
-                  const newCo2 = sensor.co2 != null && sensor.co2 > 0 ? [...prevCo2, { time: timeStr, value: sensor.co2 }].slice(-24) : prevCo2;
+                  const tVal = Number(sensor.t);
+                  const hVal = Number(sensor.h);
+                  const co2Val = sensor.co2 != null ? Number(sensor.co2) : null;
+
+                  const newT = !isNaN(tVal) && sensor.t !== null ? [...prevT, { time: timeStr, value: tVal }].slice(-30) : prevT;
+                  const newH = !isNaN(hVal) && sensor.h !== null ? [...prevH, { time: timeStr, value: hVal }].slice(-30) : prevH;
+                  const newCo2 = co2Val !== null && !isNaN(co2Val) && co2Val > 0 ? [...prevCo2, { time: timeStr, value: co2Val }].slice(-30) : prevCo2;
 
                   newHist[sId] = {
                     t: newT,
@@ -1723,7 +1788,7 @@ const LiveMonitoring = () => {
         }, 2000);
       }
     },
-    [candidateIdentifiers, deviceMeta, selectedDeviceId]
+    [candidateIdentifiers, deviceMeta, selectedDeviceId, isMultiSensorDevice, isOfficeControlDevice, isControllingDevice]
   );
 
   // ── Step 3A: Direct Private Broker MQTT Connection (Fast-path when available) ──
@@ -1928,6 +1993,17 @@ const LiveMonitoring = () => {
               />
               {deviceMeta?.status === 'blocked' ? 'Blocked' : isDeviceOnline ? 'Online' : 'Offline'}
             </span>
+
+            {isMultiSensorDevice && (
+              <button
+                onClick={() => navigate(`/cold-storage?device=${selectedDeviceId}&mqttId=${deviceMeta?.mqttId || ''}`)}
+                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-semibold transition-all shadow-sm shadow-emerald-500/10 active:scale-95"
+                title="Open Cold Storage Setpoints & Schedule"
+              >
+                <Sliders className="h-3.5 w-3.5" />
+                <span>Cold Storage Settings</span>
+              </button>
+            )}
           </div>
 
           {/* Right: Last Updated & Refresh */}
@@ -2346,286 +2422,60 @@ const LiveMonitoring = () => {
         );
       })()}
 
-      {/* ── Multi-Sensor Cold Storage Matrix View ──────────────────────────── */}
+      {/* ── Cold Storage Multi-Room Live View (Matching Theme & Simplicity) ── */}
       {isMultiSensorDevice && (() => {
-        const sortedPorts = [...DEFAULT_PROBE_PORTS].sort((a, b) => {
-          if (sortBy === 'temp') return (multiSensorData[b]?.t || 0) - (multiSensorData[a]?.t || 0);
-          if (sortBy === 'humi') return (multiSensorData[b]?.h || 0) - (multiSensorData[a]?.h || 0);
-          return a.localeCompare(b);
-        });
+        const activeRoom = (!activeMultiTab || activeMultiTab === 'all') ? 'S1' : activeMultiTab;
+        const currentData = multiSensorData[activeRoom] || { t: null, h: null, co2: null };
+        const roomName = getProbeName(activeRoom, deviceMeta, customSensorNames);
+        const setpointInfo = resolveRoomSetpointInfo(multiSensorSetpoints[activeRoom], activeRoom);
+        const history = sensorHistory[activeRoom] || { t: [], h: [], co2: [] };
 
-        // Current focused room data if activeMultiTab is S1..S7
-        const isFocusedRoom = activeMultiTab !== 'all';
-        const focusedProbeData = isFocusedRoom ? multiSensorData[activeMultiTab] : null;
-        const focusedRoomName = isFocusedRoom ? getProbeName(activeMultiTab, deviceMeta, customSensorNames) : '';
-        const focusedHistT = isFocusedRoom ? (sensorHistory?.[activeMultiTab]?.t || []) : [];
-        const focusedHistH = isFocusedRoom ? (sensorHistory?.[activeMultiTab]?.h || []) : [];
-        const focusedHistCo2 = isFocusedRoom ? (sensorHistory?.[activeMultiTab]?.co2 || []) : [];
-        const focusedSetpoints = isFocusedRoom ? multiSensorSetpoints[activeMultiTab] : null;
-        const focusedRelays = isFocusedRoom ? multiSensorRelays[activeMultiTab] : null;
+        // Channel numbers for Modbus RTU 22-relay board
+        const roomIdx = parseInt(activeRoom.replace('S', ''), 10) - 1;
+        const chCool = (roomIdx * 3) + 1;
+        const chHumi = (roomIdx * 3) + 2;
+        const chLight = (roomIdx * 3) + 3;
+        const isS7 = activeRoom === 'S7';
+        const coolingLabel = isS7 ? 'Fanpad' : 'AC Cooling';
 
-        const focusedRoomIdx = isFocusedRoom ? parseInt(activeMultiTab.replace('S', ''), 10) - 1 : 0;
-        const focusedChCooling = (focusedRoomIdx * 3) + 1;
-        const focusedChHumi = (focusedRoomIdx * 3) + 2;
-        const focusedChLight = (focusedRoomIdx * 3) + 3;
-        const focusedIsS7 = activeMultiTab === 'S7';
-        const focusedCoolingLabel = focusedIsS7 ? 'Fanpad' : 'AC / Cooling';
+        const roomRelays = multiSensorRelays[activeRoom] || {};
+        const isCoolingOn = roomRelays.cooling ?? false;
+        const isHumiOn = roomRelays.humi ?? false;
+        const isLightOn = roomRelays.light ?? false;
 
-        const focusedAlarms = isFocusedRoom
-          ? activeWarnings.filter((w) => {
-            const text = typeof w === 'string' ? w.toLowerCase() : JSON.stringify(w).toLowerCase();
-            return text.includes(activeMultiTab.toLowerCase()) || text.includes(`room ${activeMultiTab.replace('S', '')}`);
-          })
-          : [];
-
-        const focusedTValues = focusedHistT
-          .map((d) => (typeof d === 'object' && d !== null ? d.value : Number(d)))
-          .filter((v) => Number.isFinite(v) && v > 0);
-        const focusedHValues = focusedHistH
-          .map((d) => (typeof d === 'object' && d !== null ? d.value : Number(d)))
-          .filter((v) => Number.isFinite(v) && v > 0);
-
-        const focusedMinT = focusedTValues.length > 0 ? Math.min(...focusedTValues).toFixed(1) : '--';
-        const focusedMaxT = focusedTValues.length > 0 ? Math.max(...focusedTValues).toFixed(1) : '--';
-        const focusedAvgT = focusedTValues.length > 0 ? (focusedTValues.reduce((a, b) => a + b, 0) / focusedTValues.length).toFixed(1) : '--';
-
-        const focusedMinH = focusedHValues.length > 0 ? Math.min(...focusedHValues).toFixed(1) : '--';
-        const focusedMaxH = focusedHValues.length > 0 ? Math.max(...focusedHValues).toFixed(1) : '--';
-        const focusedAvgH = focusedHValues.length > 0 ? (focusedHValues.reduce((a, b) => a + b, 0) / focusedHValues.length).toFixed(1) : '--';
+        const hasValidData = (currentData?.t != null && Number(currentData.t) > 0) || (currentData?.h != null && Number(currentData.h) > 0);
+        const isProbeOnline = isDeviceOnline && (currentData?.status === 'OK' || currentData?.status === 'online' || hasValidData);
 
         return (
           <div className="space-y-6">
-            {/* ── Active Hardware Alarm / System Normal Status Banner ── */}
-            {activeWarnings.length > 0 ? (
-              <motion.div
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="rounded-2xl border border-rose-500/40 bg-gradient-to-r from-rose-950/50 via-rose-900/30 to-slate-900/70 p-4 backdrop-blur-md shadow-lg shadow-rose-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-              >
-                <div className="flex items-start sm:items-center gap-3">
-                  <div className="rounded-xl bg-rose-500/20 border border-rose-500/30 p-2.5 text-rose-400 shrink-0 animate-pulse">
-                    <AlertTriangle className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-sm font-bold text-white tracking-wide">
-                        Cold Storage Hardware Warnings Active
-                      </h4>
-                      <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-bold font-mono text-rose-300 border border-rose-500/30">
-                        {activeWarnings.length} {activeWarnings.length === 1 ? 'Alert' : 'Alerts'}
-                      </span>
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-rose-200/90 font-medium">
-                      {activeWarnings.map((w, idx) => (
-                        <span
-                          key={idx}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-rose-900/50 border border-rose-700/40 px-2.5 py-0.5"
-                        >
-                          <span className="h-1.5 w-1.5 rounded-full bg-rose-400 animate-ping" />
-                          {typeof w === 'string' ? w : w.message || JSON.stringify(w)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                <div className="text-[11px] font-mono text-rose-300/90 shrink-0 sm:text-right">
-                  <span className="inline-block bg-rose-500/10 px-2.5 py-1 rounded-lg border border-rose-500/20">
-                    Warning Buzzer Relay Ch22 Active
-                  </span>
-                </div>
-              </motion.div>
-            ) : (
-              <></>
-            )}
-
-            {/* ── Top Summary KPI Strip ── */}
-            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-              {/* Card 1: Active Chambers */}
-              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/80 p-3.5 sm:p-5 backdrop-blur-sm hover:border-emerald-500/30 transition-all flex flex-col justify-between">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className={`rounded-xl p-2 shrink-0 ${isDeviceOnline ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-slate-800 border border-slate-700 text-slate-400'}`}>
-                      <Cpu className="h-4 w-4" />
-                    </div>
-                    <span className="text-xs font-semibold text-slate-300 truncate">Active Chambers</span>
-                  </div>
-                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shrink-0 ${isDeviceOnline
-                    ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
-                    : 'bg-slate-800 border border-slate-700 text-slate-400'
-                    }`}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${isDeviceOnline ? 'bg-emerald-400 animate-pulse-dot' : 'bg-slate-500'}`} />
-                    {isDeviceOnline ? `${multiSensorSummary.onlineCount}/${multiSensorSummary.totalProbes} Live` : 'Standby / Offline'}
-                  </span>
-                </div>
-                <div className="mt-3 flex items-baseline gap-1.5">
-                  <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
-                    {isDeviceOnline ? multiSensorSummary.onlineCount : 0}
-                  </span>
-                  <span className="text-xs text-slate-400 font-medium">/ {multiSensorSummary.totalProbes} online</span>
-                </div>
-                <p className="mt-2 text-[11px] text-slate-400 truncate">
-                  {isDeviceOnline ? 'Monitored Cold Storage Rooms (S1–S7)' : 'Awaiting Live Hardware Telemetry'}
-                </p>
-              </div>
-
-              {/* Card 2: Facility Average Temp */}
-              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/80 p-3.5 sm:p-5 backdrop-blur-sm hover:border-emerald-500/30 transition-all flex flex-col justify-between">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-2 text-emerald-400 shrink-0">
-                      <Thermometer className="h-4 w-4" />
-                    </div>
-                    <span className="text-xs font-semibold text-slate-300 truncate">Facility Avg Temp</span>
-                  </div>
-                  <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
-                    °C
-                  </span>
-                </div>
-                <div className="mt-3 flex items-baseline gap-1">
-                  {isDeviceOnline && multiSensorSummary.avgTemp !== 'N/A' ? (
-                    <>
-                      <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
-                        {multiSensorSummary.avgTemp}
-                      </span>
-                      <span className="text-xs text-slate-400 font-medium">°C</span>
-                    </>
-                  ) : (
-                    <span className="text-base font-semibold text-slate-400 font-mono tracking-wider">
-                      N/A
-                    </span>
-                  )}
-                </div>
-                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400 flex-wrap gap-1">
-                  <span>Min: <strong className="text-slate-200 font-mono">{multiSensorSummary.minTemp}°C</strong></span>
-                  <span>Max: <strong className="text-slate-200 font-mono">{multiSensorSummary.maxTemp}°C</strong></span>
-                </div>
-              </div>
-
-              {/* Card 3: Facility Average Humidity */}
-              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/80 p-3.5 sm:p-5 backdrop-blur-sm hover:border-emerald-500/30 transition-all flex flex-col justify-between">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-2 text-emerald-400 shrink-0">
-                      <Droplets className="h-4 w-4" />
-                    </div>
-                    <span className="text-xs font-semibold text-slate-300 truncate">Facility Avg Humidity</span>
-                  </div>
-                  <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
-                    %
-                  </span>
-                </div>
-                <div className="mt-3 flex items-baseline gap-1">
-                  {isDeviceOnline && multiSensorSummary.avgHumi !== 'N/A' ? (
-                    <>
-                      <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
-                        {multiSensorSummary.avgHumi}
-                      </span>
-                      <span className="text-xs text-slate-400 font-medium">%</span>
-                    </>
-                  ) : (
-                    <span className="text-base font-semibold text-slate-400 font-mono tracking-wider">
-                      N/A
-                    </span>
-                  )}
-                </div>
-                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400 flex-wrap gap-1">
-                  <span>Min: <strong className="text-slate-200 font-mono">{multiSensorSummary.minHumi}%</strong></span>
-                  <span>Max: <strong className="text-slate-200 font-mono">{multiSensorSummary.maxHumi}%</strong></span>
-                </div>
-              </div>
-
-              {/* Card 4: Atmosphere / CO2 */}
-              <div className="rounded-2xl border border-slate-800/80 bg-slate-900/80 p-3.5 sm:p-5 backdrop-blur-sm hover:border-emerald-500/30 transition-all flex flex-col justify-between">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-2 text-emerald-400 shrink-0">
-                      <Activity className="h-4 w-4" />
-                    </div>
-                    <span className="text-xs font-semibold text-slate-300 truncate">Chamber CO2</span>
-                  </div>
-                  <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
-                    PPM
-                  </span>
-                </div>
-                <div className="mt-3 flex items-baseline gap-1">
-                  {isDeviceOnline && multiSensorSummary.co2 != null && multiSensorSummary.co2 !== 'N/A' ? (
-                    <>
-                      <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
-                        {multiSensorSummary.co2}
-                      </span>
-                      <span className="text-xs text-slate-400 font-medium">ppm</span>
-                    </>
-                  ) : (
-                    <span className="text-base font-semibold text-slate-400 font-mono tracking-wider">
-                      N/A
-                    </span>
-                  )}
-                </div>
-                <p className="mt-2 text-[11px] text-slate-400 truncate">
-                  Controlled Air Atmosphere
-                </p>
-              </div>
-            </div>
-
-            {/* ── Navigation & Sort Bar (Responsive & Touch-Friendly) ── */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-2 sm:pb-0">
-              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none touch-pan-x pb-1 sm:pb-0 -mx-1 px-1">
-                {/* All Rooms Tab */}
-                <button
-                  onClick={() => setActiveMultiTab('all')}
-                  className={`relative shrink-0 flex items-center gap-2 px-4 sm:px-5 py-3 text-xs sm:text-sm font-semibold transition-all hover:text-white ${activeMultiTab === 'all' ? 'text-emerald-400' : 'text-slate-400'
-                    }`}
-                >
-                  <LayoutGrid className="h-4 w-4" />
-                  <span className="whitespace-nowrap">All Rooms Matrix</span>
-                  <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-slate-300 border border-slate-700">
-                    7
-                  </span>
-                  {activeMultiTab === 'all' && (
-                    <motion.div
-                      layoutId="activeMultiTabIndicator"
-                      className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500"
-                    />
-                  )}
-                </button>
-
-                {/* Individual Room Tabs (S1–S7) */}
+            {/* Room Selection Tabs */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-700/60 pb-px overflow-x-auto scrollbar-none gap-3">
+              <div className="flex items-center">
                 {DEFAULT_PROBE_PORTS.map((port) => {
-                  const pData = multiSensorData[port];
+                  const isActive = activeRoom === port;
                   const pName = getProbeName(port, deviceMeta, customSensorNames);
-                  const isOnline = isDeviceOnline && (pData?.status === 'OK' || pData?.status === 'online');
-                  const isActive = activeMultiTab === port;
-                  const hasAlarm = activeWarnings.some((w) => {
-                    const text = typeof w === 'string' ? w.toLowerCase() : JSON.stringify(w).toLowerCase();
-                    return text.includes(port.toLowerCase()) || text.includes(`room ${port.replace('S', '')}`);
-                  });
+                  const pData = multiSensorData[port];
 
                   return (
                     <button
                       key={port}
                       onClick={() => setActiveMultiTab(port)}
-                      className={`relative shrink-0 flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-3 text-xs font-semibold transition-all hover:text-white ${isActive ? 'text-emerald-400' : hasAlarm ? 'text-rose-400' : 'text-slate-400'
-                        }`}
+                      className={`relative px-4 sm:px-5 py-3.5 text-sm font-semibold transition-all hover:text-white whitespace-nowrap flex items-center gap-2 ${
+                        isActive ? 'text-emerald-400' : 'text-slate-400'
+                      }`}
                     >
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${hasAlarm ? 'bg-rose-500 animate-ping' : isOnline ? 'bg-emerald-400' : 'bg-slate-600'
-                          }`}
-                      />
-                      <span className="whitespace-nowrap">{pName}</span>
-                      <span className="font-mono text-[10px] text-slate-500">({port})</span>
+                      <span className="font-mono text-xs opacity-75">{port}</span>
+                      <span>{pName}</span>
                       {pData?.t != null && pData.t > 0 && (
-                        <span
-                          className={`rounded px-1.5 py-0.5 text-[10px] font-mono tabular-nums ${isActive
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : 'bg-slate-800/80 text-slate-300'
-                            }`}
-                        >
-                          {pData.t.toFixed(1)}°C
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                          isActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
+                        }`}>
+                          {Number(pData.t).toFixed(1)}°C
                         </span>
                       )}
                       {isActive && (
                         <motion.div
-                          layoutId="activeMultiTabIndicator"
+                          layoutId="activeColdRoomTabIndicator"
                           className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500"
                         />
                       )}
@@ -2633,559 +2483,99 @@ const LiveMonitoring = () => {
                   );
                 })}
               </div>
-
-              {activeMultiTab === 'all' && (
-                <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0 pt-1 sm:pt-0 sm:pl-4">
-                  <span className="text-[11px] text-slate-400 font-medium">Sort:</span>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1 text-xs text-slate-200 outline-none focus:border-emerald-500 transition-colors"
-                  >
-                    <option value="id">Port Sequence (S1–S7)</option>
-                    <option value="temp">Highest Temperature</option>
-                    <option value="humi">Highest Humidity</option>
-                  </select>
-                </div>
-              )}
+              <div className="flex items-center gap-2 pb-2 sm:pb-0">
+                <button
+                  onClick={() => navigate(`/cold-storage?device=${selectedDeviceId}&mqttId=${deviceMeta?.mqttId || ''}&room=${activeRoom}`)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition-all"
+                >
+                  <Sliders className="h-3.5 w-3.5" />
+                  <span>Configure Settings</span>
+                </button>
+              </div>
             </div>
 
-            {/* ── View 1: All Rooms 7-Card Matrix ── */}
-            {activeMultiTab === 'all' && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {sortedPorts.map((sensorId) => {
-                    const data = multiSensorData[sensorId] || { t: null, h: null, status: 'STANDBY' };
-                    const history = sensorHistory?.[sensorId] || { t: [], h: [] };
-                    const roomName = getProbeName(sensorId, deviceMeta, customSensorNames);
-                    const setpoints = multiSensorSetpoints[sensorId];
-                    const relays = multiSensorRelays[sensorId];
-                    const hasAlarm = activeWarnings.some((w) => {
-                      const text = typeof w === 'string' ? w.toLowerCase() : JSON.stringify(w).toLowerCase();
-                      return text.includes(sensorId.toLowerCase()) || text.includes(`room ${sensorId.replace('S', '')}`);
-                    });
+            {/* Main Content Grid: 1 col Live Readings, 2 cols Trend Charts */}
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+              {/* Left Column: Live Readings */}
+              <div className="space-y-4 xl:col-span-1">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+                  Live Readings
+                </h3>
 
-                    return (
-                      <ColdRoomProbeCard
-                        key={sensorId}
-                        sensorId={sensorId}
-                        roomName={roomName}
-                        data={data}
-                        history={history}
-                        setpoints={setpoints}
-                        relays={relays}
-                        hasAlarm={hasAlarm}
-                        isDeviceOnline={isDeviceOnline}
-                        onSelect={setSelectedSensor}
-                        onFocus={(id) => setActiveMultiTab(id)}
-                      />
-                    );
-                  })}
-                </div>
-
-                {Object.keys(multiSensorData).length === 0 && !loading && (
-                  <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/30 py-12 text-center text-slate-400 text-sm">
-                    <p className="animate-pulse text-emerald-400 font-semibold mb-1">
-                      Listening for Multi-Sensor Telemetry Packets...
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Cold storage telemetry will automatically stream here over MQTT / SSE.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── View 2: Single Room Detailed Focus View ── */}
-            {activeMultiTab !== 'all' && (
-              <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-                {/* Left Column (1 col): Live Readings, Actuators & Targets */}
-                <div className="space-y-4 xl:col-span-1">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-2">
-                      Live Chamber Focus ({focusedRoomName})
-                    </h3>
-                    <button
-                      onClick={() => setActiveMultiTab('all')}
-                      className="flex items-center gap-1 text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
-                    >
-                      <ArrowLeft className="h-3.5 w-3.5" /> All Rooms
-                    </button>
-                  </div>
-
-                  {/* Room Identity Card */}
-                  <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-sm">
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <span className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 text-xs font-mono font-bold text-emerald-400">
-                          {activeMultiTab}
-                        </span>
-                        <div>
-                          <h4 className="text-sm font-bold text-white">{focusedRoomName}</h4>
-                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                            <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
-                              <Sprout className="h-3 w-3" />
-                              {focusedSetpoints?.crop_name || DEFAULT_COLD_ROOM_CROPS[activeMultiTab] || 'Strawberry'}
-                            </span>
-                            <span className="text-slate-600">•</span>
-                            <span className="text-[11px] text-blue-400 font-semibold flex items-center gap-1">
-                              <Layers className="h-3 w-3" />
-                              {focusedSetpoints?.setup_name || DEFAULT_COLD_ROOM_SETUPS[activeMultiTab] || 'Cold Storage'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <span
-                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${isDeviceOnline && (focusedProbeData?.status === 'OK' || focusedProbeData?.status === 'online')
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : 'bg-slate-800 text-slate-400 border border-slate-700'
-                          }`}
-                      >
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${isDeviceOnline && (focusedProbeData?.status === 'OK' || focusedProbeData?.status === 'online')
-                            ? 'bg-emerald-400 animate-pulse-dot'
-                            : 'bg-slate-500'
-                            }`}
-                        />
-                        {isDeviceOnline && (focusedProbeData?.status === 'OK' || focusedProbeData?.status === 'online')
-                          ? 'Online'
-                          : 'Standby'}
-                      </span>
-                    </div>
-
-                    {focusedAlarms.length > 0 && (
-                      <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-950/40 p-2.5 text-xs text-rose-300 flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
-                        <span className="truncate">{focusedAlarms.join(' • ')}</span>
-                      </div>
-                    )}
-                  </div>
-
-
-                  {/* Target Setpoints & Tolerance Bounds */}
-                  {focusedSetpoints && (
-                    <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-sm space-y-3">
-                      <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                        <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                          <Layers className="h-3.5 w-3.5 text-emerald-400" /> Target Setpoints & Bounds
-                        </span>
-                        {focusedSetpoints.stage_name && (
-                          <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                            {focusedSetpoints.stage_name}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="rounded-xl bg-slate-950/40 p-2.5 border border-slate-800/60">
-                          <span className="text-[10px] text-slate-500 block mb-0.5">Target Temp</span>
-                          <div className="text-lg font-bold text-white font-mono">
-                            {focusedSetpoints.target_temp != null ? `${focusedSetpoints.target_temp}°C` : 'N/A'}
-                          </div>
-                          {focusedSetpoints.temp_range != null && (
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              ±{focusedSetpoints.temp_range}°C band
-                            </span>
-                          )}
-                          {(focusedSetpoints.min_temp != null || focusedSetpoints.max_temp != null) && (
-                            <div className="mt-1 text-[9px] text-slate-500 font-mono truncate">
-                              Safety: {focusedSetpoints.min_temp ?? 0}° - {focusedSetpoints.max_temp ?? 50}°C
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="rounded-xl bg-slate-950/40 p-2.5 border border-slate-800/60">
-                          <span className="text-[10px] text-slate-500 block mb-0.5">Target Humidity</span>
-                          <div className="text-lg font-bold text-white font-mono">
-                            {focusedSetpoints.target_humi != null ? `${focusedSetpoints.target_humi}%` : 'N/A'}
-                          </div>
-                          {focusedSetpoints.humi_range != null && (
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              ±{focusedSetpoints.humi_range}% band
-                            </span>
-                          )}
-                          {(focusedSetpoints.min_humi != null || focusedSetpoints.max_humi != null) && (
-                            <div className="mt-1 text-[9px] text-slate-500 font-mono truncate">
-                              Safety: {focusedSetpoints.min_humi ?? 0}% - {focusedSetpoints.max_humi ?? 100}%
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Big Metric Cards Grid */}
-                  <div className="space-y-3">
-                    <BigMetric
-                      label={`${focusedRoomName} Temperature`}
-                      value={focusedProbeData?.t}
-                      unit="°C"
-                      icon={Thermometer}
-                      type="temperature"
-                      isOnline={isDeviceOnline}
-                    />
-
-                    <BigMetric
-                      label={`${focusedRoomName} Humidity`}
-                      value={focusedProbeData?.h}
-                      unit="%"
-                      icon={Droplets}
-                      type="moisture"
-                      isOnline={isDeviceOnline}
-                    />
-
-                    {focusedProbeData?.co2 != null && (
-                      <BigMetric
-                        label={`${focusedRoomName} CO2 Level`}
-                        value={focusedProbeData?.co2}
-                        unit="ppm"
-                        icon={Activity}
-                        type="co2"
-                        isOnline={isDeviceOnline}
-                      />
-                    )}
-                  </div>
-
-
-                </div>
-
-                {/* Right Column (2 cols): Real-time Trend Charts */}
-                <div className="space-y-4 xl:col-span-2">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
-                      Real-Time Telemetry Trends ({focusedRoomName})
-                    </h3>
-                    <button
-                      onClick={() => setSelectedSensor(activeMultiTab)}
-                      className="flex items-center gap-1 text-xs text-slate-400 hover:text-emerald-400 transition-colors"
-                      title="Inspect in full modal"
-                    >
-                      <Maximize2 className="h-3.5 w-3.5" /> Fullscreen Modal
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <LiveChart
-                      data={focusedHistT}
-                      type="temperature"
-                      title={`${focusedRoomName} Temperature`}
-                      unit="°C"
-                      subtitle="Continuous Telemetry Feed"
-                    />
-
-                    <LiveChart
-                      data={focusedHistH}
-                      type="moisture"
-                      title={`${focusedRoomName} Humidity`}
-                      unit="%"
-                      subtitle="Continuous Telemetry Feed"
-                    />
-
-                    {focusedProbeData?.co2 != null && (
-                      <div className="md:col-span-2">
-                        <LiveChart
-                          data={(focusedHistCo2.length > 0 ? focusedHistCo2 : focusedHistT).map((pt) => ({
-                            time: pt.time,
-                            value: pt.value ?? focusedProbeData?.co2 ?? 420,
-                          }))}
-                          type="co2"
-                          title={`${focusedRoomName} CO2 Atmospheric Trend`}
-                          unit="ppm"
-                          subtitle="Atmospheric Carbon Dioxide"
-                        />
-                      </div>
-                    )}
-                  </div>
-                  {/* Hardware Actuators & Relays State */}
-                  <div className="rounded-2xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-sm space-y-3">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                      <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                        <Zap className="h-3.5 w-3.5 text-emerald-400" /> Chamber Actuators (Relays)
-                      </span>
-                      <span className="text-[10px] font-mono text-slate-400">
-                        Channels {focusedChCooling}, {focusedChHumi}, {focusedChLight}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 text-xs">
-                      {/* Cooling / AC / Fanpad */}
-                      <div
-                        className={`rounded-xl p-2.5 border text-center transition-all ${focusedRelays?.cooling
-                          ? 'bg-emerald-500/15 border-emerald-500/30 shadow-sm shadow-emerald-500/10'
-                          : 'bg-slate-950/40 border-slate-800/60'
-                          }`}
-                      >
-                        <div className="flex items-center justify-center mb-1">
-                          {focusedIsS7 ? (
-                            <Fan
-                              className={`h-4 w-4 ${focusedRelays?.cooling ? 'text-emerald-400 animate-spin' : 'text-slate-500'
-                                }`}
-                            />
-                          ) : (
-                            <Thermometer
-                              className={`h-4 w-4 ${focusedRelays?.cooling ? 'text-emerald-400' : 'text-slate-500'
-                                }`}
-                            />
-                          )}
-                        </div>
-                        <div className="text-[10px] font-medium text-slate-400 truncate">{focusedCoolingLabel}</div>
-                        <div className="text-[9px] text-slate-500 font-mono">Ch {focusedChCooling}</div>
-                        <div
-                          className={`mt-1 text-[11px] font-bold font-mono ${focusedRelays?.cooling ? 'text-emerald-300' : 'text-slate-500'
-                            }`}
-                        >
-                          {focusedRelays?.cooling ? 'ON' : 'OFF'}
-                        </div>
-                      </div>
-
-                      {/* Humidifier */}
-                      <div
-                        className={`rounded-xl p-2.5 border text-center transition-all ${focusedRelays?.humi
-                          ? 'bg-sky-500/15 border-sky-500/30 shadow-sm shadow-sky-500/10'
-                          : 'bg-slate-950/40 border-slate-800/60'
-                          }`}
-                      >
-                        <div className="flex items-center justify-center mb-1">
-                          <Droplets
-                            className={`h-4 w-4 ${focusedRelays?.humi ? 'text-sky-400' : 'text-slate-500'}`}
-                          />
-                        </div>
-                        <div className="text-[10px] font-medium text-slate-400 truncate">Humidifier</div>
-                        <div className="text-[9px] text-slate-500 font-mono">Ch {focusedChHumi}</div>
-                        <div
-                          className={`mt-1 text-[11px] font-bold font-mono ${focusedRelays?.humi ? 'text-sky-300' : 'text-slate-500'
-                            }`}
-                        >
-                          {focusedRelays?.humi ? 'ON' : 'OFF'}
-                        </div>
-                      </div>
-
-                      {/* Grow Lights */}
-                      <div
-                        className={`rounded-xl p-2.5 border text-center transition-all ${focusedRelays?.light
-                          ? 'bg-amber-500/15 border-amber-500/30 shadow-sm shadow-amber-500/10'
-                          : 'bg-slate-950/40 border-slate-800/60'
-                          }`}
-                      >
-                        <div className="flex items-center justify-center mb-1">
-                          <Sun
-                            className={`h-4 w-4 ${focusedRelays?.light ? 'text-amber-400' : 'text-slate-500'}`}
-                          />
-                        </div>
-                        <div className="text-[10px] font-medium text-slate-400 truncate">Grow Lights</div>
-                        <div className="text-[9px] text-slate-500 font-mono">Ch {focusedChLight}</div>
-                        <div
-                          className={`mt-1 text-[11px] font-bold font-mono ${focusedRelays?.light ? 'text-amber-300' : 'text-slate-500'
-                            }`}
-                        >
-                          {focusedRelays?.light ? 'ON' : 'OFF'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* ── Multi-Sensor Sensor Detail Modal (Theme Elevated) ─────────────── */}
-      {selectedSensor && multiSensorData[selectedSensor] && (() => {
-        const modalData = multiSensorData[selectedSensor];
-        const modalRoomName = getProbeName(selectedSensor, deviceMeta, customSensorNames);
-        const modalSetpoints = multiSensorSetpoints[selectedSensor];
-        const modalRelays = multiSensorRelays[selectedSensor];
-        const modalIdx = parseInt(selectedSensor.replace('S', ''), 10) - 1;
-        const modalChCooling = (modalIdx * 3) + 1;
-        const modalChHumi = (modalIdx * 3) + 2;
-        const modalChLight = (modalIdx * 3) + 3;
-        const modalIsS7 = selectedSensor === 'S7';
-        const modalCoolingLabel = modalIsS7 ? 'Fanpad' : 'AC / Cooling';
-
-        return (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96 }}
-              className="w-full max-w-4xl bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-y-auto max-h-[90vh]"
-            >
-              <button
-                onClick={() => setSelectedSensor(null)}
-                className="absolute top-5 right-5 rounded-full p-2 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
-
-              {/* Modal Header */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-6 sm:mb-8">
-                <div className="p-3 sm:p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl shrink-0">
-                  <Cpu className="h-6 w-6 sm:h-7 sm:w-7 text-emerald-400" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-xs font-mono font-bold text-emerald-400">
-                      {selectedSensor}
-                    </span>
-                    <h2 className="text-xl sm:text-2xl font-bold text-white tracking-wide truncate">
-                      {modalRoomName}
-                    </h2>
-                    {modalSetpoints?.stage_name && (
-                      <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 text-[10px] font-bold text-emerald-300">
-                        {modalSetpoints.stage_name}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-slate-400 block truncate">
-                    Live Telemetry Analysis & Historical Trends • Updated {formatTimestamp(liveDevice?.lastUpdated)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Live KPI Tiles */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                <div className="bg-slate-950/60 p-4 sm:p-5 rounded-2xl border border-slate-800/80 hover:border-emerald-500/20 transition-all flex flex-col justify-center">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-xs text-slate-400 flex items-center gap-1.5 font-medium">
-                      <Thermometer className="h-4 w-4 text-emerald-400" /> Live Temperature
-                    </p>
-                    {modalSetpoints?.target_temp != null && (
-                      <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                        Target: {modalSetpoints.target_temp}°C
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    {isDeviceOnline && modalData?.t != null && Number(modalData.t) > 0 ? (
-                      <>
-                        <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
-                          {Number(modalData.t).toFixed(2)}
-                        </span>
-                        <span className="text-xs text-slate-400 font-medium">°C</span>
-                      </>
-                    ) : (
-                      <span className="text-base font-semibold text-slate-400 font-mono tracking-wider">
-                        N/A
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="bg-slate-950/60 p-4 sm:p-5 rounded-2xl border border-slate-800/80 hover:border-emerald-500/20 transition-all flex flex-col justify-center">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-xs text-slate-400 flex items-center gap-1.5 font-medium">
-                      <Droplets className="h-4 w-4 text-emerald-400" /> Live Humidity
-                    </p>
-                    {modalSetpoints?.target_humi != null && (
-                      <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                        Target: {modalSetpoints.target_humi}%
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    {isDeviceOnline && modalData?.h != null && Number(modalData.h) > 0 ? (
-                      <>
-                        <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
-                          {Number(modalData.h).toFixed(2)}
-                        </span>
-                        <span className="text-xs text-slate-400 font-medium">%</span>
-                      </>
-                    ) : (
-                      <span className="text-base font-semibold text-slate-400 font-mono tracking-wider">
-                        N/A
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="bg-slate-950/60 p-4 sm:p-5 rounded-2xl border border-slate-800/80 hover:border-emerald-500/20 transition-all flex flex-col justify-center sm:col-span-2 lg:col-span-1">
-                  <p className="text-xs text-slate-400 mb-1.5 flex items-center gap-1.5 font-medium">
-                    <Activity className="h-4 w-4 text-emerald-400" /> Chamber CO2
-                  </p>
-                  <div className="flex items-baseline gap-1">
-                    {isDeviceOnline && modalData?.co2 != null && Number(modalData.co2) > 0 ? (
-                      <>
-                        <span className="text-2xl sm:text-3xl font-bold text-white tabular-nums tracking-tight">
-                          {modalData.co2}
-                        </span>
-                        <span className="text-xs text-slate-400 font-medium">ppm</span>
-                      </>
-                    ) : (
-                      <span className="text-base font-semibold text-slate-400 font-mono tracking-wider">
-                        N/A
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Hardware Relays Status Row */}
-              {modalRelays && (
-                <div className="mb-6 rounded-2xl border border-slate-800/80 bg-slate-950/50 p-4">
-                  <div className="flex items-center justify-between text-xs font-semibold text-slate-300 mb-3">
-                    <span className="flex items-center gap-1.5">
-                      <Zap className="h-3.5 w-3.5 text-emerald-400" /> Actuator Relay States
-                    </span>
-                    <span className="text-[10px] font-mono text-slate-400">
-                      Channels {modalChCooling}, {modalChHumi}, {modalChLight}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div
-                      className={`rounded-xl p-3 border text-center ${modalRelays.cooling
-                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
-                        : 'bg-slate-900/60 border-slate-800 text-slate-500'
-                        }`}
-                    >
-                      <div className="text-[11px] font-medium">{modalCoolingLabel} (Ch {modalChCooling})</div>
-                      <div className="text-sm font-bold font-mono mt-1">
-                        {modalRelays.cooling ? 'ACTIVE (ON)' : 'OFF'}
-                      </div>
-                    </div>
-                    <div
-                      className={`rounded-xl p-3 border text-center ${modalRelays.humi
-                        ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
-                        : 'bg-slate-900/60 border-slate-800 text-slate-500'
-                        }`}
-                    >
-                      <div className="text-[11px] font-medium">Humidifier (Ch {modalChHumi})</div>
-                      <div className="text-sm font-bold font-mono mt-1">
-                        {modalRelays.humi ? 'ACTIVE (ON)' : 'OFF'}
-                      </div>
-                    </div>
-                    <div
-                      className={`rounded-xl p-3 border text-center ${modalRelays.light
-                        ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
-                        : 'bg-slate-900/60 border-slate-800 text-slate-500'
-                        }`}
-                    >
-                      <div className="text-[11px] font-medium">Grow Lights (Ch {modalChLight})</div>
-                      <div className="text-sm font-bold font-mono mt-1">
-                        {modalRelays.light ? 'ACTIVE (ON)' : 'OFF'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Live Trend Charts in Modal */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <LiveChart
-                  data={sensorHistory?.[selectedSensor]?.t || []}
-                  type="temperature"
-                  title={`${modalRoomName} Temperature Trend`}
+                <BigMetric
+                  label="Temperature"
+                  value={currentData.t}
                   unit="°C"
+                  icon={Thermometer}
+                  type="temperature"
+                  isOnline={isProbeOnline}
                 />
-                <LiveChart
-                  data={sensorHistory?.[selectedSensor]?.h || []}
-                  type="moisture"
-                  title={`${modalRoomName} Humidity Trend`}
+
+                <BigMetric
+                  label="Humidity"
+                  value={currentData.h}
                   unit="%"
+                  icon={Droplets}
+                  type="moisture"
+                  isOnline={isProbeOnline}
+                />
+
+                <BigMetric
+                  label="CO2 Concentration"
+                  value={currentData.co2}
+                  unit="ppm"
+                  icon={Activity}
+                  type="co2"
+                  isOnline={isProbeOnline && currentData.co2 != null}
                 />
               </div>
-            </motion.div>
+
+              {/* Right Column: Trend Charts */}
+              <div className="space-y-4 xl:col-span-2">
+                <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+                  Trend Charts
+                </h3>
+
+                {(() => {
+                  const tChartData = (history.t && history.t.length > 0)
+                    ? history.t
+                    : (currentData.t != null && !isNaN(currentData.t) ? [{ time: 'Live', value: Number(currentData.t) }] : []);
+
+                  const hChartData = (history.h && history.h.length > 0)
+                    ? history.h
+                    : (currentData.h != null && !isNaN(currentData.h) ? [{ time: 'Live', value: Number(currentData.h) }] : []);
+
+                  const co2ChartData = (history.co2 && history.co2.length > 0)
+                    ? history.co2
+                    : (currentData.co2 != null && !isNaN(currentData.co2) && Number(currentData.co2) > 0
+                        ? [{ time: 'Live', value: Number(currentData.co2) }]
+                        : []);
+
+                  return (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <LiveChart
+                        data={tChartData}
+                        type="temperature"
+                        title={`${roomName} Temperature Trend`}
+                        unit="°C"
+                      />
+                      <LiveChart
+                        data={hChartData}
+                        type="moisture"
+                        title={`${roomName} Humidity Trend`}
+                        unit="%"
+                      />
+                      <LiveChart
+                        data={co2ChartData}
+                        type="co2"
+                        title={`${roomName} CO2 Trend`}
+                        unit="ppm"
+                      />
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
           </div>
         );
       })()}

@@ -22,24 +22,15 @@ const resolveDeviceId = async (mqttId, topic) => {
     return deviceCache.get(cacheKey);
   }
 
-  // Determine device type criteria based on the topic structure
-  let typeCriteria = {};
-  if (topic.includes('/monitor/')) {
-    typeCriteria = { deviceType: 'controlling' };
-  } else if (topic.includes('/room1/') || topic.includes('/room2/') || topic.includes('/room3/')) {
-    typeCriteria = { deviceType: { $in: ['office_control', 'system2', 'monit', 'monnet'] } };
-  } else {
-    // default/multi_sensor
-    typeCriteria = { deviceType: { $nin: ['controlling', 'office_control', 'system2'] } };
-  }
-
-  // Look up device in database using MQTT ID, device name, or ObjectId
+  // Look up device in database strictly using exact MQTT ID, name, deviceName, or ObjectId
   let device = null;
   try {
+    const cleanId = mqttId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     device = await Device.findOne({
       $or: [
-        { mqttId: { $regex: new RegExp(`^${mqttId}$`, 'i') } },
-        { name: { $regex: new RegExp(`^${mqttId}$`, 'i') } },
+        { mqttId: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
+        { name: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
+        { deviceName: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
         { _id: mongoose.Types.ObjectId.isValid(mqttId) ? mqttId : null }
       ].filter(Boolean)
     });
@@ -103,19 +94,95 @@ const startMqttSubscriber = () => {
       const parsedTime = rawTs && !isNaN(new Date(typeof rawTs === 'string' && rawTs.includes(' ') && !rawTs.includes('T') ? rawTs.replace(' ', 'T') : rawTs).getTime())
         ? new Date(typeof rawTs === 'string' && rawTs.includes(' ') && !rawTs.includes('T') ? rawTs.replace(' ', 'T') : rawTs)
         : null;
-      const packetTimestamp = parsedTime || (isRetain ? null : new Date());
+      
+      const now = new Date();
+      // Live incoming packet (!isRetain) is 100% fresh right now
+      const isFresh = !isRetain || Boolean(parsedTime && Math.abs(now.getTime() - parsedTime.getTime()) < 3 * 60 * 1000);
+      const packetTimestamp = !isRetain ? now : (parsedTime || now);
+
+      // Keep local JSON files synced for immediate API response across all topics
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const rootDir = path.resolve(__dirname, '../..');
+
+        if (payloadData?.crop_programs && typeof payloadData.crop_programs === 'object') {
+          const cropFile = path.join(rootDir, 'crop_programs.json');
+          let curProgs = {};
+          if (fs.existsSync(cropFile)) {
+            try { curProgs = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
+          }
+          const updated = { ...curProgs, ...payloadData.crop_programs };
+          fs.writeFileSync(cropFile, JSON.stringify(updated, null, 4));
+        }
+
+        const targetIds = Array.from(new Set([mqttId, 'cold_room', 'cold_storage', 'control123'].filter(Boolean)));
+
+        if (payloadData?.sensor_setpoints && typeof payloadData.sensor_setpoints === 'object') {
+          for (const id of targetIds) {
+            const setpFile = path.join(rootDir, `setpoints_${id}.json`);
+            let curSetps = {};
+            if (fs.existsSync(setpFile)) {
+              try { curSetps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
+            }
+            const updated = { ...curSetps, ...payloadData.sensor_setpoints };
+            fs.writeFileSync(setpFile, JSON.stringify(updated, null, 4));
+          }
+        } else if (payloadData?.port && payloadData?.settings) {
+          for (const id of targetIds) {
+            const setpFile = path.join(rootDir, `setpoints_${id}.json`);
+            let curSetps = {};
+            if (fs.existsSync(setpFile)) {
+              try { curSetps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
+            }
+            if (!curSetps[payloadData.port]) curSetps[payloadData.port] = {};
+            curSetps[payloadData.port] = { ...curSetps[payloadData.port], ...payloadData };
+            fs.writeFileSync(setpFile, JSON.stringify(curSetps, null, 4));
+          }
+        }
+
+        if (payloadData?.system_config && typeof payloadData.system_config === 'object') {
+          for (const id of targetIds) {
+            const cfgFile = path.join(rootDir, `config_${id}.json`);
+            let curCfg = {};
+            if (fs.existsSync(cfgFile)) {
+              try { curCfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch (e) { }
+            }
+            const updated = { ...curCfg, ...payloadData.system_config };
+            fs.writeFileSync(cfgFile, JSON.stringify(updated, null, 4));
+          }
+        } else if (payloadData?.upload_frequency_min !== undefined || payloadData?.upload_hours !== undefined || payloadData?.temp_alarm_offset !== undefined) {
+          for (const id of targetIds) {
+            const cfgFile = path.join(rootDir, `config_${id}.json`);
+            let curCfg = {};
+            if (fs.existsSync(cfgFile)) {
+              try { curCfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch (e) { }
+            }
+            const updated = {
+              ...curCfg,
+              ...(payloadData.upload_hours !== undefined ? { upload_hours: payloadData.upload_hours } : {}),
+              ...(payloadData.upload_mins !== undefined ? { upload_mins: payloadData.upload_mins } : {}),
+              ...(payloadData.upload_secs !== undefined ? { upload_secs: payloadData.upload_secs } : {}),
+              ...(payloadData.upload_frequency_min !== undefined ? { upload_frequency_min: payloadData.upload_frequency_min } : {}),
+              ...(payloadData.upload_frequency_sec !== undefined ? { upload_frequency_sec: payloadData.upload_frequency_sec } : {}),
+              ...(payloadData.temp_alarm_offset !== undefined ? { temp_alarm_offset: payloadData.temp_alarm_offset } : {}),
+              ...(payloadData.humi_alarm_offset !== undefined ? { humi_alarm_offset: payloadData.humi_alarm_offset } : {}),
+              ...(payloadData.sensor_names ? { sensor_names: payloadData.sensor_names } : {})
+            };
+            fs.writeFileSync(cfgFile, JSON.stringify(updated, null, 4));
+          }
+        }
+      } catch (fErr) { }
 
       // Stream setpoint updates real-time via SSE to web dashboard
       if (topic.includes('/setpoints/')) {
         const deviceId = await resolveDeviceId(mqttId, topic);
-        const now = Date.now();
-        const isFresh = !isRetain && packetTimestamp && (now - packetTimestamp.getTime() < 2 * 60 * 1000);
 
         if (deviceId) {
           const updateFields = {};
           if (isFresh) {
             updateFields.status = 'online';
-            updateFields.lastUpdated = packetTimestamp;
+            updateFields.lastUpdated = now;
           }
           const incomingCrop = payloadData?.crop_name || payloadData?.['Crop Name'] || payloadData?.cropName;
           const incomingSetup = payloadData?.setup_name || payloadData?.['Setup Name'] || payloadData?.['Setup Details'] || payloadData?.setupName;
@@ -126,13 +193,14 @@ const startMqttSubscriber = () => {
             Device.findByIdAndUpdate(deviceId, updateFields).catch(() => { });
           }
         }
+
         telemetryEmitter.emit('telemetry', {
           deviceId: deviceId ? String(deviceId) : null,
           mqttId,
           topic,
           data: payloadData,
           isRetain,
-          timestamp: packetTimestamp || new Date()
+          timestamp: packetTimestamp || now
         });
 
         // If packet contains sensor_data, queue telemetry document for history
@@ -158,7 +226,7 @@ const startMqttSubscriber = () => {
               mqttId,
               topic: `inhydro/${mqttId}/telemetry/live`,
               data: normData,
-              timestamp: packetTimestamp || new Date()
+              timestamp: packetTimestamp || now
             });
           }
         }
@@ -175,18 +243,18 @@ const startMqttSubscriber = () => {
         topic,
         data: payloadData,
         isRetain,
-        timestamp: packetTimestamp || new Date()
+        timestamp: packetTimestamp || now
       });
 
       if (deviceId) {
         // Check if device is blocked (cached for 10 seconds to prevent DB saturation)
-        const now = Date.now();
+        const nowMs = now.getTime();
         let cachedStatus = deviceStatusCache.get(String(deviceId));
-        if (!cachedStatus || now - cachedStatus.lastCheck > 10000) {
+        if (!cachedStatus || nowMs - cachedStatus.lastCheck > 10000) {
           const deviceCheck = await Device.findById(deviceId).select('status');
           cachedStatus = {
             status: deviceCheck ? deviceCheck.status : 'active',
-            lastCheck: now,
+            lastCheck: nowMs,
             lastUpdate: cachedStatus ? cachedStatus.lastUpdate : 0
           };
           deviceStatusCache.set(String(deviceId), cachedStatus);
@@ -196,20 +264,22 @@ const startMqttSubscriber = () => {
           return; // Device is blocked, ignore telemetry
         }
 
-        // Only mark online if packet is fresh (not a stale retained message)
-        const tsForCheck = packetTimestamp ? packetTimestamp.getTime() : 0;
-        const isFresh = !isRetain && tsForCheck > 0 && (now - tsForCheck < 2 * 60 * 1000);
-
-        // Throttle DB online status update to at most once per 15 seconds per device
-        if (isFresh && (now - cachedStatus.lastUpdate > 15000)) {
-          cachedStatus.lastUpdate = now;
+        // Update DB online status for fresh packets
+        if (isFresh && (nowMs - cachedStatus.lastUpdate > 10000 || cachedStatus.status !== 'online')) {
+          cachedStatus.lastUpdate = nowMs;
+          cachedStatus.status = 'online';
           Device.findByIdAndUpdate(deviceId, {
             status: 'online',
-            lastUpdated: packetTimestamp
+            lastUpdated: now
           }).catch(err => {
             console.error(`[MQTT Subscriber] Failed to update device online status: ${err.message}`);
           });
         }
+      }
+
+      // Heartbeat packets only refresh online status, no telemetry doc needed
+      if (topic.includes('/heartbeat') || topic.endsWith('/command/status')) {
+        return;
       }
 
       // ── High-Throughput Bulk Write Queue (P3 Optimization) ──
@@ -307,6 +377,35 @@ process.on('SIGTERM', async () => {
   if (flushTimer) clearInterval(flushTimer);
   await flushAllQueues();
 });
+
+// Background 15-second Watchdog to automatically detect offline devices
+setInterval(async () => {
+  try {
+    const threshold = new Date(Date.now() - 45000);
+    const staleDevices = await Device.find({
+      status: 'online',
+      $or: [
+        { lastUpdated: { $lt: threshold } },
+        { lastUpdated: null }
+      ]
+    });
+    for (const dev of staleDevices) {
+      dev.status = 'offline';
+      await dev.save();
+      deviceStatusCache.delete(String(dev._id));
+      telemetryEmitter.emit('telemetry', {
+        deviceId: String(dev._id),
+        mqttId: dev.mqttId,
+        topic: `inhydro/${dev.mqttId}/status`,
+        data: { status: 'offline', timestamp: new Date() },
+        isRetain: false,
+        timestamp: new Date()
+      });
+    }
+  } catch (err) {
+    // Ignore transient DB query errors
+  }
+}, 15000);
 
 module.exports = { startMqttSubscriber, telemetryEmitter, flushAllQueues };
 

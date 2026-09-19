@@ -1,4 +1,4 @@
-import os, sys, json, time, datetime, socket, glob, fcntl
+import os, sys, json, time, datetime, socket, glob, fcntl, uuid
 import subprocess, threading
 import tkinter as tk
 from PIL import Image, ImageTk
@@ -8,6 +8,7 @@ import serial
 import paho.mqtt.client as mqtt
 
 
+SCRIPT_BOOT_TIME = time.time()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ID_FILE = os.path.join(BASE_DIR, "device_id.txt")
 
@@ -457,18 +458,194 @@ CONTROL_PASS = "MGPL@5598"
 CONTROL_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/update"
 CURRENT_SETP_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/current"
 CONTROL_SYNC_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/request_sync"
+CONTROL_CMD_TOPIC = f"inhydro/{DEVICE_NAME}/command"
 LIVE_TELEMETRY_TOPIC = f"inhydro/{DEVICE_NAME}/telemetry/live"
+
+CMD_TRACK_FILE = os.path.join(BASE_DIR, f".last_cmd_{DEVICE_NAME}.json")
+
+def _load_cmd_history():
+    if os.path.exists(CMD_TRACK_FILE):
+        try:
+            with open(CMD_TRACK_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"action": "", "time": 0.0, "cmd_id": "", "cooldown_until": 0.0, "boot_time": 0.0}
+
+def _save_cmd_history(action, cmd_id, cooldown_seconds=7.0):
+    try:
+        now = time.time()
+        with open(CMD_TRACK_FILE, "w") as f:
+            json.dump({
+                "action": action,
+                "time": now,
+                "cmd_id": str(cmd_id),
+                "cooldown_until": now + cooldown_seconds,
+                "boot_time": SCRIPT_BOOT_TIME
+            }, f)
+    except Exception:
+        pass
+
+_command_execution_lock = False
 
 def on_control_message(client, userdata, msg):
     try:
+        # CRITICAL SAFEGUARD: Discard ANY retained message from broker!
+        # Retained messages are historical data stored on the broker from past sessions.
+        # They must NEVER execute commands, restarts, or exits!
+        if msg.retain:
+            print(f" [MQTT] Discarding stale retained broker message on {msg.topic}")
+            return
+
         if msg.topic == CONTROL_SYNC_TOPIC:
             control_client.publish(CURRENT_SETP_TOPIC, json.dumps(setpoints), retain=True)
             return
 
-        # Ignore retained messages so stale broker payloads don't overwrite local HMI disk setpoints on restart
-        if msg.retain:
-            print(" Ignoring retained setpoint update from MQTT broker.")
-            return
+        if msg.topic == CONTROL_CMD_TOPIC or msg.topic.endswith("/command"):
+            global _command_execution_lock
+            if _command_execution_lock:
+                print(f" [COMMAND] PURGED FROM QUEUE: Duplicate command in-flight ignored - execution already active.")
+                return
+
+            payload_str = msg.payload.decode().strip()
+            if not payload_str:
+                return
+
+            cmd_action = ""
+            cmd_time = None
+            cmd_id = ""
+            try:
+                data = json.loads(payload_str)
+                if isinstance(data, dict):
+                    cmd_action = str(data.get("action", data.get("command", ""))).strip().lower()
+                    cmd_time = data.get("timestamp")
+                    cmd_id = str(data.get("cmd_id", ""))
+                elif isinstance(data, str):
+                    cmd_action = data.strip().lower()
+            except Exception:
+                cmd_action = payload_str.strip().lower()
+
+            if not cmd_action:
+                return
+
+            now = time.time()
+            hist = _load_cmd_history()
+            last_action = hist.get("action", "")
+            last_time = float(hist.get("time", 0.0))
+            last_id = hist.get("cmd_id", "")
+            cooldown_until = float(hist.get("cooldown_until", 0.0))
+
+            # 1. Exact Duplicate ID check
+            if cmd_id and last_id and cmd_id == last_id:
+                print(f" [COMMAND] PURGED FROM QUEUE: Duplicate command ID '{cmd_id}' already processed.")
+                return
+
+            # 2. Check if command was generated BEFORE this current script process booted
+            if cmd_time:
+                try:
+                    ts = float(cmd_time)
+                    if ts > 1e11: ts = ts / 1000.0 # JS millisecond conversion
+                    if ts < (SCRIPT_BOOT_TIME - 1.0):
+                        print(f" [COMMAND] PURGED FROM QUEUE: Command generated at {ts:.1f} before current process boot ({SCRIPT_BOOT_TIME:.1f}). Discarding duplicate.")
+                        return
+                    if abs(now - ts) > 20.0:
+                        print(f" [COMMAND] PURGED FROM QUEUE: Expired command generated {abs(now - ts):.1f}s ago. Discarding.")
+                        return
+                    if ts <= (last_time + 0.5):
+                        print(f" [COMMAND] PURGED FROM QUEUE: Command timestamp ({ts:.1f}) <= last execution time ({last_time:.1f}). Discarding.")
+                        return
+                except Exception:
+                    pass
+
+            # 3. Active Cooldown Window check (Blocks duplicate queued commands from executing after reboot or in rapid bursts)
+            if cmd_action == last_action and now < cooldown_until:
+                remaining = cooldown_until - now
+                print(f" [COMMAND] PURGED FROM QUEUE: Rapid duplicate '{cmd_action}' blocked by active cooldown ({remaining:.1f}s remaining). Purging queued command.")
+                return
+
+            # 4. Bootup Grace Period: If script just started (< 5 seconds since boot) and last command was restart, drop any queued restart
+            if (now - SCRIPT_BOOT_TIME < 5.0) and (cmd_action in ["restart", "reboot_script", "restart_script"]) and (last_action == "restart"):
+                print(f" [COMMAND] PURGED FROM QUEUE: Ignoring queued '{cmd_action}' received during bootup stabilization ({now - SCRIPT_BOOT_TIME:.1f}s after boot).")
+                return
+
+            if cmd_action in ["restart", "reboot_script", "restart_script"]:
+                _command_execution_lock = True
+                _save_cmd_history("restart", cmd_id, cooldown_seconds=7.0)
+                print(" [COMMAND] Executing Remote SCRIPT RESTART...")
+
+                # Immediately unsubscribe to prevent duplicate queued packets in this burst from being processed
+                try:
+                    client.unsubscribe(CONTROL_CMD_TOPIC)
+                    if DEVICE_NAME.lower() != DEVICE_NAME:
+                        client.unsubscribe(f"inhydro/{DEVICE_NAME.lower()}/command")
+                except Exception:
+                    pass
+
+                try:
+                    client.publish(f"inhydro/{DEVICE_NAME}/command/status", json.dumps({"action": "restart", "status": "executing", "timestamp": time.time()}), retain=False)
+                except Exception:
+                    pass
+
+                def _execute_restart():
+                    print(" [COMMAND] De-energizing relays and restarting python process...")
+                    try: emergency_hardware_all_off()
+                    except Exception: pass
+                    try: manual_stop()
+                    except Exception: pass
+                    try:
+                        client.loop_stop()
+                        client.disconnect()
+                    except Exception: pass
+                    time.sleep(0.3)
+                    os.execl(sys.executable, sys.executable, *sys.argv)
+
+                if 'root' in globals() and hasattr(root, 'after'):
+                    try: root.after(400, _execute_restart)
+                    except Exception: _execute_restart()
+                else:
+                    _execute_restart()
+                return
+
+            elif cmd_action in ["exit", "stop", "shutdown", "exit_script"]:
+                _command_execution_lock = True
+                _save_cmd_history("exit", cmd_id, cooldown_seconds=7.0)
+                print(" [COMMAND] Executing Remote SCRIPT EXIT / SHUTDOWN...")
+
+                # Immediately unsubscribe
+                try:
+                    client.unsubscribe(CONTROL_CMD_TOPIC)
+                    if DEVICE_NAME.lower() != DEVICE_NAME:
+                        client.unsubscribe(f"inhydro/{DEVICE_NAME.lower()}/command")
+                except Exception:
+                    pass
+
+                try:
+                    client.publish(f"inhydro/{DEVICE_NAME}/command/status", json.dumps({"action": "exit", "status": "executing", "timestamp": time.time()}), retain=False)
+                except Exception:
+                    pass
+
+                def _execute_exit():
+                    print(" [COMMAND] De-energizing relays and terminating process...")
+                    try: emergency_hardware_all_off()
+                    except Exception: pass
+                    try: manual_stop()
+                    except Exception: pass
+                    try:
+                        client.loop_stop()
+                        client.disconnect()
+                    except Exception: pass
+                    time.sleep(0.3)
+                    if 'root' in globals() and hasattr(root, 'destroy'):
+                        try: root.destroy()
+                        except Exception: pass
+                    os._exit(0)
+
+                if 'root' in globals() and hasattr(root, 'after'):
+                    try: root.after(400, _execute_exit)
+                    except Exception: _execute_exit()
+                else:
+                    _execute_exit()
+                return
 
         payload_str = msg.payload.decode().strip()
         if not payload_str:
@@ -491,15 +668,21 @@ def on_control_message(client, userdata, msg):
         print(f" Private Control MQTT Update Error: {e}")
 
 is_mqtt_connected = False
-control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Monit_Device_{DEVICE_NAME}")
+_client_uid = hex(uuid.getnode())[-6:]
+control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Monit_Device_{DEVICE_NAME}_{_client_uid}", clean_session=True)
 control_client.on_message = on_control_message
 
 def on_control_connect(client, userdata, flags, rc, properties=None):
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
+        try: client.publish(CONTROL_CMD_TOPIC, "", retain=True)
+        except Exception: pass
         client.subscribe(CONTROL_TOPIC)
         client.subscribe(CONTROL_SYNC_TOPIC)
+        client.subscribe(CONTROL_CMD_TOPIC)
+        if DEVICE_NAME.lower() != DEVICE_NAME:
+            client.subscribe(f"inhydro/{DEVICE_NAME.lower()}/command")
         client.publish(CURRENT_SETP_TOPIC, json.dumps(setpoints), retain=True)
         print(f" Connected to Private VPS Mosquitto Broker ({CONTROL_BROKER})")
     else:
@@ -515,10 +698,39 @@ control_client.on_disconnect = on_control_disconnect
 try:
     if CONTROL_USER and CONTROL_PASS:
         control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
+    control_client.reconnect_delay_set(min_delay=2, max_delay=30)
     control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
     control_client.loop_start()
 except Exception as e:
     print(f" VPS Control MQTT Error: {e}")
+
+def mqtt_reconnect_watchdog():
+    while True:
+        try:
+            thread_alive = False
+            if hasattr(control_client, '_thread') and control_client._thread:
+                thread_alive = control_client._thread.is_alive()
+
+            if not control_client.is_connected() or not thread_alive:
+                try:
+                    control_client.reconnect()
+                except Exception:
+                    try:
+                        control_client.loop_stop()
+                    except Exception:
+                        pass
+                    try:
+                        if CONTROL_USER and CONTROL_PASS:
+                            control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
+                        control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
+                        control_client.loop_start()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        time.sleep(10)
+
+threading.Thread(target=mqtt_reconnect_watchdog, daemon=True).start()
 
 
 def log_auth_event(user_idx, user_name, status):
@@ -867,35 +1079,52 @@ def manual_stop():
         tk.Label(warn_box_frame, text="MANUAL STOP ALL RELAYS", font=("Arial", 9, "bold"), fg="#dc2626", bg="#e0e0e0", anchor="w", justify="left").pack(anchor="w")
 
 def restart_program():
+    global _shutdown_completed
+    _shutdown_completed = False
+    try: emergency_hardware_all_off()
+    except Exception: pass
     manual_stop()
     for inst in [ec_instrument, ph_instrument, md02_instrument]:
         if inst:
             try: inst.serial.close()
             except: pass
+    time.sleep(0.3)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
 def set_wifi(ssid, password):
     try:
-        subprocess.run(['nmcli', 'connection', 'delete', ssid], capture_output=True)
-        command = ['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password]
-        result = subprocess.run(command, capture_output=True, text=True)
-        if "key-mgmt" in result.stderr:
-            fallback_cmd = ['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password, 'wifi-sec.key-mgmt', 'wpa-psk']
-            result_fallback = subprocess.run(fallback_cmd, capture_output=True, text=True)
-            if result_fallback.returncode == 0:
-                return f"SUCCESS: Connected to '{ssid}'!"
-            else:
-                return f"FAILED: {result_fallback.stderr.strip()}"
-        if result.returncode == 0:
+        ssid = str(ssid).strip()
+        password = str(password).strip()
+        if not ssid:
+            return "FAILED: Empty SSID"
+        try:
+            subprocess.run(['sudo', 'rfkill', 'unblock', 'wifi'], capture_output=True, timeout=3)
+            subprocess.run(['sudo', 'nmcli', 'radio', 'wifi', 'on'], capture_output=True, timeout=3)
+        except Exception: pass
+        try:
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True, timeout=4)
+        except Exception: pass
+        cmd = ['sudo', 'nmcli', '--wait', '15', 'device', 'wifi', 'connect', ssid]
+        if password:
+            cmd += ['password', password]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=18)
+        if res.returncode != 0 and password:
+            try:
+                subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'add', 'type', 'wifi', 'con-name', ssid, 'ssid', ssid], capture_output=True, timeout=8)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'modify', ssid, '802-11-wireless-security.key-mgmt', 'wpa-psk', '802-11-wireless-security.psk', password], capture_output=True, timeout=6)
+                res = subprocess.run(['sudo', 'nmcli', '--wait', '15', 'connection', 'up', 'id', ssid], capture_output=True, text=True, timeout=18)
+            except Exception: pass
+        if res.returncode == 0:
             return f"SUCCESS: Connected to '{ssid}'!"
-        else:
-            return f"FAILED: {result.stderr.strip()}"
-    except Exception as e:
-        return f"ERROR: {str(e)}"
+        err_msg = res.stderr.strip() or res.stdout.strip() or "Connection failed"
+        return f"FAILED: {err_msg}"
+    except Exception as e: return f"ERROR: {str(e)}"
 
 def scan_wifi():
     try:
-        command = ['nmcli', '-t', '-f', 'SSID,SIGNAL', 'dev', 'wifi', 'list']
+        command = ['sudo', 'nmcli', '-t', '-f', 'SSID,SIGNAL', 'dev', 'wifi', 'list']
         result = subprocess.run(command, capture_output=True, text=True, timeout=8)
         if result.returncode == 0:
             lines = result.stdout.strip().split('\n')
@@ -1111,22 +1340,33 @@ def register_spp_dbus():
 
 def auto_trust_devices():
     try:
-        subprocess.run(["bluetoothctl", "power", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "discoverable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "pairable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception: pass
+        bt = subprocess.Popen(['bluetoothctl'], stdin=subprocess.PIPE,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+        for cmd in ["power on\n","agent NoInputNoOutput\n","default-agent\n",
+                    "discoverable on\n","pairable on\n"]:
+            bt.stdin.write(cmd)
+        bt.stdin.flush()
+    except Exception as e: print("BT agent error:", e)
 
+    last_discoverable_check = 0
     while True:
+        now = time.time()
+        # Re-enforce discoverable/pairable modes every 60 seconds to bypass OS timeout
+        if now - last_discoverable_check >= 60:
+            try:
+                subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "agent", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                last_discoverable_check = now
+            except: pass
+
         try:
-            output = subprocess.check_output(['bluetoothctl', 'paired-devices'], text=True)
-            for line in output.split('\n'):
+            out = subprocess.check_output(['bluetoothctl','paired-devices'], text=True)
+            for line in out.split('\n'):
                 if line.startswith('Device '):
-                    mac = line.split(" ")[1]
-                    subprocess.run(["bluetoothctl", "trust", mac], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception: pass
-        time.sleep(15)
+                    os.system(f"sudo bluetoothctl trust {line.split()[1]} >/dev/null 2>&1")
+        except: pass
+        time.sleep(5)
 
 def start_bluetooth_server():
     # Enforce Bluetooth Power, Discoverable and Pairable state via DBus Adapter
@@ -1145,7 +1385,7 @@ def start_bluetooth_server():
         adapter_props.Set('org.bluez.Adapter1', 'Pairable', dbus.Boolean(True))
         adapter_props.Set('org.bluez.Adapter1', 'DiscoverableTimeout', dbus.UInt32(0))
         adapter_props.Set('org.bluez.Adapter1', 'PairableTimeout', dbus.UInt32(0))
-        print("  Bluetooth Adapter Permanently Powered, Discoverable & Pairable (No Timeout)!")
+        print("  Bluetooth Adapter Powered (Always Discoverable & Pairable)")
     except Exception as e:
         print(f" Notice: Bluetooth adapter prop setup: {e}")
 
@@ -2454,6 +2694,51 @@ def update():
 
     root.after(1000, update)
 
+def wifi_network_watchdog():
+    consecutive_failures = 0
+    while True:
+        time.sleep(60)
+        is_online = False
+        for host in [("8.8.8.8", 53), ("1.1.1.1", 53)]:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2.5)
+                res = s.connect_ex(host)
+                s.close()
+                if res == 0:
+                    is_online = True
+                    break
+            except Exception:
+                pass
+
+        if is_online:
+            consecutive_failures = 0
+            continue
+
+        consecutive_failures += 1
+
+        wifi_associated = False
+        try:
+            out = subprocess.check_output(['nmcli', '-t', '-f', 'TYPE,STATE', 'dev'], text=True, timeout=5)
+            for line in out.splitlines():
+                parts = line.strip().split(':')
+                if len(parts) >= 2 and parts[0] == 'wifi' and parts[1] == 'connected':
+                    wifi_associated = True
+                    break
+        except Exception:
+            pass
+
+        if (not wifi_associated and consecutive_failures >= 2) or (consecutive_failures >= 5):
+            print("[NetworkWatchdog] Wi-Fi link failure detected. Cycling Wi-Fi radio...")
+            try:
+                subprocess.run(["sudo", "nmcli", "radio", "wifi", "off"], capture_output=True, timeout=5)
+                time.sleep(2)
+                subprocess.run(["sudo", "nmcli", "radio", "wifi", "on"], capture_output=True, timeout=5)
+            except Exception as e:
+                print(f"[NetworkWatchdog] Wi-Fi reset error: {e}")
+            consecutive_failures = 0
+            time.sleep(20)
+
 # ==========================================
 # MAIN APPLICATION THREADS & ENTRY POINT
 # ==========================================
@@ -2477,6 +2762,13 @@ def main():
         print(" Offline Telemetry Sync Worker started")
     except Exception as e:
         print(f"Failed to start Offline Sync thread: {e}")
+
+    try:
+        t_wifi = threading.Thread(target=wifi_network_watchdog, daemon=True)
+        t_wifi.start()
+        print(" Wi-Fi Self-Healing Watchdog started")
+    except Exception as e:
+        print(f"Failed to start Wi-Fi watchdog thread: {e}")
 
     update()
     root.mainloop()

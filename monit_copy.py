@@ -1,4 +1,4 @@
-import os, sys, json, time, datetime, socket, glob, fcntl
+import os, sys, json, time, datetime, socket, glob, fcntl, uuid
 import subprocess, threading
 import tkinter as tk
 from PIL import Image, ImageTk
@@ -492,7 +492,8 @@ def on_control_message(client, userdata, msg):
         print(f" Private Control MQTT Update Error: {e}")
 
 is_mqtt_connected = False
-control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Monit_Device_{DEVICE_NAME}")
+_client_uid = hex(uuid.getnode())[-6:]
+control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Monit_Copy_{DEVICE_NAME}_{_client_uid}")
 control_client.on_message = on_control_message
 
 def on_control_connect(client, userdata, flags, rc, properties=None):
@@ -516,10 +517,39 @@ control_client.on_disconnect = on_control_disconnect
 try:
     if CONTROL_USER and CONTROL_PASS:
         control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
+    control_client.reconnect_delay_set(min_delay=2, max_delay=30)
     control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
     control_client.loop_start()
 except Exception as e:
     print(f" VPS Control MQTT Error: {e}")
+
+def mqtt_reconnect_watchdog():
+    while True:
+        try:
+            thread_alive = False
+            if hasattr(control_client, '_thread') and control_client._thread:
+                thread_alive = control_client._thread.is_alive()
+
+            if not control_client.is_connected() or not thread_alive:
+                try:
+                    control_client.reconnect()
+                except Exception:
+                    try:
+                        control_client.loop_stop()
+                    except Exception:
+                        pass
+                    try:
+                        if CONTROL_USER and CONTROL_PASS:
+                            control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
+                        control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
+                        control_client.loop_start()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        time.sleep(10)
+
+threading.Thread(target=mqtt_reconnect_watchdog, daemon=True).start()
 
 
 def log_auth_event(user_idx, user_name, status):
@@ -880,26 +910,38 @@ def restart_program():
 
 def set_wifi(ssid, password):
     try:
-        subprocess.run(['nmcli', 'connection', 'delete', ssid], capture_output=True)
-        command = ['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password]
-        result = subprocess.run(command, capture_output=True, text=True)
-        if "key-mgmt" in result.stderr:
-            fallback_cmd = ['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password, 'wifi-sec.key-mgmt', 'wpa-psk']
-            result_fallback = subprocess.run(fallback_cmd, capture_output=True, text=True)
-            if result_fallback.returncode == 0:
-                return f"SUCCESS: Connected to '{ssid}'!"
-            else:
-                return f"FAILED: {result_fallback.stderr.strip()}"
-        if result.returncode == 0:
+        ssid = str(ssid).strip()
+        password = str(password).strip()
+        if not ssid:
+            return "FAILED: Empty SSID"
+        try:
+            subprocess.run(['sudo', 'rfkill', 'unblock', 'wifi'], capture_output=True, timeout=3)
+            subprocess.run(['sudo', 'nmcli', 'radio', 'wifi', 'on'], capture_output=True, timeout=3)
+        except Exception: pass
+        try:
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True, timeout=4)
+        except Exception: pass
+        cmd = ['sudo', 'nmcli', '--wait', '15', 'device', 'wifi', 'connect', ssid]
+        if password:
+            cmd += ['password', password]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=18)
+        if res.returncode != 0 and password:
+            try:
+                subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'add', 'type', 'wifi', 'con-name', ssid, 'ssid', ssid], capture_output=True, timeout=8)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'modify', ssid, '802-11-wireless-security.key-mgmt', 'wpa-psk', '802-11-wireless-security.psk', password], capture_output=True, timeout=6)
+                res = subprocess.run(['sudo', 'nmcli', '--wait', '15', 'connection', 'up', 'id', ssid], capture_output=True, text=True, timeout=18)
+            except Exception: pass
+        if res.returncode == 0:
             return f"SUCCESS: Connected to '{ssid}'!"
-        else:
-            return f"FAILED: {result.stderr.strip()}"
-    except Exception as e:
-        return f"ERROR: {str(e)}"
+        err_msg = res.stderr.strip() or res.stdout.strip() or "Connection failed"
+        return f"FAILED: {err_msg}"
+    except Exception as e: return f"ERROR: {str(e)}"
 
 def scan_wifi():
     try:
-        command = ['nmcli', '-t', '-f', 'SSID,SIGNAL', 'dev', 'wifi', 'list']
+        command = ['sudo', 'nmcli', '-t', '-f', 'SSID,SIGNAL', 'dev', 'wifi', 'list']
         result = subprocess.run(command, capture_output=True, text=True, timeout=8)
         if result.returncode == 0:
             lines = result.stdout.strip().split('\n')
@@ -1115,22 +1157,33 @@ def register_spp_dbus():
 
 def auto_trust_devices():
     try:
-        subprocess.run(["bluetoothctl", "power", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "discoverable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "pairable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception: pass
+        bt = subprocess.Popen(['bluetoothctl'], stdin=subprocess.PIPE,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+        for cmd in ["power on\n","agent NoInputNoOutput\n","default-agent\n",
+                    "discoverable on\n","pairable on\n"]:
+            bt.stdin.write(cmd)
+        bt.stdin.flush()
+    except Exception as e: print("BT agent error:", e)
 
+    last_discoverable_check = 0
     while True:
+        now = time.time()
+        # Re-enforce discoverable/pairable modes every 60 seconds to bypass OS timeout
+        if now - last_discoverable_check >= 60:
+            try:
+                subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "agent", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                last_discoverable_check = now
+            except: pass
+
         try:
-            output = subprocess.check_output(['bluetoothctl', 'paired-devices'], text=True)
-            for line in output.split('\n'):
+            out = subprocess.check_output(['bluetoothctl','paired-devices'], text=True)
+            for line in out.split('\n'):
                 if line.startswith('Device '):
-                    mac = line.split(" ")[1]
-                    subprocess.run(["bluetoothctl", "trust", mac], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception: pass
-        time.sleep(15)
+                    os.system(f"sudo bluetoothctl trust {line.split()[1]} >/dev/null 2>&1")
+        except: pass
+        time.sleep(5)
 
 def start_bluetooth_server():
     # Enforce Bluetooth Power, Discoverable and Pairable state via DBus Adapter
@@ -1149,7 +1202,7 @@ def start_bluetooth_server():
         adapter_props.Set('org.bluez.Adapter1', 'Pairable', dbus.Boolean(True))
         adapter_props.Set('org.bluez.Adapter1', 'DiscoverableTimeout', dbus.UInt32(0))
         adapter_props.Set('org.bluez.Adapter1', 'PairableTimeout', dbus.UInt32(0))
-        print(" ✅ Bluetooth Adapter Permanently Powered, Discoverable & Pairable (No Timeout)!")
+        print(" ✅ Bluetooth Adapter Powered (Always Discoverable & Pairable)")
     except Exception as e:
         print(f" Notice: Bluetooth adapter prop setup: {e}")
 
@@ -2458,6 +2511,51 @@ def update():
 
     root.after(1000, update)
 
+def wifi_network_watchdog():
+    consecutive_failures = 0
+    while True:
+        time.sleep(60)
+        is_online = False
+        for host in [("8.8.8.8", 53), ("1.1.1.1", 53)]:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2.5)
+                res = s.connect_ex(host)
+                s.close()
+                if res == 0:
+                    is_online = True
+                    break
+            except Exception:
+                pass
+
+        if is_online:
+            consecutive_failures = 0
+            continue
+
+        consecutive_failures += 1
+
+        wifi_associated = False
+        try:
+            out = subprocess.check_output(['nmcli', '-t', '-f', 'TYPE,STATE', 'dev'], text=True, timeout=5)
+            for line in out.splitlines():
+                parts = line.strip().split(':')
+                if len(parts) >= 2 and parts[0] == 'wifi' and parts[1] == 'connected':
+                    wifi_associated = True
+                    break
+        except Exception:
+            pass
+
+        if (not wifi_associated and consecutive_failures >= 2) or (consecutive_failures >= 5):
+            print("[NetworkWatchdog] Wi-Fi link failure detected. Cycling Wi-Fi radio...")
+            try:
+                subprocess.run(["sudo", "nmcli", "radio", "wifi", "off"], capture_output=True, timeout=5)
+                time.sleep(2)
+                subprocess.run(["sudo", "nmcli", "radio", "wifi", "on"], capture_output=True, timeout=5)
+            except Exception as e:
+                print(f"[NetworkWatchdog] Wi-Fi reset error: {e}")
+            consecutive_failures = 0
+            time.sleep(20)
+
 # ==========================================
 # MAIN APPLICATION THREADS & ENTRY POINT
 # ==========================================
@@ -2481,6 +2579,13 @@ def main():
         print("✅ Offline Telemetry Sync Worker started")
     except Exception as e:
         print(f"Failed to start Offline Sync thread: {e}")
+
+    try:
+        t_wifi = threading.Thread(target=wifi_network_watchdog, daemon=True)
+        t_wifi.start()
+        print("✅ Wi-Fi Self-Healing Watchdog started")
+    except Exception as e:
+        print(f"Failed to start Wi-Fi watchdog thread: {e}")
 
     update()
     root.mainloop()

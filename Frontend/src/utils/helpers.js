@@ -61,14 +61,27 @@ export const getMetricColor = (status) => {
   }
 };
 
+export const formatDateDMY = (dateObj) => {
+  if (!dateObj) return '';
+  const d = (dateObj instanceof Date) ? dateObj : new Date(dateObj);
+  if (isNaN(d.getTime())) return '';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+};
+
 export const formatTimestamp = (isoString) => {
   if (!isoString) return 'Never connected';
   const date = new Date(isoString);
   if (isNaN(date.getTime()) || date.getTime() === 0) return 'Never connected';
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  const timeStr = date.toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit'
   });
+  return `${day}-${month}-${year} ${timeStr}`;
 };

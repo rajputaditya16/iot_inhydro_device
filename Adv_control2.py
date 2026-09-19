@@ -855,19 +855,34 @@ threading.Thread(target=poll_sensors, daemon=True).start()
 
 def set_wifi(ssid, password):
     try:
-        subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True)
-        result = subprocess.run(
-            ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password],
-            capture_output=True, text=True)
-        if "key-mgmt" in result.stderr:
-            result = subprocess.run(
-                ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid,
-                 'password', password, 'wifi-sec.key-mgmt', 'wpa-psk'],
-                capture_output=True, text=True)
-        return (f"SUCCESS: Connected to {ssid}!" if result.returncode == 0
-                else f"FAILED: {result.stderr.strip()}")
-    except Exception as e:
-        return f"ERROR: {e}"
+        ssid = str(ssid).strip()
+        password = str(password).strip()
+        if not ssid:
+            return "FAILED: Empty SSID"
+        try:
+            subprocess.run(['sudo', 'rfkill', 'unblock', 'wifi'], capture_output=True, timeout=3)
+            subprocess.run(['sudo', 'nmcli', 'radio', 'wifi', 'on'], capture_output=True, timeout=3)
+        except Exception: pass
+        try:
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True, timeout=4)
+        except Exception: pass
+        cmd = ['sudo', 'nmcli', '--wait', '15', 'device', 'wifi', 'connect', ssid]
+        if password:
+            cmd += ['password', password]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=18)
+        if res.returncode != 0 and password:
+            try:
+                subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'add', 'type', 'wifi', 'con-name', ssid, 'ssid', ssid], capture_output=True, timeout=8)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'modify', ssid, '802-11-wireless-security.key-mgmt', 'wpa-psk', '802-11-wireless-security.psk', password], capture_output=True, timeout=6)
+                res = subprocess.run(['sudo', 'nmcli', '--wait', '15', 'connection', 'up', 'id', ssid], capture_output=True, text=True, timeout=18)
+            except Exception: pass
+        if res.returncode == 0:
+            return f"SUCCESS: Connected to '{ssid}'!"
+        err_msg = res.stderr.strip() or res.stdout.strip() or "Connection failed"
+        return f"FAILED: {err_msg}"
+    except Exception as e: return f"ERROR: {str(e)}"
 
 def scan_wifi():
     try:
@@ -2472,7 +2487,7 @@ def update_ui():
     # Update real-time clock
     now = datetime.datetime.now()
     lbl_clock.config(text=now.strftime("%H:%M:%S"))
-    lbl_date.config(text=now.strftime("%A, %B %d, %Y"))
+    lbl_date.config(text=now.strftime("%A, %d-%m-%Y"))
 
     # Update sensor cards
     for key, val in latest_data.items():

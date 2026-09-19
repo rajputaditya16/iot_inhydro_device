@@ -409,12 +409,33 @@ def trigger_buzzer_30s():
 
 def set_wifi(ssid, password):
     try:
-        subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True)
-        cmd = ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password]
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        if "key-mgmt" in res.stderr:
-            res = subprocess.run(cmd + ['wifi-sec.key-mgmt', 'wpa-psk'], capture_output=True, text=True)
-        return f"SUCCESS: Connected to {ssid}!" if res.returncode == 0 else f"FAILED: {res.stderr.strip()}"
+        ssid = str(ssid).strip()
+        password = str(password).strip()
+        if not ssid:
+            return "FAILED: Empty SSID"
+        try:
+            subprocess.run(['sudo', 'rfkill', 'unblock', 'wifi'], capture_output=True, timeout=3)
+            subprocess.run(['sudo', 'nmcli', 'radio', 'wifi', 'on'], capture_output=True, timeout=3)
+        except Exception: pass
+        try:
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True, timeout=4)
+        except Exception: pass
+        cmd = ['sudo', 'nmcli', '--wait', '15', 'device', 'wifi', 'connect', ssid]
+        if password:
+            cmd += ['password', password]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=18)
+        if res.returncode != 0 and password:
+            try:
+                subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'add', 'type', 'wifi', 'con-name', ssid, 'ssid', ssid], capture_output=True, timeout=8)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'modify', ssid, '802-11-wireless-security.key-mgmt', 'wpa-psk', '802-11-wireless-security.psk', password], capture_output=True, timeout=6)
+                res = subprocess.run(['sudo', 'nmcli', '--wait', '15', 'connection', 'up', 'id', ssid], capture_output=True, text=True, timeout=18)
+            except Exception: pass
+        if res.returncode == 0:
+            return f"SUCCESS: Connected to '{ssid}'!"
+        err_msg = res.stderr.strip() or res.stdout.strip() or "Connection failed"
+        return f"FAILED: {err_msg}"
     except Exception as e: return f"ERROR: {str(e)}"
 
 def scan_wifi():
@@ -1223,18 +1244,8 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
 
     entered_val = str(initial_value)
 
-    type_badge = {
-        "numeric": "NUMERIC KEYPAD",
-        "time": "TIME KEYPAD (12-HR AM/PM)",
-        "calendar": "CALENDAR DATE KEYPAD (YYYY-MM-DD)",
-        "alphanumeric": "ALPHANUMERIC KEYBOARD"
-    }.get(mode, "NUMERIC KEYPAD")
-
-    lbl_badge = tk.Label(kp_main, text=type_badge, font=("Helvetica", 10, "bold"), fg="#64748b", bg="#f8fafc", padx=12, pady=3, bd=1, relief="solid")
-    lbl_badge.pack(pady=(4, 2))
-
     lbl_modal_title = tk.Label(kp_main, text=title_text, font=big, fg="#1565c0", bg="white")
-    lbl_modal_title.pack(pady=(2, 4))
+    lbl_modal_title.pack(pady=(6, 4))
 
     lbl_modal_disp = tk.Label(kp_main, text=entered_val, font=("Arial", 22, "bold"), fg="#0f172a", bg="#f1f5f9", width=24, relief="sunken", bd=2)
     lbl_modal_disp.pack(pady=4)

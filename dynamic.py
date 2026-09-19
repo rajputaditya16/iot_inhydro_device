@@ -1,4 +1,4 @@
-import os, sys, json, time, datetime, socket, glob, fcntl
+import os, sys, json, time, datetime, socket, glob, fcntl, uuid, atexit, signal
 import subprocess, threading, queue
 import tkinter as tk
 from PIL import Image, ImageTk
@@ -7,6 +7,7 @@ import minimalmodbus
 import serial
 import paho.mqtt.client as mqtt
 
+SCRIPT_BOOT_TIME = time.time()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ID_FILE = os.path.join(BASE_DIR, "device_id.txt")
 
@@ -45,14 +46,14 @@ DEFAULT_CONFIG = {
         },
         "room_md02": {
             "name": "Room Sensor (MD02)",
-            "path": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0",
+            "path": "/dev/serial/by-path/platform-xhci-hcd.1-usb-0:1:1.0-port0",
             "slave_id": 1,
             "enabled": True
         }
     },
     "relays": {
         "name": "Modbus Relays",
-        "path": "/dev/serial/by-path/",
+        "path": "/dev/serial/by-path/platform-xhci-hcd.1-usb-0:2:1.0-port0",
         "slave_id": 1,
         "enabled": True
     }
@@ -75,6 +76,10 @@ def load_system_config():
                                 system_config["sensors"][skey] = sval
                     if "relays" in loaded:
                         system_config["relays"].update(loaded["relays"])
+                    elif "relay_port" in loaded and loaded["relay_port"]:
+                        rp = str(loaded["relay_port"]).strip()
+                        if os.path.exists(rp):
+                            system_config["relays"]["path"] = rp
                     print(f" Loaded configuration from {CONFIG_FILE}")
         except Exception as e:
             print(f" Error reading config file: {e}")
@@ -121,46 +126,268 @@ def is_relay_assigned():
     return bool(path and path != "NONE" and path != "/dev/serial/by-path/" and os.path.exists(path) and not os.path.isdir(path))
 
 def get_relay_path():
-    return system_config.get("relays", {}).get("path", "").strip()
+    p = system_config.get("relays", {}).get("path", "").strip()
+    if p and os.path.exists(p) and not os.path.isdir(p):
+        return p
+    def_p = DEFAULT_CONFIG.get("relays", {}).get("path", "").strip()
+    if def_p and os.path.exists(def_p) and not os.path.isdir(def_p):
+        return def_p
+    if os.path.exists("/dev/serial/by-path"):
+        try:
+            entries = [os.path.join("/dev/serial/by-path", f) for f in os.listdir("/dev/serial/by-path")]
+            entries = [x for x in entries if not os.path.isdir(x)]
+            md02_p = system_config.get("sensors", {}).get("room_md02", {}).get("path", "").strip()
+            water_p = system_config.get("sensors", {}).get("water", {}).get("path", "").strip()
+            cand = [x for x in entries if x != md02_p and x != water_p]
+            if cand: return cand[0]
+            if entries: return entries[0]
+        except Exception: pass
+    try:
+        ttys = sorted(glob.glob("/dev/ttyUSB*"))
+        if ttys: return ttys[-1]
+    except Exception: pass
+    return p
 
 DEVICE_ID_EC   = system_config["sensors"]["water"].get("ec_slave_id", 31)
 DEVICE_ID_PH   = system_config["sensors"]["water"].get("ph_slave_id", 32)
 DEVICE_ID_MD02 = system_config["sensors"]["room_md02"].get("slave_id", 1)
 RELAY_SLAVE_ID = system_config["relays"].get("slave_id", 1)
+POSSIBLE_RELAY_IDS = [RELAY_SLAVE_ID, 255, 1, 2, 0, 3]
+_working_relay_slave_id = None
+_working_functioncode = 5
+_slave_id_scanned = False
+_unsupported_channels = set()
+_logged_unsupported = set()
 
-relay_cmd_queue = queue.Queue()
+_relay_inst = None
+_relay_inst_path = None
+_relay_state_lock = threading.Lock()
+_relay_desired_states = {}
+_relay_actual_states = {}
+_relay_event = threading.Event()
+
+def scan_relay_slave_id(inst):
+    """
+    Scans for the relay board's slave ID ONCE using base Coil 0 with rapid 0.15s probe.
+    Once an ID responds, it is permanently locked into memory and configuration.
+    Never rescans or loops through candidate IDs during normal operation.
+    """
+    global _working_relay_slave_id, _working_functioncode, _slave_id_scanned
+    if _slave_id_scanned and _working_relay_slave_id is not None:
+        return _working_relay_slave_id
+
+    seen = set()
+    candidate_ids = []
+    for sid in POSSIBLE_RELAY_IDS:
+        if sid not in seen:
+            seen.add(sid)
+            candidate_ids.append(sid)
+
+    print(f" [RelayInit] Rapid scan for Relay Slave ID ONCE across: {candidate_ids}...")
+    found_id = None
+    found_fc = 5
+
+    orig_timeout = inst.serial.timeout if hasattr(inst, 'serial') and inst.serial else 0.5
+    try:
+        if hasattr(inst, 'serial') and inst.serial:
+            inst.serial.timeout = 0.15
+
+        for sid in candidate_ids:
+            inst.address = sid
+            # Probe 1: Standard Coil write FC5 (safe, OFF)
+            try:
+                inst.write_bit(0, 0, functioncode=5)
+                found_id = sid
+                found_fc = 5
+                print(f" [RelayInit] Discovered Relay on Slave ID {sid} (FC5 Coil) - LOCKED PERMANENTLY")
+                break
+            except Exception:
+                pass
+
+            # Probe 2: Holding register write FC6 (safe, OFF)
+            try:
+                inst.write_register(0, 0x0200, functioncode=6)
+                found_id = sid
+                found_fc = 6
+                print(f" [RelayInit] Discovered Relay on Slave ID {sid} (FC6 Register) - LOCKED PERMANENTLY")
+                break
+            except Exception:
+                pass
+    finally:
+        if hasattr(inst, 'serial') and inst.serial:
+            inst.serial.timeout = orig_timeout
+
+    if found_id is not None:
+        _working_relay_slave_id = found_id
+        _working_functioncode = found_fc
+        system_config["relays"]["slave_id"] = found_id
+        try: save_system_config()
+        except Exception: pass
+    else:
+        # Fallback to configured ID so we NEVER scan again in a loop
+        _working_relay_slave_id = RELAY_SLAVE_ID
+        _working_functioncode = 5
+        print(f" [RelayInit] Probe completed. Defaulting permanently to Slave ID {_working_relay_slave_id}")
+
+    _slave_id_scanned = True
+    inst.address = _working_relay_slave_id
+    return _working_relay_slave_id
+
+def get_relay_instrument():
+    global _relay_inst, _relay_inst_path, _working_relay_slave_id
+    path = get_relay_path()
+    if not path or not os.path.exists(path) or os.path.isdir(path):
+        return None
+    slave_id = _working_relay_slave_id if _working_relay_slave_id is not None else RELAY_SLAVE_ID
+    if _relay_inst is None or _relay_inst_path != path:
+        try:
+            if _relay_inst and hasattr(_relay_inst, 'serial') and _relay_inst.serial:
+                _relay_inst.serial.close()
+        except Exception: pass
+        try:
+            inst = minimalmodbus.Instrument(path, slave_id)
+            inst.serial.baudrate = 9600
+            inst.serial.timeout = 0.5
+            inst.serial.stopbits = 1
+            inst.serial.parity = serial.PARITY_NONE
+            inst.mode = minimalmodbus.MODE_RTU
+            inst.clear_buffers_before_each_transaction = True
+            _relay_inst = inst
+            _relay_inst_path = path
+            if not _slave_id_scanned:
+                scan_relay_slave_id(inst)
+        except Exception:
+            _relay_inst = None
+            _relay_inst_path = None
+    return _relay_inst
+
+def is_illegal_data_address(e):
+    if isinstance(e, minimalmodbus.SlaveReportedException):
+        if len(e.args) > 1 and e.args[1] == 2:
+            return True
+        if "illegal data address" in str(e).lower():
+            return True
+    return False
+
+def write_relay_channel(inst, channel, state):
+    global _working_relay_slave_id, _working_functioncode, _slave_id_scanned, _unsupported_channels, _logged_unsupported
+    if channel in _unsupported_channels:
+        return False, "Channel not supported on board"
+
+    if not _slave_id_scanned or _working_relay_slave_id is None:
+        scan_relay_slave_id(inst)
+
+    inst.address = _working_relay_slave_id
+    val_fc5 = 1 if state else 0
+    val_fc6 = 0x0100 if state else 0x0200
+
+    if _working_functioncode == 6:
+        try:
+            inst.write_register(channel, val_fc6, functioncode=6)
+            return True, None
+        except Exception as e:
+            if is_illegal_data_address(e):
+                _unsupported_channels.add(channel)
+                if channel not in _logged_unsupported:
+                    _logged_unsupported.add(channel)
+                    print(f" [RelayHW] Channel {channel} exceeds hardware register range (Illegal Data Address). Fast-skipped forever.")
+            return False, e
+
+    # Default to FC5 write_bit
+    try:
+        inst.write_bit(channel, val_fc5, functioncode=5)
+        return True, None
+    except Exception as e:
+        if is_illegal_data_address(e):
+            # Channel is out of physical coil range (e.g. channel 10/12 on 8-channel board)
+            _unsupported_channels.add(channel)
+            if channel not in _logged_unsupported:
+                _logged_unsupported.add(channel)
+                print(f" [RelayHW] Channel {channel} exceeds hardware coil range (Illegal Data Address). Fast-skipped forever.")
+            return False, e
+
+        # Fallback to FC6 register write on the EXACT SAME locked slave ID
+        try:
+            inst.write_register(channel, val_fc6, functioncode=6)
+            _working_functioncode = 6
+            return True, None
+        except Exception as e2:
+            if is_illegal_data_address(e2):
+                _unsupported_channels.add(channel)
+                if channel not in _logged_unsupported:
+                    _logged_unsupported.add(channel)
+                    print(f" [RelayHW] Channel {channel} exceeds hardware register range (Illegal Data Address). Fast-skipped forever.")
+            return False, e
 
 def relay_worker_loop():
+    global _relay_inst
+    _err_throttle = {}
     while True:
         try:
-            cmd = relay_cmd_queue.get()
-            if cmd is None: break
-            channel, state = cmd
+            _relay_event.wait(timeout=0.05)
 
-            relay_path = get_relay_path()
-            inst = None
-            try:
-                if relay_path and os.path.exists(relay_path) and not os.path.isdir(relay_path):
-                    inst = minimalmodbus.Instrument(relay_path, RELAY_SLAVE_ID)
-                    inst.serial.baudrate = 9600
-                    inst.serial.timeout = 0.2
-                    inst.mode = minimalmodbus.MODE_RTU
-                    inst.clear_buffers_before_each_transaction = True
-                    inst.write_bit(channel, 1 if state else 0, functioncode=5)
-            except Exception as e:
-                print(f" Relay Write Error on {relay_path}: {e}")
-            finally:
-                if inst and hasattr(inst, 'serial') and inst.serial and getattr(inst.serial, 'is_open', False):
-                    try: inst.serial.close()
-                    except Exception: pass
-            relay_cmd_queue.task_done()
+            inst = get_relay_instrument()
+            if not inst:
+                now = time.time()
+                if now - _err_throttle.get("port_missing", 0) > 10:
+                    print(f" [RelayWorker] Relay serial port not accessible: '{get_relay_path()}'")
+                    _err_throttle["port_missing"] = now
+                time.sleep(0.5)
+                continue
+
+            with _relay_state_lock:
+                if not _relay_desired_states:
+                    _relay_event.clear()
+                    continue
+                items_to_write = list(_relay_desired_states.items())
+                _relay_desired_states.clear()
+                _relay_event.clear()
+
+            # Process ON (True) commands FIRST so relay trip actuation is instant!
+            items_to_write.sort(key=lambda x: not x[1])
+
+            for idx, (channel, state) in enumerate(items_to_write):
+                success, err = write_relay_channel(inst, channel, state)
+                if success:
+                    with _relay_state_lock:
+                        _relay_actual_states[channel] = state
+                else:
+                    now = time.time()
+                    if now - _err_throttle.get(channel, 0) > 10:
+                        print(f" Relay Write Error on {get_relay_path()} (Channel {channel}, State {'ON' if state else 'OFF'}): {err}")
+                        _err_throttle[channel] = now
+
+                    # On hardware port level I/O error, re-queue remaining items and reset instrument
+                    if isinstance(err, (serial.SerialException, OSError)):
+                        with _relay_state_lock:
+                            for rem_ch, rem_st in items_to_write[idx:]:
+                                if rem_ch not in _relay_desired_states:
+                                    _relay_desired_states[rem_ch] = rem_st
+                            _relay_event.set()
+                        try:
+                            if hasattr(inst, 'serial') and inst.serial:
+                                inst.serial.close()
+                        except Exception: pass
+                        _relay_inst = None
+                        break
         except Exception:
             pass
 
 threading.Thread(target=relay_worker_loop, daemon=True).start()
 
-def send_modbus_relay_cmd(channel, state):
-    relay_cmd_queue.put((channel, state))
+def send_modbus_relay_cmd(channel, state, force=False):
+    with _relay_state_lock:
+        if channel in _unsupported_channels and not force:
+            return False
+        if not force:
+            # If this exact command is already pending in queue, don't duplicate
+            if _relay_desired_states.get(channel) == state:
+                return True
+            # If relay is already physically in this state and no change pending, skip
+            if channel in _relay_actual_states and _relay_actual_states[channel] == state and channel not in _relay_desired_states:
+                return True
+        _relay_desired_states[channel] = state
+        _relay_event.set()
     return True
 
 class ModbusRelay:
@@ -169,44 +396,84 @@ class ModbusRelay:
         self.name = name
         self.is_active = False
 
-    def on(self):
+    def on(self, force=False):
+        if self.channel in _unsupported_channels and not force:
+            self.is_active = False
+            return
         self.is_active = True
-        send_modbus_relay_cmd(self.channel, True)
+        send_modbus_relay_cmd(self.channel, True, force=force)
 
-    def off(self):
+    def off(self, force=False):
         self.is_active = False
-        send_modbus_relay_cmd(self.channel, False)
+        send_modbus_relay_cmd(self.channel, False, force=force)
 
-relay_ec1        = ModbusRelay(0, "EC1 ")
-relay_ec2        = ModbusRelay(1, "EC2 ")
-relay_ph         = ModbusRelay(2, "pH ")
-relay_blank      = ModbusRelay(3, "Blank ")
-relay_fan1       = ModbusRelay(4, "1. Fan ")
-relay_fan2       = ModbusRelay(5, "2. Fan ")
-relay_pad        = ModbusRelay(6, "Cooling Pad ")
-relay_fogger     = ModbusRelay(7, "Fogger ")
-relay_acf        = ModbusRelay(8, "Air Circulation Fan")
-relay_sprinkler  = ModbusRelay(9, "Sprinkler")
-relay_irrigation = ModbusRelay(10, "Irrigation ")
-relay_timer1     = ModbusRelay(11, "Cyclic Timer 1")
-relay_timer2     = ModbusRelay(12, "Cyclic Timer 2")
+relay_ec1        = ModbusRelay(9, "EC1 ")
+relay_ec2        = ModbusRelay(8, "EC2 ")
+relay_ph         = ModbusRelay(10, "pH ")
+relay_acf_sync   = ModbusRelay(2, "ACF Fogger Sync")
+relay_blank      = relay_acf_sync
+relay_fan1       = ModbusRelay(11, "1. Fan ")
+relay_fan2       = ModbusRelay(12, "2. Fan ")
+relay_pad        = ModbusRelay(7, "Cooling Pad ")
+relay_fogger     = ModbusRelay(0, "Fogger ")
+relay_acf        = ModbusRelay(1, "Air Circulation Fan")
+relay_sprinkler  = ModbusRelay(6, "Sprinkler")
+relay_irrigation = ModbusRelay(3, "Irrigation ")
+relay_timer1     = ModbusRelay(4, "Cyclic Timer 1")
+relay_timer2     = ModbusRelay(5, "Cyclic Timer 2")
 relay_solenoid   = ModbusRelay(13, "S-Tank Solenoid")
 
 relay_temp = relay_fan1
 relay_humi = relay_fogger
 
 all_relays_list = [
-    relay_ec1, relay_ec2, relay_ph, relay_blank, relay_fan1, relay_fan2,
+    relay_ec1, relay_ec2, relay_ph, relay_acf_sync, relay_fan1, relay_fan2,
     relay_pad, relay_fogger, relay_acf, relay_sprinkler, relay_irrigation,
     relay_timer1, relay_timer2, relay_solenoid
 ]
 
 def all_relays_off():
     for r in all_relays_list:
-        try: r.off()
+        try: r.off(force=True)
         except: pass
 
 all_relays_off()
+
+_shutdown_completed = False
+
+def emergency_hardware_all_off():
+    global _shutdown_completed
+    if _shutdown_completed:
+        return
+    _shutdown_completed = True
+    print("\n[Shutdown] Safely turning off all physical relays...")
+    inst = get_relay_instrument()
+    if inst:
+        for r in all_relays_list:
+            try:
+                write_relay_channel(inst, r.channel, False)
+                with _relay_state_lock:
+                    _relay_actual_states[r.channel] = False
+            except Exception:
+                pass
+        try:
+            if hasattr(inst, 'serial') and inst.serial:
+                inst.serial.close()
+        except Exception:
+            pass
+    print("[Shutdown] All relays confirmed OFF.")
+
+atexit.register(emergency_hardware_all_off)
+
+def _sig_handler(signum, frame):
+    emergency_hardware_all_off()
+    sys.exit(0)
+
+try:
+    signal.signal(signal.SIGINT, _sig_handler)
+    signal.signal(signal.SIGTERM, _sig_handler)
+except Exception:
+    pass
 
 ec_active         = False
 ph_active         = False
@@ -223,6 +490,8 @@ ph_start_time  = 0
 timer_state = {
     1: {"state": "OFF", "last": 0.0},
     2: {"state": "OFF", "last": 0.0},
+    "Timer1": {"state": "OFF", "last": 0.0},
+    "Timer2": {"state": "OFF", "last": 0.0},
     "humi": {"state": "OFF", "last": 0.0},
     "PAD": {"state": "OFF", "last": 0.0},
     "ACF": {"state": "OFF", "last": 0.0},
@@ -517,17 +786,194 @@ CONTROL_PASS = "MGPL@5598"
 CONTROL_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/update"
 CURRENT_SETP_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/current"
 CONTROL_SYNC_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/request_sync"
+CONTROL_CMD_TOPIC = f"inhydro/{DEVICE_NAME}/command"
 LIVE_TELEMETRY_TOPIC = f"inhydro/{DEVICE_NAME}/telemetry/live"
+
+CMD_TRACK_FILE = os.path.join(BASE_DIR, f".last_cmd_{DEVICE_NAME}.json")
+
+def _load_cmd_history():
+    if os.path.exists(CMD_TRACK_FILE):
+        try:
+            with open(CMD_TRACK_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"action": "", "time": 0.0, "cmd_id": "", "cooldown_until": 0.0, "boot_time": 0.0}
+
+def _save_cmd_history(action, cmd_id, cooldown_seconds=7.0):
+    try:
+        now = time.time()
+        with open(CMD_TRACK_FILE, "w") as f:
+            json.dump({
+                "action": action,
+                "time": now,
+                "cmd_id": str(cmd_id),
+                "cooldown_until": now + cooldown_seconds,
+                "boot_time": SCRIPT_BOOT_TIME
+            }, f)
+    except Exception:
+        pass
+
+_command_execution_lock = False
 
 def on_control_message(client, userdata, msg):
     try:
+        # CRITICAL SAFEGUARD: Discard ANY retained message from broker!
+        # Retained messages are historical data stored on the broker from past sessions.
+        # They must NEVER execute commands, restarts, or exits!
+        if msg.retain:
+            print(f" [MQTT] Discarding stale retained broker message on {msg.topic}")
+            return
+
         if msg.topic == CONTROL_SYNC_TOPIC:
             control_client.publish(CURRENT_SETP_TOPIC, json.dumps(setpoints), retain=True)
             return
 
-        if msg.retain:
-            print(" Ignoring retained setpoint update from MQTT broker.")
-            return
+        if msg.topic == CONTROL_CMD_TOPIC or msg.topic.endswith("/command"):
+            global _command_execution_lock
+            if _command_execution_lock:
+                print(f" [COMMAND] PURGED FROM QUEUE: Duplicate command in-flight ignored - execution already active.")
+                return
+
+            payload_str = msg.payload.decode().strip()
+            if not payload_str:
+                return
+
+            cmd_action = ""
+            cmd_time = None
+            cmd_id = ""
+            try:
+                data = json.loads(payload_str)
+                if isinstance(data, dict):
+                    cmd_action = str(data.get("action", data.get("command", ""))).strip().lower()
+                    cmd_time = data.get("timestamp")
+                    cmd_id = str(data.get("cmd_id", ""))
+                elif isinstance(data, str):
+                    cmd_action = data.strip().lower()
+            except Exception:
+                cmd_action = payload_str.strip().lower()
+
+            if not cmd_action:
+                return
+
+            now = time.time()
+            hist = _load_cmd_history()
+            last_action = hist.get("action", "")
+            last_time = float(hist.get("time", 0.0))
+            last_id = hist.get("cmd_id", "")
+            cooldown_until = float(hist.get("cooldown_until", 0.0))
+
+            # 1. Exact Duplicate ID check
+            if cmd_id and last_id and cmd_id == last_id:
+                print(f" [COMMAND] PURGED FROM QUEUE: Duplicate command ID '{cmd_id}' already processed.")
+                return
+
+            # 2. Check if command was generated BEFORE this current script process booted
+            if cmd_time:
+                try:
+                    ts = float(cmd_time)
+                    if ts > 1e11: ts = ts / 1000.0 # JS millisecond conversion
+                    if ts < (SCRIPT_BOOT_TIME - 1.0):
+                        print(f" [COMMAND] PURGED FROM QUEUE: Command generated at {ts:.1f} before current process boot ({SCRIPT_BOOT_TIME:.1f}). Discarding duplicate.")
+                        return
+                    if abs(now - ts) > 20.0:
+                        print(f" [COMMAND] PURGED FROM QUEUE: Expired command generated {abs(now - ts):.1f}s ago. Discarding.")
+                        return
+                    if ts <= (last_time + 0.5):
+                        print(f" [COMMAND] PURGED FROM QUEUE: Command timestamp ({ts:.1f}) <= last execution time ({last_time:.1f}). Discarding.")
+                        return
+                except Exception:
+                    pass
+
+            # 3. Active Cooldown Window check (Blocks duplicate queued commands from executing after reboot or in rapid bursts)
+            if cmd_action == last_action and now < cooldown_until:
+                remaining = cooldown_until - now
+                print(f" [COMMAND] PURGED FROM QUEUE: Rapid duplicate '{cmd_action}' blocked by active cooldown ({remaining:.1f}s remaining). Purging queued command.")
+                return
+
+            # 4. Bootup Grace Period: If script just started (< 5 seconds since boot) and last command was restart, drop any queued restart
+            if (now - SCRIPT_BOOT_TIME < 5.0) and (cmd_action in ["restart", "reboot_script", "restart_script"]) and (last_action == "restart"):
+                print(f" [COMMAND] PURGED FROM QUEUE: Ignoring queued '{cmd_action}' received during bootup stabilization ({now - SCRIPT_BOOT_TIME:.1f}s after boot).")
+                return
+
+            if cmd_action in ["restart", "reboot_script", "restart_script"]:
+                _command_execution_lock = True
+                _save_cmd_history("restart", cmd_id, cooldown_seconds=7.0)
+                print(" [COMMAND] Executing Remote SCRIPT RESTART...")
+
+                # Immediately unsubscribe to prevent duplicate queued packets in this burst from being processed
+                try:
+                    client.unsubscribe(CONTROL_CMD_TOPIC)
+                    if DEVICE_NAME.lower() != DEVICE_NAME:
+                        client.unsubscribe(f"inhydro/{DEVICE_NAME.lower()}/command")
+                except Exception:
+                    pass
+
+                try:
+                    client.publish(f"inhydro/{DEVICE_NAME}/command/status", json.dumps({"action": "restart", "status": "executing", "timestamp": time.time()}), retain=False)
+                except Exception:
+                    pass
+
+                def _execute_restart():
+                    print(" [COMMAND] De-energizing relays and restarting python process...")
+                    try: emergency_hardware_all_off()
+                    except Exception: pass
+                    try: manual_stop()
+                    except Exception: pass
+                    try:
+                        client.loop_stop()
+                        client.disconnect()
+                    except Exception: pass
+                    time.sleep(0.3)
+                    os.execl(sys.executable, sys.executable, *sys.argv)
+
+                if 'root' in globals() and hasattr(root, 'after'):
+                    try: root.after(400, _execute_restart)
+                    except Exception: _execute_restart()
+                else:
+                    _execute_restart()
+                return
+
+            elif cmd_action in ["exit", "stop", "shutdown", "exit_script"]:
+                _command_execution_lock = True
+                _save_cmd_history("exit", cmd_id, cooldown_seconds=7.0)
+                print(" [COMMAND] Executing Remote SCRIPT EXIT / SHUTDOWN...")
+
+                # Immediately unsubscribe
+                try:
+                    client.unsubscribe(CONTROL_CMD_TOPIC)
+                    if DEVICE_NAME.lower() != DEVICE_NAME:
+                        client.unsubscribe(f"inhydro/{DEVICE_NAME.lower()}/command")
+                except Exception:
+                    pass
+
+                try:
+                    client.publish(f"inhydro/{DEVICE_NAME}/command/status", json.dumps({"action": "exit", "status": "executing", "timestamp": time.time()}), retain=False)
+                except Exception:
+                    pass
+
+                def _execute_exit():
+                    print(" [COMMAND] De-energizing relays and terminating process...")
+                    try: emergency_hardware_all_off()
+                    except Exception: pass
+                    try: manual_stop()
+                    except Exception: pass
+                    try:
+                        client.loop_stop()
+                        client.disconnect()
+                    except Exception: pass
+                    time.sleep(0.3)
+                    if 'root' in globals() and hasattr(root, 'destroy'):
+                        try: root.destroy()
+                        except Exception: pass
+                    os._exit(0)
+
+                if 'root' in globals() and hasattr(root, 'after'):
+                    try: root.after(400, _execute_exit)
+                    except Exception: _execute_exit()
+                else:
+                    _execute_exit()
+                return
 
         payload_str = msg.payload.decode().strip()
         if not payload_str:
@@ -550,15 +996,21 @@ def on_control_message(client, userdata, msg):
         print(f" Private Control MQTT Update Error: {e}")
 
 is_mqtt_connected = False
-control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Dynamic_Monit_{DEVICE_NAME}")
+_client_uid = hex(uuid.getnode())[-6:]
+control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Dynamic_Monit_{DEVICE_NAME}_{_client_uid}", clean_session=True)
 control_client.on_message = on_control_message
 
 def on_control_connect(client, userdata, flags, rc, properties=None):
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
+        try: client.publish(CONTROL_CMD_TOPIC, "", retain=True)
+        except Exception: pass
         client.subscribe(CONTROL_TOPIC)
         client.subscribe(CONTROL_SYNC_TOPIC)
+        client.subscribe(CONTROL_CMD_TOPIC)
+        if DEVICE_NAME.lower() != DEVICE_NAME:
+            client.subscribe(f"inhydro/{DEVICE_NAME.lower()}/command")
         client.publish(CURRENT_SETP_TOPIC, json.dumps(setpoints), retain=True)
         print(f" Connected to Private VPS Mosquitto Broker ({CONTROL_BROKER})")
     else:
@@ -574,10 +1026,39 @@ control_client.on_disconnect = on_control_disconnect
 try:
     if CONTROL_USER and CONTROL_PASS:
         control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
+    control_client.reconnect_delay_set(min_delay=2, max_delay=30)
     control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
     control_client.loop_start()
 except Exception as e:
     print(f" VPS Control MQTT Error: {e}")
+
+def mqtt_reconnect_watchdog():
+    while True:
+        try:
+            thread_alive = False
+            if hasattr(control_client, '_thread') and control_client._thread:
+                thread_alive = control_client._thread.is_alive()
+
+            if not control_client.is_connected() or not thread_alive:
+                try:
+                    control_client.reconnect()
+                except Exception:
+                    try:
+                        control_client.loop_stop()
+                    except Exception:
+                        pass
+                    try:
+                        if CONTROL_USER and CONTROL_PASS:
+                            control_client.username_pw_set(CONTROL_USER, CONTROL_PASS)
+                        control_client.connect(CONTROL_BROKER, CONTROL_PORT, 60)
+                        control_client.loop_start()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        time.sleep(10)
+
+threading.Thread(target=mqtt_reconnect_watchdog, daemon=True).start()
 
 def log_auth_event(user_idx, user_name, status):
     try:
@@ -622,6 +1103,13 @@ def process_generic_cyclic_timer(prefix, relay_obj):
 
     ts = timer_state[prefix]
     now_sec = time.time()
+
+    if on_min <= 0:
+        if ts["state"] == "ON" or relay_obj.is_active:
+            ts["state"] = "OFF"
+            ts["last"] = 0.0
+            relay_obj.off()
+        return
 
     if in_window:
         run_sec = on_min * 60.0
@@ -697,6 +1185,12 @@ def process_humi_day_night_timer(relay_obj, room_humi=None):
     ts = timer_state["humi"]
     now_sec = time.time()
 
+    if on_min <= 0:
+        ts["state"] = "OFF"
+        ts["last"] = 0.0
+        relay_obj.off()
+        return f"{mode} (DISABLED)"
+
     if in_window:
         run_sec = on_min * 60.0
         off_sec = off_min * 60.0
@@ -745,9 +1239,9 @@ def control_system(water_data, md02_data):
     now = time.time()
 
     if is_sensor_assigned("water"):
-        if water_data:
-            ec_val = water_data["ec"]
-            ph_val = water_data["ph"]
+        if water_data and water_data.get("ec") is not None and water_data.get("ph") is not None:
+            ec_val = float(water_data["ec"])
+            ph_val = float(water_data["ph"])
 
             ec_min = float(setpoints.get("EC MIN", 1.2))
             ec_max = float(setpoints.get("EC MAX", 1.8))
@@ -770,7 +1264,7 @@ def control_system(water_data, md02_data):
             else:
                 relay_solenoid.off()
 
-            if not ec_active and ec_val < ec_min:
+            if not ec_active and 0 < ec_val < ec_min:
                 if now - last_ec >= 180 or last_ec == 0:
                     ec_active = True
                     ec_start_time = now
@@ -781,6 +1275,7 @@ def control_system(water_data, md02_data):
                 else:
                     rem = int(180 - (now - last_ec))
                     warnings.append(f"EC MIXING PAUSE ({rem}s remaining)")
+                    relay_ec1.off(); relay_ec2.off()
             elif ec_active:
                 if ec_val >= ec_max or (now - ec_start_time >= 60):
                     ec_active = False
@@ -791,8 +1286,11 @@ def control_system(water_data, md02_data):
                     relay_ec1.on()
                     relay_ec2.on()
                     warnings.append("EC DOSING ACTIVE")
+            else:
+                relay_ec1.off()
+                relay_ec2.off()
 
-            if not ph_active and ph_val > ph_high:
+            if not ph_active and ph_val > ph_high and ph_val > 0:
                 if now - last_ph >= 180 or last_ph == 0:
                     ph_active = True
                     ph_start_time = now
@@ -802,6 +1300,7 @@ def control_system(water_data, md02_data):
                 else:
                     rem = int(180 - (now - last_ph))
                     warnings.append(f"PH MIXING PAUSE ({rem}s remaining)")
+                    relay_ph.off()
             elif ph_active:
                 if ph_val <= ph_low or (now - ph_start_time >= 60):
                     ph_active = False
@@ -810,6 +1309,8 @@ def control_system(water_data, md02_data):
                 else:
                     relay_ph.on()
                     warnings.append("PH DOSING ACTIVE")
+            else:
+                relay_ph.off()
         else:
             ec_active = ph_active = solenoid_active = False
             relay_ec1.off(); relay_ec2.off(); relay_ph.off(); relay_solenoid.off()
@@ -855,33 +1356,45 @@ def control_system(water_data, md02_data):
             elif fan1_on:
                 warnings.append("TEMP MED (STAGE 1: FAN 1 ON)")
 
+            # Cooling Pad Pump Temperature Hysteresis (ON at >= t_max, stays active until <= t_min)
             if room_temp >= t_max:
                 _pad_temp_active = True
             elif room_temp <= t_min:
                 _pad_temp_active = False
 
+            # Cooling Pad Pump Automation + Humidity Safety Interlock with Hysteresis
+            # Cutoff ON when room_humi >= pad_h_max; Pad re-enabled when room_humi < (pad_h_max - pad_safety)
             if room_humi >= pad_h_max:
                 _pad_humi_allowed = False
             elif room_humi < (pad_h_max - pad_safety):
                 _pad_humi_allowed = True
 
-            if _pad_temp_active and _pad_humi_allowed:
+            pad_humi_allowed = _pad_humi_allowed
+            pad_temp_allowed = _pad_temp_active
+
+            if pad_temp_allowed and pad_humi_allowed:
                 process_generic_cyclic_timer("PAD", relay_pad)
                 if relay_pad.is_active:
                     warnings.append("COOLING PAD PUMP ON")
             else:
                 relay_pad.off()
-                if not _pad_humi_allowed:
+                if not pad_humi_allowed:
                     warnings.append("COOLING PAD CUTOFF (HUMIDITY HIGH)")
         else:
-            relay_fan1.off(); relay_fan2.off(); relay_pad.off(); relay_fogger.off()
+            fan1_on = fan2_on = _pad_temp_active = False
+            relay_fan1.off(); relay_fan2.off(); relay_pad.off()
             warnings.append("ROOM SENSOR ERROR")
-
-        humi_mode = process_humi_day_night_timer(relay_fogger, md02_data["room_humi"] if md02_data else None)
-        if relay_fogger.is_active:
-            warnings.append(f"FOGGER ON ({humi_mode})")
     else:
-        relay_fan1.off(); relay_fan2.off(); relay_pad.off(); relay_fogger.off()
+        fan1_on = fan2_on = _pad_temp_active = False
+        relay_fan1.off(); relay_fan2.off(); relay_pad.off()
+
+    room_humi_val = md02_data["room_humi"] if (is_sensor_assigned("room_md02") and md02_data) else None
+    humi_mode = process_humi_day_night_timer(relay_fogger, room_humi_val)
+    if relay_fogger.is_active:
+        relay_acf_sync.on()
+        warnings.append(f"FOGGER ON ({humi_mode})")
+    else:
+        relay_acf_sync.off()
 
     process_generic_cyclic_timer("ACF", relay_acf)
     process_generic_cyclic_timer("Sprinkler", relay_sprinkler)
@@ -904,31 +1417,48 @@ def manual_stop():
         tk.Label(warn_box_frame, text="MANUAL STOP ALL RELAYS", font=("Arial", 9, "bold"), fg="#dc2626", bg="#e0e0e0", anchor="w", justify="left").pack(anchor="w")
 
 def restart_program():
+    global _shutdown_completed
+    _shutdown_completed = False
+    try: emergency_hardware_all_off()
+    except Exception: pass
     manual_stop()
+    time.sleep(0.3)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
 def set_wifi(ssid, password):
     try:
-        subprocess.run(['nmcli', 'connection', 'delete', ssid], capture_output=True)
-        command = ['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password]
-        result = subprocess.run(command, capture_output=True, text=True)
-        if "key-mgmt" in result.stderr:
-            fallback_cmd = ['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password, 'wifi-sec.key-mgmt', 'wpa-psk']
-            result_fallback = subprocess.run(fallback_cmd, capture_output=True, text=True)
-            if result_fallback.returncode == 0:
-                return f"SUCCESS: Connected to '{ssid}'!"
-            else:
-                return f"FAILED: {result_fallback.stderr.strip()}"
-        if result.returncode == 0:
+        ssid = str(ssid).strip()
+        password = str(password).strip()
+        if not ssid:
+            return "FAILED: Empty SSID"
+        try:
+            subprocess.run(['sudo', 'rfkill', 'unblock', 'wifi'], capture_output=True, timeout=3)
+            subprocess.run(['sudo', 'nmcli', 'radio', 'wifi', 'on'], capture_output=True, timeout=3)
+        except Exception: pass
+        try:
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True, timeout=4)
+        except Exception: pass
+        cmd = ['sudo', 'nmcli', '--wait', '15', 'device', 'wifi', 'connect', ssid]
+        if password:
+            cmd += ['password', password]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=18)
+        if res.returncode != 0 and password:
+            try:
+                subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'add', 'type', 'wifi', 'con-name', ssid, 'ssid', ssid], capture_output=True, timeout=8)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'modify', ssid, '802-11-wireless-security.key-mgmt', 'wpa-psk', '802-11-wireless-security.psk', password], capture_output=True, timeout=6)
+                res = subprocess.run(['sudo', 'nmcli', '--wait', '15', 'connection', 'up', 'id', ssid], capture_output=True, text=True, timeout=18)
+            except Exception: pass
+        if res.returncode == 0:
             return f"SUCCESS: Connected to '{ssid}'!"
-        else:
-            return f"FAILED: {result.stderr.strip()}"
-    except Exception as e:
-        return f"ERROR: {str(e)}"
+        err_msg = res.stderr.strip() or res.stdout.strip() or "Connection failed"
+        return f"FAILED: {err_msg}"
+    except Exception as e: return f"ERROR: {str(e)}"
 
 def scan_wifi():
     try:
-        command = ['nmcli', '-t', '-f', 'SSID,SIGNAL', 'dev', 'wifi', 'list']
+        command = ['sudo', 'nmcli', '-t', '-f', 'SSID,SIGNAL', 'dev', 'wifi', 'list']
         result = subprocess.run(command, capture_output=True, text=True, timeout=8)
         if result.returncode == 0:
             lines = result.stdout.strip().split('\n')
@@ -1140,22 +1670,37 @@ def register_spp_dbus():
 
 def auto_trust_devices():
     try:
-        subprocess.run(["bluetoothctl", "power", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "discoverable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "pairable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception: pass
+        bt = subprocess.Popen(['bluetoothctl'], stdin=subprocess.PIPE,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+        for cmd in ["power on\n","agent NoInputNoOutput\n","default-agent\n",
+                    "discoverable on\n","pairable on\n"]:
+            bt.stdin.write(cmd)
+        bt.stdin.flush()
+    except Exception as e: print("BT agent error:", e)
 
+    last_discoverable_check = 0
+    trusted_devices = set()
     while True:
+        now = time.time()
+        # Re-enforce discoverable/pairable modes every 60 seconds to bypass OS timeout
+        if now - last_discoverable_check >= 60:
+            try:
+                subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(["bluetoothctl", "agent", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                last_discoverable_check = now
+            except: pass
+
         try:
-            output = subprocess.check_output(['bluetoothctl', 'paired-devices'], text=True)
-            for line in output.split('\n'):
+            out = subprocess.check_output(['bluetoothctl', 'paired-devices'], text=True, timeout=5)
+            for line in out.split('\n'):
                 if line.startswith('Device '):
-                    mac = line.split(" ")[1]
-                    subprocess.run(["bluetoothctl", "trust", mac], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception: pass
-        time.sleep(15)
+                    mac = line.split()[1]
+                    if mac not in trusted_devices:
+                        subprocess.run(["sudo", "bluetoothctl", "trust", mac], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+                        trusted_devices.add(mac)
+        except: pass
+        time.sleep(5)
 
 def start_bluetooth_server():
     try:
@@ -1173,7 +1718,7 @@ def start_bluetooth_server():
         adapter_props.Set('org.bluez.Adapter1', 'Pairable', dbus.Boolean(True))
         adapter_props.Set('org.bluez.Adapter1', 'DiscoverableTimeout', dbus.UInt32(0))
         adapter_props.Set('org.bluez.Adapter1', 'PairableTimeout', dbus.UInt32(0))
-        print("  Bluetooth Adapter Permanently Powered, Discoverable & Pairable (No Timeout)!")
+        print("  Bluetooth Adapter Powered (Always Discoverable & Pairable)")
     except Exception as e:
         print(f" Notice: Bluetooth adapter prop setup: {e}")
 
@@ -1192,7 +1737,7 @@ COLUMNS = [
     "room_temp", "room_humi", "timer1", "timer2",
     "relay_temp", "relay_humi", "relay_ec1", "relay_ec2",
     "relay_ph", "relay_solenoid", "relay_fan1", "relay_fan2", "relay_pad",
-    "relay_fogger", "relay_acf", "relay_sprinkler", "relay_irrigation"
+    "relay_fogger", "relay_acf", "relay_acf_sync", "relay_sprinkler", "relay_irrigation"
 ]
 
 def publish_live_telemetry(water_data, md02_data):
@@ -1221,6 +1766,7 @@ def publish_live_telemetry(water_data, md02_data):
             "relay_pad": relay_pad.is_active,
             "relay_fogger": relay_fogger.is_active,
             "relay_acf": relay_acf.is_active,
+            "relay_acf_sync": relay_acf_sync.is_active,
             "relay_sprinkler": relay_sprinkler.is_active,
             "relay_irrigation": relay_irrigation.is_active
         }
@@ -1263,6 +1809,7 @@ def save_local_telemetry(water_data, md02_data):
         1 if relay_pad.is_active else 0,
         1 if relay_fogger.is_active else 0,
         1 if relay_acf.is_active else 0,
+        1 if relay_acf_sync.is_active else 0,
         1 if relay_sprinkler.is_active else 0,
         1 if relay_irrigation.is_active else 0
     ]
@@ -1288,6 +1835,7 @@ def save_local_telemetry(water_data, md02_data):
 
 def unpack_row(r):
     if not isinstance(r, list) or len(r) < 7: return None
+    is_new_format = (len(r) >= 23)
     return {
         "device": DEVICE_NAME,
         "timestamp": r[0],
@@ -1310,8 +1858,9 @@ def unpack_row(r):
         "relay_pad": bool(r[17]) if len(r) > 17 and r[17] is not None else False,
         "relay_fogger": bool(r[18]) if len(r) > 18 and r[18] is not None else False,
         "relay_acf": bool(r[19]) if len(r) > 19 and r[19] is not None else False,
-        "relay_sprinkler": bool(r[20]) if len(r) > 20 and r[20] is not None else False,
-        "relay_irrigation": bool(r[21]) if len(r) > 21 and r[21] is not None else False
+        "relay_acf_sync": bool(r[20]) if is_new_format and r[20] is not None else False,
+        "relay_sprinkler": bool(r[21] if is_new_format else r[20]) if len(r) > (21 if is_new_format else 20) and (r[21] if is_new_format else r[20]) is not None else False,
+        "relay_irrigation": bool(r[22] if is_new_format else r[21]) if len(r) > (22 if is_new_format else 21) and (r[22] if is_new_format else r[21]) is not None else False
     }
 
 def sync_offline_data_worker():
@@ -1411,7 +1960,14 @@ root = tk.Tk()
 root.update()
 root.attributes("-fullscreen", True)
 root.configure(bg="#ffffff")
-root.bind("<Escape>", lambda e: root.destroy())
+def on_app_exit():
+    emergency_hardware_all_off()
+    try: root.destroy()
+    except Exception: pass
+    sys.exit(0)
+
+root.protocol("WM_DELETE_WINDOW", on_app_exit)
+root.bind("<Escape>", lambda e: on_app_exit())
 
 FONT_BIG   = ("Arial", 14, "bold")
 FONT_MED   = ("Arial", 11, "bold")
@@ -1461,7 +2017,7 @@ footer_main.pack_propagate(False)
 tk.Button(footer_main, text="SETPOINTS", font=FONT_MED, bg="#0284c7", fg="white", width=12, command=lambda: request_setpoints_access()).pack(side="left", padx=10, pady=3)
 tk.Button(footer_main, text="STOP", font=FONT_MED, bg="#dc2626", fg="white", width=10, command=manual_stop).pack(side="left", padx=10, pady=3)
 tk.Button(footer_main, text="RESTART", font=FONT_MED, bg="#64748b", fg="white", width=10, command=restart_program).pack(side="left", padx=10, pady=3)
-tk.Button(footer_main, text="EXIT", font=FONT_MED, bg="#334155", fg="white", width=10, command=root.destroy).pack(side="right", padx=10, pady=3)
+tk.Button(footer_main, text="EXIT", font=FONT_MED, bg="#334155", fg="white", width=10, command=on_app_exit).pack(side="right", padx=10, pady=3)
 
 content_grid = tk.Frame(frame_main, bg="#ffffff")
 content_grid.pack(expand=True, fill="both", padx=10, pady=(63, 6))
@@ -2341,147 +2897,196 @@ def open_keypad_sp(key):
         tk.Button(kp_sp_actions, text=txt, font=("Arial", 12, "bold"), bg=bg, fg=fg, width=w_btn+2, pady=6, command=cmd).pack(side="left", padx=8)
 
 def update():
-    water_data = cached_water_data
-    md02_data  = cached_md02_data
+    try:
+        water_data = cached_water_data
+        md02_data  = cached_md02_data
 
-    warnings = control_system(water_data, md02_data)
+        warnings = control_system(water_data, md02_data)
 
-    if is_sensor_assigned("water") and lbl_val_ec and lbl_val_ph:
-        if water_data:
-            tds = water_data['ec'] * 500
-            lbl_val_ec.config(text=f"{water_data['ec']:.3f} mS/cm ({tds:.0f} ppm)", fg="#0d47a1")
-            lbl_val_ph.config(text=f"{water_data['ph']:.2f}", fg="#0d47a1")
-        else:
-            lbl_val_ec.config(text="ERROR", fg="#c62828")
-            lbl_val_ph.config(text="ERROR", fg="#c62828")
-
-    if is_sensor_assigned("room_md02") and lbl_val_room_temp and lbl_val_room_humi:
-        if md02_data:
-            lbl_val_room_temp.config(text=f"{md02_data['room_temp']} °C", fg="#0d47a1")
-            lbl_val_room_humi.config(text=f"{md02_data['room_humi']} %", fg="#0d47a1")
-        else:
-            lbl_val_room_temp.config(text="ERROR", fg="#c62828")
-            lbl_val_room_humi.config(text="ERROR", fg="#c62828")
-
-    relay_states = {
-        "ec1": relay_ec1.is_active,
-        "ec2": relay_ec2.is_active,
-        "ph": relay_ph.is_active,
-        "solenoid": relay_solenoid.is_active,
-        "fan1": relay_fan1.is_active,
-        "fan2": relay_fan2.is_active,
-        "pad": relay_pad.is_active,
-        "fogger": relay_fogger.is_active,
-        "acf": relay_acf.is_active,
-        "sprinkler": relay_sprinkler.is_active,
-        "irrigation": relay_irrigation.is_active,
-        "timer1": relay_timer1.is_active,
-        "timer2": relay_timer2.is_active,
-    }
-    for r_key, is_on in relay_states.items():
-        lbl_st = labels_relays.get(r_key)
-        if lbl_st:
-            if is_on: lbl_st.config(text="ON", fg="#2e7d32")
-            else: lbl_st.config(text="OFF", fg="#c62828")
-
-    for pfx, name_k, def_title, relay_obj, start_k, stop_k, on_k, off_k in [
-        ("PAD",        "PAD Name",        "COOLING PAD PUMP",    relay_pad,        "PAD Start",    "PAD Stop",    "PAD ON Min",    "PAD OFF Min"),
-        ("ACF",        "ACF Name",        "AIR CIRCULATION FAN", relay_acf,        "ACF Start",    "ACF Stop",    "ACF ON Min",    "ACF OFF Min"),
-        ("Sprinkler",  "Sprinkler Name",  "OVERHEAD SPRINKLER",  relay_sprinkler,  "Sprinkler Start","Sprinkler Stop","Sprinkler ON Min","Sprinkler OFF Min"),
-        ("Irrigation", "Irrigation Name", "DAYTIME IRRIGATION",  relay_irrigation, "Irrigation Start","Irrigation Stop","Irrigation ON Min","Irrigation OFF Min"),
-        ("Timer1",     "Timer1 Name",     "WATER MIXING PUMP",   relay_timer1,     "Timer1 Start", "Timer1 Stop", "Timer1 ON Min", "Timer1 OFF Min"),
-        ("Timer2",     "Timer2 Name",     "CYCLIC TIMER 2",      relay_timer2,     "Timer2 Start", "Timer2 Stop", "Timer2 ON Min", "Timer2 OFF Min"),
-    ]:
-        lbl_tname = labels_timers.get(f"tname_{pfx}")
-        if lbl_tname:
-            lbl_tname.config(text=str(setpoints.get(name_k, def_title)).upper())
-
-        t_spec = labels_timers.get(pfx)
-        if t_spec:
-            start_t = setpoints.get(start_k, "06:00")
-            stop_t = setpoints.get(stop_k, "18:00")
-            window_str = f"{start_t} - {stop_t}"
-
-            try: on_min = int(float(setpoints.get(on_k, 5)))
-            except: on_min = 5
-            try: off_min = int(float(setpoints.get(off_k, 15)))
-            except: off_min = 15
-            cycle_str = f"{on_min}m ON / {off_min}m OFF"
-
-            t_st = timer_state.get(pfx, {"state": "OFF"})
-            state_str = t_st.get("state", "OFF")
-            is_active = relay_obj.is_active
-
-            if is_active or state_str == "ON":
-                status_str = f"ON ({state_str})"
-                status_fg = "#16a34a"
+        if is_sensor_assigned("water") and lbl_val_ec and lbl_val_ph:
+            if water_data:
+                tds = water_data['ec'] * 500
+                lbl_val_ec.config(text=f"{water_data['ec']:.3f} mS/cm ({tds:.0f} ppm)", fg="#0d47a1")
+                lbl_val_ph.config(text=f"{water_data['ph']:.2f}", fg="#0d47a1")
             else:
-                status_str = f"OFF ({state_str})"
-                status_fg = "#dc2626"
+                lbl_val_ec.config(text="ERROR", fg="#c62828")
+                lbl_val_ph.config(text="ERROR", fg="#c62828")
 
-            t_spec["status"].config(text=status_str, fg=status_fg)
-            t_spec["window"].config(text=window_str, fg="#0f172a")
-            t_spec["cycle"].config(text=cycle_str, fg="#0f172a")
+        if is_sensor_assigned("room_md02") and lbl_val_room_temp and lbl_val_room_humi:
+            if md02_data:
+                lbl_val_room_temp.config(text=f"{md02_data['room_temp']} °C", fg="#0d47a1")
+                lbl_val_room_humi.config(text=f"{md02_data['room_humi']} %", fg="#0d47a1")
+            else:
+                lbl_val_room_temp.config(text="ERROR", fg="#c62828")
+                lbl_val_room_humi.config(text="ERROR", fg="#c62828")
 
-    lbl_hname = labels_timers.get("tname_humi")
-    if lbl_hname:
-        lbl_hname.config(text=str(setpoints.get("HUMI Name", "FOGGER TIMER")).upper())
+        relay_states = {
+            "ec1": relay_ec1.is_active,
+            "ec2": relay_ec2.is_active,
+            "ph": relay_ph.is_active,
+            "solenoid": relay_solenoid.is_active,
+            "fan1": relay_fan1.is_active,
+            "fan2": relay_fan2.is_active,
+            "pad": relay_pad.is_active,
+            "fogger": relay_fogger.is_active,
+            "acf_sync": relay_acf_sync.is_active,
+            "acf": relay_acf.is_active,
+            "sprinkler": relay_sprinkler.is_active,
+            "irrigation": relay_irrigation.is_active,
+            "timer1": relay_timer1.is_active,
+            "timer2": relay_timer2.is_active,
+        }
+        for r_key, is_on in relay_states.items():
+            lbl_st = labels_relays.get(r_key)
+            if lbl_st:
+                if is_on: lbl_st.config(text="ON", fg="#2e7d32")
+                else: lbl_st.config(text="OFF", fg="#c62828")
 
-    h_spec = labels_timers.get("humi")
-    if h_spec:
-        d_str = f"{setpoints.get('HUMI D_ON Min',10)}m/{setpoints.get('HUMI D_OFF Min',20)}m ({setpoints.get('HUMI D_Start','06:00')}-{setpoints.get('HUMI D_Stop','18:00')})"
-        n_str = f"{setpoints.get('HUMI N_ON Min',5)}m/{setpoints.get('HUMI N_OFF Min',40)}m ({setpoints.get('HUMI N_Start','18:00')}-{setpoints.get('HUMI N_Stop','06:00')})"
+        for pfx, name_k, def_title, relay_obj, start_k, stop_k, on_k, off_k in [
+            ("PAD",        "PAD Name",        "COOLING PAD PUMP",    relay_pad,        "PAD Start",    "PAD Stop",    "PAD ON Min",    "PAD OFF Min"),
+            ("ACF",        "ACF Name",        "AIR CIRCULATION FAN", relay_acf,        "ACF Start",    "ACF Stop",    "ACF ON Min",    "ACF OFF Min"),
+            ("Sprinkler",  "Sprinkler Name",  "OVERHEAD SPRINKLER",  relay_sprinkler,  "Sprinkler Start","Sprinkler Stop","Sprinkler ON Min","Sprinkler OFF Min"),
+            ("Irrigation", "Irrigation Name", "DAYTIME IRRIGATION",  relay_irrigation, "Irrigation Start","Irrigation Stop","Irrigation ON Min","Irrigation OFF Min"),
+            ("Timer1",     "Timer1 Name",     "WATER MIXING PUMP",   relay_timer1,     "Timer1 Start", "Timer1 Stop", "Timer1 ON Min", "Timer1 OFF Min"),
+            ("Timer2",     "Timer2 Name",     "CYCLIC TIMER 2",      relay_timer2,     "Timer2 Start", "Timer2 Stop", "Timer2 ON Min", "Timer2 OFF Min"),
+        ]:
+            lbl_tname = labels_timers.get(f"tname_{pfx}")
+            if lbl_tname:
+                lbl_tname.config(text=str(setpoints.get(name_k, def_title)).upper())
 
-        is_active = relay_fogger.is_active
-        t_st = timer_state.get("humi", {"state": "OFF"})
-        st_val = t_st.get("state", "OFF")
+            t_spec = labels_timers.get(pfx)
+            if t_spec:
+                start_t = setpoints.get(start_k, "06:00")
+                stop_t = setpoints.get(stop_k, "18:00")
+                window_str = f"{start_t} - {stop_t}"
 
-        if is_active:
-            status_str = f"ON ({st_val})"
-            status_fg = "#2e7d32"
-        else:
-            status_str = f"OFF ({st_val})"
-            status_fg = "#c62828"
+                try: on_min = int(float(setpoints.get(on_k, 5)))
+                except: on_min = 5
+                try: off_min = int(float(setpoints.get(off_k, 15)))
+                except: off_min = 15
+                cycle_str = f"{on_min}m ON / {off_min}m OFF"
 
-        h_spec["status"].config(text=status_str, fg=status_fg)
-        h_spec["day_cycle"].config(text=d_str, fg="#0f172a")
-        h_spec["night_cycle"].config(text=n_str, fg="#0f172a")
+                t_st = timer_state.get(pfx, {"state": "OFF"})
+                state_str = t_st.get("state", "OFF")
+                is_active = relay_obj.is_active
 
-    if 'warn_box_frame' in globals():
-        existing_labels = list(warn_box_frame.winfo_children())
-        num_existing = len(existing_labels)
-        num_needed = len(warnings)
+                if is_active or state_str == "ON":
+                    status_str = f"ON ({state_str})"
+                    status_fg = "#16a34a"
+                else:
+                    status_str = f"OFF ({state_str})"
+                    status_fg = "#dc2626"
 
-        for i in range(min(num_existing, num_needed)):
-            w_text = warnings[i]
-            m = w_text.upper()
-            if "ERR" in m or "CUTOFF" in m or "DISABLED" in m: fg_col = "#dc2626"
-            elif "ON" in m or "ACTIVE" in m: fg_col = "#15803d"
-            else: fg_col = "#92400e"
+                t_spec["status"].config(text=status_str, fg=status_fg)
+                t_spec["window"].config(text=window_str, fg="#0f172a")
+                t_spec["cycle"].config(text=cycle_str, fg="#0f172a")
 
-            lbl = existing_labels[i]
-            if lbl.cget("text") != w_text or lbl.cget("fg") != fg_col:
-                lbl.config(text=w_text, fg=fg_col)
+        lbl_hname = labels_timers.get("tname_humi")
+        if lbl_hname:
+            lbl_hname.config(text=str(setpoints.get("HUMI Name", "FOGGER TIMER")).upper())
 
-        for i in range(num_existing, num_needed):
-            w_text = warnings[i]
-            m = w_text.upper()
-            if "ERR" in m or "CUTOFF" in m or "DISABLED" in m: fg_col = "#dc2626"
-            elif "ON" in m or "ACTIVE" in m: fg_col = "#15803d"
-            else: fg_col = "#92400e"
+        h_spec = labels_timers.get("humi")
+        if h_spec:
+            d_str = f"{setpoints.get('HUMI D_ON Min',10)}m/{setpoints.get('HUMI D_OFF Min',20)}m ({setpoints.get('HUMI D_Start','06:00')}-{setpoints.get('HUMI D_Stop','18:00')})"
+            n_str = f"{setpoints.get('HUMI N_ON Min',5)}m/{setpoints.get('HUMI N_OFF Min',40)}m ({setpoints.get('HUMI N_Start','18:00')}-{setpoints.get('HUMI N_Stop','06:00')})"
 
-            tk.Label(warn_box_frame, text=w_text, font=("Arial", 9, "bold"), fg=fg_col, bg="#e0e0e0", anchor="w", justify="left").pack(anchor="w")
+            is_active = relay_fogger.is_active
+            t_st = timer_state.get("humi", {"state": "OFF"})
+            st_val = t_st.get("state", "OFF")
 
-        for i in range(num_needed, num_existing):
-            existing_labels[i].destroy()
+            if is_active:
+                status_str = f"ON ({st_val})"
+                status_fg = "#2e7d32"
+            else:
+                status_str = f"OFF ({st_val})"
+                status_fg = "#c62828"
 
-    if 'lbl_clock' in globals():
-        lbl_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y\n%I:%M:%S %p"))
+            h_spec["status"].config(text=status_str, fg=status_fg)
+            h_spec["day_cycle"].config(text=d_str, fg="#0f172a")
+            h_spec["night_cycle"].config(text=n_str, fg="#0f172a")
 
-    publish_live_telemetry(water_data, md02_data)
-    save_local_telemetry(water_data, md02_data)
+        if 'warn_box_frame' in globals():
+            existing_labels = list(warn_box_frame.winfo_children())
+            num_existing = len(existing_labels)
+            num_needed = len(warnings)
 
-    root.after(1000, update)
+            for i in range(min(num_existing, num_needed)):
+                w_text = warnings[i]
+                m = w_text.upper()
+                if "ERR" in m or "CUTOFF" in m or "DISABLED" in m: fg_col = "#dc2626"
+                elif "ON" in m or "ACTIVE" in m: fg_col = "#15803d"
+                else: fg_col = "#92400e"
+
+                lbl = existing_labels[i]
+                if lbl.cget("text") != w_text or lbl.cget("fg") != fg_col:
+                    lbl.config(text=w_text, fg=fg_col)
+
+            for i in range(num_existing, num_needed):
+                w_text = warnings[i]
+                m = w_text.upper()
+                if "ERR" in m or "CUTOFF" in m or "DISABLED" in m: fg_col = "#dc2626"
+                elif "ON" in m or "ACTIVE" in m: fg_col = "#15803d"
+                else: fg_col = "#92400e"
+
+                tk.Label(warn_box_frame, text=w_text, font=("Arial", 9, "bold"), fg=fg_col, bg="#e0e0e0", anchor="w", justify="left").pack(anchor="w")
+
+            for i in range(num_needed, num_existing):
+                existing_labels[i].destroy()
+
+        if 'lbl_clock' in globals():
+            lbl_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y\n%I:%M:%S %p"))
+
+        publish_live_telemetry(water_data, md02_data)
+        save_local_telemetry(water_data, md02_data)
+    except Exception as e:
+        print(f"[UpdateError] Error in main update cycle: {e}")
+    finally:
+        root.after(1000, update)
+
+def wifi_network_watchdog():
+    consecutive_failures = 0
+    while True:
+        time.sleep(60)
+        is_online = False
+        for host in [("8.8.8.8", 53), ("1.1.1.1", 53)]:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(2.5)
+                res = s.connect_ex(host)
+                s.close()
+                if res == 0:
+                    is_online = True
+                    break
+            except Exception:
+                pass
+
+        if is_online:
+            consecutive_failures = 0
+            continue
+
+        consecutive_failures += 1
+
+        wifi_associated = False
+        try:
+            out = subprocess.check_output(['nmcli', '-t', '-f', 'TYPE,STATE', 'dev'], text=True, timeout=5)
+            for line in out.splitlines():
+                parts = line.strip().split(':')
+                if len(parts) >= 2 and parts[0] == 'wifi' and parts[1] == 'connected':
+                    wifi_associated = True
+                    break
+        except Exception:
+            pass
+
+        if (not wifi_associated and consecutive_failures >= 2) or (consecutive_failures >= 5):
+            print("[NetworkWatchdog] Wi-Fi link failure detected. Cycling Wi-Fi radio...")
+            try:
+                subprocess.run(["sudo", "nmcli", "radio", "wifi", "off"], capture_output=True, timeout=5)
+                time.sleep(2)
+                subprocess.run(["sudo", "nmcli", "radio", "wifi", "on"], capture_output=True, timeout=5)
+            except Exception as e:
+                print(f"[NetworkWatchdog] Wi-Fi reset error: {e}")
+            consecutive_failures = 0
+            time.sleep(20)
 
 def main():
     try:
@@ -2504,8 +3109,20 @@ def main():
     except Exception as e:
         print(f"Failed to start Offline Sync thread: {e}")
 
-    update()
-    root.mainloop()
+    try:
+        t_wifi = threading.Thread(target=wifi_network_watchdog, daemon=True)
+        t_wifi.start()
+        print(" Wi-Fi Self-Healing Watchdog started")
+    except Exception as e:
+        print(f"Failed to start Wi-Fi watchdog thread: {e}")
+
+    try:
+        update()
+        root.mainloop()
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        emergency_hardware_all_off()
 
 if __name__ == "__main__":
     main()

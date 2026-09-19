@@ -54,8 +54,8 @@ const LiveChart = memo(({ data = [], type = 'temperature', title, unit, subtitle
         </div>
         <span className="text-xs text-slate-400">{unit}</span>
       </div>
-      <div className="h-48">
-        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={100} debounce={100}>
+      <div className="h-48 w-full min-w-0" style={{ minWidth: 0, minHeight: 192 }}>
+        <ResponsiveContainer width="100%" height={192} minWidth={0} minHeight={100} debounce={50}>
           {isBoth ? (
             <LineChart data={safeData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />

@@ -1,16 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Save, CheckCircle2, RefreshCw, ChevronDown, Server,
   Thermometer, Droplets, Zap, Clock, ShieldCheck, Activity, Sliders,
-  Power, FlaskConical, AlertCircle, Wind, Fan, RotateCw, Edit3, Sprout, Layers
+  Power, FlaskConical, AlertCircle, Wind, Fan, RotateCw, Edit3, X
 } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
 const defaultSetpoints = {
-  // Agricultural Profile & Identification
-  "Crop Name": "Hydroponic Crop",
-  "Setup Name": "Monit Automated Dosing & Climate Setup",
-
   // Nutrients & pH
   "EC MIN": 1.2,
   "EC MAX": 1.8,
@@ -100,13 +96,35 @@ const MonitSettings = () => {
   const [loading, setLoading] = useState(true);
   const [client, setClient] = useState(null);
   const [liveData, setLiveData] = useState(null);
-  const [machineOnline, setMachineOnline] = useState(false);
+  const [isMachineOnline, setIsMachineOnline] = useState(false);
+  const lastTelemetryTimeRef = useRef(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    const ticker = setInterval(() => {
+      const isFresh = Boolean(
+        lastTelemetryTimeRef.current && (Date.now() - lastTelemetryTimeRef.current < 45000)
+      );
+      setIsMachineOnline((prev) => (prev !== isFresh ? isFresh : prev));
+    }, 3000);
+    return () => clearInterval(ticker);
+  }, []);
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [toast, setToast] = useState({ show: false, type: 'success', message: '' });
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState('');
+  const [confirmModal, setConfirmModal] = useState({ open: false, action: null });
+  const [commandLoading, setCommandLoading] = useState(false);
+  const [commandCooldown, setCommandCooldown] = useState(0);
+
+  useEffect(() => {
+    if (commandCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setCommandCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [commandCooldown]);
 
   const token = localStorage.getItem('token');
   const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -151,7 +169,6 @@ const MonitSettings = () => {
 
   useEffect(() => {
     setTempName(selectedDevice?.name || 'Monnet Device');
-    setMachineOnline(selectedDevice?.status === 'online');
     setIsEditingName(false);
   }, [deviceRoot, selectedDevice]);
 
@@ -190,6 +207,7 @@ const MonitSettings = () => {
       mqttClient.subscribe(`inhydro/${deviceRoot}/setpoints/current`);
       mqttClient.subscribe(`inhydro/${deviceRoot}/telemetry/live`);
       mqttClient.subscribe(`inhydro/${deviceRoot}/room1/telemetry/live`);
+      mqttClient.subscribe(`inhydro/${deviceRoot}/command/status`);
       mqttClient.publish(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
     });
 
@@ -199,7 +217,16 @@ const MonitSettings = () => {
           const parsed = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
           const payload = Array.isArray(parsed) ? parsed[parsed.length - 1] : parsed;
           setLiveData(payload);
-          setMachineOnline(true);
+          lastTelemetryTimeRef.current = Date.now();
+          setIsMachineOnline(true);
+        } catch (e) { }
+      }
+      else if (topic === `inhydro/${deviceRoot}/command/status` || topic?.endsWith('/command/status')) {
+        try {
+          const statusData = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
+          if (statusData?.status === 'executing') {
+            showToast('success', `Device acknowledged: Executing ${statusData.action} now...`);
+          }
         } catch (e) { }
       }
       else if (topic === `inhydro/${deviceRoot}/setpoints/current` || topic?.includes('/setpoints/')) {
@@ -320,6 +347,61 @@ const MonitSettings = () => {
     }
   };
 
+  const handleDeviceCommand = async (action) => {
+    if (!selectedDevice && !deviceRoot) return;
+    if (commandCooldown > 0) {
+      showToast('error', 'Command in progress. Please wait a moment.');
+      return;
+    }
+    setCommandLoading(true);
+    // Enforce brief 6s debounce cooldown in background (no timer countdown displayed)
+    setCommandCooldown(6);
+    // Close modal immediately so user cannot double-click
+    setConfirmModal({ open: false, action: null });
+
+    const cmd_id = `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const cmdPayload = { action, cmd_id, timestamp: Date.now() };
+    let sentViaWs = false;
+
+    // 1. Instant Direct WebSocket MQTT publish (sub-millisecond)
+    if (client && client.connected) {
+      try {
+        client.publish(`inhydro/${deviceRoot}/command`, JSON.stringify(cmdPayload), { retain: false });
+        sentViaWs = true;
+        showToast('success', `${action === 'restart' ? 'Restart' : 'Exit'} command dispatched to "${selectedDevice?.name || deviceRoot}"`);
+        setCommandLoading(false);
+      } catch (err) {
+        console.warn("Direct MQTT command publish failed, falling back to REST API:", err);
+      }
+    }
+
+    // 2. Fallback via backend REST API ONLY if WebSocket was not connected or failed
+    if (!sentViaWs) {
+      try {
+        const deviceId = selectedDevice?._id || deviceRoot;
+        const res = await fetch(`${API_BASE}/api/devices/${deviceId}/command`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(cmdPayload),
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('success', `${action === 'restart' ? 'Restart' : 'Exit'} command dispatched to "${selectedDevice?.name || deviceRoot}"`);
+        } else {
+          showToast('error', data.message || `Failed to dispatch ${action} command`);
+        }
+      } catch (err) {
+        console.error("Command error:", err);
+        showToast('error', `Failed to send ${action} command to device.`);
+      } finally {
+        setCommandLoading(false);
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center rounded-2xl border border-slate-700 bg-slate-800/20">
@@ -338,7 +420,6 @@ const MonitSettings = () => {
     );
   }
 
-  const isMachineOnline = machineOnline;
   const ecVal = isMachineOnline && liveData?.ec != null && Number(liveData.ec) > 0 ? Number(liveData.ec) : null;
   const tdsPpm = isMachineOnline && Number.isFinite(ecVal) && ecVal > 0 ? Math.round(ecVal * 500) : null;
 
@@ -445,6 +526,76 @@ const MonitSettings = () => {
         </div>
       )}
 
+      {/* Remote Script Action Confirmation Modal */}
+      {confirmModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="flex items-center gap-2 text-base font-bold text-white">
+                {confirmModal.action === 'restart' ? (
+                  <>
+                    <RotateCw className="h-4 w-4 text-amber-400" />
+                    Restart Device
+                  </>
+                ) : (
+                  <>
+                    <Power className="h-4 w-4 text-rose-400" />
+                    Exit
+                  </>
+                )}
+              </h3>
+              <button
+                onClick={() => setConfirmModal({ open: false, action: null })}
+                className="rounded-lg p-1 text-slate-400 hover:text-white hover:bg-slate-800 transition-all"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-sm text-slate-300 leading-relaxed">
+              Are you sure you want to {confirmModal.action === 'restart' ? 'restart' : 'exit'}{' '}
+              <span className="font-semibold text-white">"{selectedDevice?.name || deviceRoot}"</span>?
+            </p>
+
+            <div className="flex justify-end gap-2.5 pt-2">
+              <button
+                onClick={() => setConfirmModal({ open: false, action: null })}
+                disabled={commandLoading}
+                className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeviceCommand(confirmModal.action)}
+                disabled={commandLoading || commandCooldown > 0}
+                className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-lg active:scale-95 disabled:opacity-50 transition-all ${
+                  confirmModal.action === 'restart'
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/20 hover:from-amber-400 hover:to-orange-400'
+                    : 'bg-gradient-to-r from-rose-600 to-red-600 shadow-rose-600/20 hover:from-rose-500 hover:to-red-500'
+                }`}
+              >
+                {commandLoading ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Sending...
+                  </>
+                ) : confirmModal.action === 'restart' ? (
+                  <>
+                    <RotateCw className="h-4 w-4" />
+                    Restart
+                  </>
+                ) : (
+                  <>
+                    <Power className="h-4 w-4" />
+                    Exit
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Header Controls */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
@@ -518,6 +669,27 @@ const MonitSettings = () => {
             <RefreshCw className="h-4 w-4 text-slate-400" /> Sync Device
           </button>
 
+          {/* Remote Script Controls */}
+          <button
+            onClick={() => setConfirmModal({ open: true, action: 'restart' })}
+            disabled={commandCooldown > 0}
+            title="Restart Device"
+            className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 hover:border-amber-400 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+          >
+            <RotateCw className={`h-4 w-4 text-amber-400 ${commandCooldown > 0 ? 'animate-spin' : ''}`} />
+            Restart Device
+          </button>
+
+          <button
+            onClick={() => setConfirmModal({ open: true, action: 'exit' })}
+            disabled={commandCooldown > 0}
+            title="Exit"
+            className="flex items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 hover:border-rose-400 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+          >
+            <Power className="h-4 w-4 text-rose-400" />
+            Exit
+          </button>
+
           {/* Differentiated Status Indicators: Broker vs Machine */}
           <div className="flex items-center gap-2.5">
             {/* Broker Status */}
@@ -548,19 +720,19 @@ const MonitSettings = () => {
 
             {/* Machine Hardware Status */}
             <div className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold ${
-              machineOnline
+              isMachineOnline
                 ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
                 : 'border-slate-700/50 bg-slate-900/60 text-slate-400'
             }`}>
-              <span className={`h-2 w-2 rounded-full ${machineOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-              {machineOnline ? 'Machine Online' : 'Machine Offline'}
+              <span className={`h-2 w-2 rounded-full ${isMachineOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+              {isMachineOnline ? 'Machine Online' : 'Machine Offline'}
             </div>
           </div>
         </div>
       </div>
 
       {/* Machine Offline Retained-Message Notice */}
-      {!machineOnline && (
+      {!isMachineOnline && (
         <div className="flex items-center gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5 text-xs text-amber-300/90 shadow-sm">
           <AlertCircle className="h-4 w-4 shrink-0 text-amber-400" />
           <span>
@@ -588,45 +760,6 @@ const MonitSettings = () => {
       {/* SECTION 1: SYSTEM SETPOINTS CONFIGURATION */}
       {viewMode === 'setpoints' && (
         <div className="space-y-6">
-          {/* Active Crop & Setup Profile Bar */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-xl border border-slate-700/50 bg-slate-800/30 p-4">
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Sprout className="h-4 w-4 text-emerald-400" />
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Active Crop:</span>
-                <span className="text-sm font-bold text-white">{setpoints["Crop Name"] || "Hydroponic Crop"}</span>
-              </div>
-              <div className="hidden sm:block h-4 w-px bg-slate-700" />
-              <div className="flex items-center gap-2">
-                <Layers className="h-4 w-4 text-blue-400" />
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Setup:</span>
-                <span className="text-sm font-bold text-white">{setpoints["Setup Name"] || "Monit Setup"}</span>
-              </div>
-            </div>
-            <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
-              <div className="w-full sm:w-56 flex flex-col gap-1">
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Active Crop Name</label>
-                <input
-                  type="text"
-                  value={setpoints["Crop Name"] ?? ""}
-                  onChange={(e) => handleInputChange("Crop Name", e.target.value)}
-                  placeholder="e.g. Lettuce, Tomato"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white font-semibold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
-                />
-              </div>
-              <div className="w-full sm:w-56 flex flex-col gap-1">
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Setup / System Name</label>
-                <input
-                  type="text"
-                  value={setpoints["Setup Name"] ?? ""}
-                  onChange={(e) => handleInputChange("Setup Name", e.target.value)}
-                  placeholder="e.g. Dosing Bay 1"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white font-semibold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
-                />
-              </div>
-            </div>
-          </div>
-
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
             {/* LEFT COLUMN: NUTRIENTS & PH + FOGGER HUMIDIFIER DAY/NIGHT */}

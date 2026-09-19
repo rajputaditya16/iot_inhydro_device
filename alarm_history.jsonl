@@ -5788,3 +5788,8 @@
 {"timestamp": "2026-09-11T13:48:23.042371+05:30", "skey": "PH-03", "sensor_name": "POLYHOUSE 03", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 03 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
 {"timestamp": "2026-09-11T13:48:23.043252+05:30", "skey": "PH-04", "sensor_name": "POLYHOUSE 04", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 04 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
 {"timestamp": "2026-09-11T13:48:23.044305+05:30", "skey": "PH-05", "sensor_name": "POLYHOUSE 05", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 05 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-09-16T13:14:49.675435+05:30", "skey": "PH-01", "sensor_name": "POLYHOUSE 01", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 01 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-09-16T13:14:49.676322+05:30", "skey": "PH-02", "sensor_name": "POLYHOUSE 02", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 02 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-09-16T13:14:49.676923+05:30", "skey": "PH-03", "sensor_name": "POLYHOUSE 03", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 03 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-09-16T13:14:49.677353+05:30", "skey": "PH-04", "sensor_name": "POLYHOUSE 04", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 04 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-09-16T13:14:49.677672+05:30", "skey": "PH-05", "sensor_name": "POLYHOUSE 05", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 05 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}

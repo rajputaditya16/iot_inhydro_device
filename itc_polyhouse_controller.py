@@ -848,26 +848,34 @@ except Exception: pass
 # -----------------------------------------------------------------------------
 def set_wifi(ssid, password):
     try:
-        subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True)
-        command = ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password]
-        result = subprocess.run(command, capture_output=True, text=True)
-        if "key-mgmt" in result.stderr:
-            fallback_cmd = ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password, 'wifi-sec.key-mgmt', 'wpa-psk']
-            result_fallback = subprocess.run(fallback_cmd, capture_output=True, text=True)
-            if result_fallback.returncode == 0:
-                log_alarm_event("SYSTEM", f"WiFi connected to {ssid}", "CONNECTED", "ONLINE")
-                set_ui_toast(f"✔ WiFi CONNECTED: {ssid}")
-                return f"SUCCESS: Connected to '{ssid}'!"
-            else:
-                return f"FAILED: {result_fallback.stderr.strip()}"
-        if result.returncode == 0:
-            log_alarm_event("SYSTEM", f"WiFi connected to {ssid}", "CONNECTED", "ONLINE")
-            set_ui_toast(f"✔ WiFi CONNECTED: {ssid}")
+        ssid = str(ssid).strip()
+        password = str(password).strip()
+        if not ssid:
+            return "FAILED: Empty SSID"
+        try:
+            subprocess.run(['sudo', 'rfkill', 'unblock', 'wifi'], capture_output=True, timeout=3)
+            subprocess.run(['sudo', 'nmcli', 'radio', 'wifi', 'on'], capture_output=True, timeout=3)
+        except Exception: pass
+        try:
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+            subprocess.run(['sudo', 'nmcli', 'connection', 'delete', ssid], capture_output=True, timeout=4)
+        except Exception: pass
+        cmd = ['sudo', 'nmcli', '--wait', '15', 'device', 'wifi', 'connect', ssid]
+        if password:
+            cmd += ['password', password]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=18)
+        if res.returncode != 0 and password:
+            try:
+                subprocess.run(['sudo', 'nmcli', 'connection', 'delete', 'id', ssid], capture_output=True, timeout=4)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'add', 'type', 'wifi', 'con-name', ssid, 'ssid', ssid], capture_output=True, timeout=8)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'modify', ssid, '802-11-wireless-security.key-mgmt', 'wpa-psk', '802-11-wireless-security.psk', password], capture_output=True, timeout=6)
+                res = subprocess.run(['sudo', 'nmcli', '--wait', '15', 'connection', 'up', 'id', ssid], capture_output=True, text=True, timeout=18)
+            except Exception: pass
+        if res.returncode == 0:
             return f"SUCCESS: Connected to '{ssid}'!"
-        else:
-            return f"FAILED: {result.stderr.strip()}"
-    except Exception as e:
-        return f"ERROR: {str(e)}"
+        err_msg = res.stderr.strip() or res.stdout.strip() or "Connection failed"
+        return f"FAILED: {err_msg}"
+    except Exception as e: return f"ERROR: {str(e)}"
 
 def scan_wifi():
     try:

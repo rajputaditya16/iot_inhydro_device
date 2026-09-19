@@ -1,10 +1,10 @@
 {
-    "relay_port": "/dev/serial/by-path/usb-0:1:2:1:0-port0",
-    "upload_frequency_min": 1,
+    "relay_port": "/dev/serial/by-path/platform-xhci-hcd.1-usb-0:2:1.0-port0",
+    "upload_frequency_min": 5,
     "temp_alarm_offset": 5,
     "humi_alarm_offset": 5,
     "sensor_names": {
-        "S1": "COLD",
+        "S1": "Cold Room 1",
         "S2": "Cold Room 2",
         "S3": "Cold Room 3",
         "S4": "Cold Room 4",
@@ -13,7 +13,10 @@
         "S7": "Greenhouse"
     },
     "room_paused": {
-        "S1": false,
-        "S2": false
-    }
+        "S1": false
+    },
+    "upload_hours": 0,
+    "upload_mins": 5,
+    "upload_secs": 0,
+    "upload_frequency_sec": 300
 }

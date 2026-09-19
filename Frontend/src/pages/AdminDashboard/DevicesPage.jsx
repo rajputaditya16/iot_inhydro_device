@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Cpu, Search, Plus, MapPin, Activity, Edit2, Trash2, PowerOff, ShieldAlert, Radio, Info, Copy, Check, Calendar, Clock } from 'lucide-react';
+import { Cpu, Search, Plus, MapPin, Activity, Edit2, Trash2, PowerOff, ShieldAlert, Radio, Info, Copy, Check, Calendar, Clock, Sliders } from 'lucide-react';
 import { getStatusBg, getStatusDot, formatTimestamp } from '../../utils/helpers';
 import { SkeletonTable } from '../../components/Skeleton';
 import EmptyState from '../../components/EmptyState';
@@ -303,6 +303,26 @@ const DevicesPage = () => {
                           <Activity className="h-4 w-4" />
                         </button>
 
+                        <button
+                          onClick={() => {
+                            if (device.deviceType === 'cold_storage') {
+                              navigate(`/cold-storage?device=${deviceId}&mqttId=${device.mqttId || ''}`);
+                            } else if (device.deviceType === 'monit' || device.deviceType === 'monnet') {
+                              navigate(`/monit-settings?device=${deviceId}&mqttId=${device.mqttId || ''}`);
+                            } else if (device.deviceType === 'almora') {
+                              navigate(`/almora-settings?device=${deviceId}&mqttId=${device.mqttId || ''}`);
+                            } else if (device.deviceType === 'almora2' || device.deviceType === 'almora2_full') {
+                              navigate(`/almora2-settings?device=${deviceId}&mqttId=${device.mqttId || ''}`);
+                            } else {
+                              navigate(`/cold-storage?device=${deviceId}&mqttId=${device.mqttId || ''}`);
+                            }
+                          }}
+                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-sky-500/10 hover:text-sky-400"
+                          title="Device Settings & Setpoints"
+                        >
+                          <Sliders className="h-4 w-4" />
+                        </button>
+
                         {isAdmin && (
                           <>
                             <div className="w-px h-4 bg-slate-700/50 mx-1"></div>
@@ -394,6 +414,7 @@ const DevicesPage = () => {
                     className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
                   >
                     <option value="system2">Standard System (system2.py)</option>
+                    <option value="cold_storage">Cold Storage Almora (sensor_monitor2_almora.py)</option>
                     <option value="controlling">InHydro Controller (controlling.py)</option>
                     <option value="monit">Monnet Controller (monit.py)</option>
                     <option value="monnet">Monnet Controller (monnet.py)</option>
@@ -562,14 +583,15 @@ const DevicesPage = () => {
                     <p className="text-xs text-slate-400 mt-1 font-mono">
                       Type: <span className="text-slate-300 font-semibold">{
                         selectedDeviceDetails.deviceType === 'system2' ? 'Standard System' :
-                          selectedDeviceDetails.deviceType === 'controlling' ? 'InHydro Controller' :
-                            selectedDeviceDetails.deviceType === 'almora' ? 'Almora Machine' :
-                              selectedDeviceDetails.deviceType === 'almora2' ? 'Almora Machine 2' :
-                                selectedDeviceDetails.deviceType === 'multi_sensor' ? 'Cold Storage (Multi)' :
-                                  selectedDeviceDetails.deviceType === 'light_motor_pump' ? 'Light Motor Pump' :
-                                    selectedDeviceDetails.deviceType === 'office_control' ? 'Office Control' :
-                                      selectedDeviceDetails.deviceType === 'monit' || selectedDeviceDetails.deviceType === 'monnet' ? 'Monnet Controller' :
-                                        selectedDeviceDetails.deviceType || 'Unknown'
+                          selectedDeviceDetails.deviceType === 'cold_storage' ? 'Cold Storage Almora' :
+                            selectedDeviceDetails.deviceType === 'controlling' ? 'InHydro Controller' :
+                              selectedDeviceDetails.deviceType === 'almora' ? 'Almora Machine' :
+                                selectedDeviceDetails.deviceType === 'almora2' ? 'Almora Machine 2' :
+                                  selectedDeviceDetails.deviceType === 'multi_sensor' ? 'Cold Storage (Multi)' :
+                                    selectedDeviceDetails.deviceType === 'light_motor_pump' ? 'Light Motor Pump' :
+                                      selectedDeviceDetails.deviceType === 'office_control' ? 'Office Control' :
+                                        selectedDeviceDetails.deviceType === 'monit' || selectedDeviceDetails.deviceType === 'monnet' ? 'Monnet Controller' :
+                                          selectedDeviceDetails.deviceType || 'Unknown'
                       }</span>
                     </p>
                   </div>
@@ -724,6 +746,29 @@ const DevicesPage = () => {
                   className="flex items-center gap-1.5 rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-2 text-xs font-semibold text-green-400 hover:bg-green-500 hover:text-white transition-all shadow-md shadow-green-500/5"
                 >
                   <Activity className="h-3.5 w-3.5" /> Live Monitoring
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDetailsModal(false);
+                    const devId = selectedDeviceDetails._id || selectedDeviceDetails.id;
+                    const mId = selectedDeviceDetails.mqttId || '';
+                    if (selectedDeviceDetails.deviceType === 'cold_storage') {
+                      navigate(`/cold-storage?device=${devId}&mqttId=${mId}`);
+                    } else if (selectedDeviceDetails.deviceType === 'monit' || selectedDeviceDetails.deviceType === 'monnet') {
+                      navigate(`/monit-settings?device=${devId}&mqttId=${mId}`);
+                    } else if (selectedDeviceDetails.deviceType === 'almora') {
+                      navigate(`/almora-settings?device=${devId}&mqttId=${mId}`);
+                    } else if (selectedDeviceDetails.deviceType === 'almora2' || selectedDeviceDetails.deviceType === 'almora2_full') {
+                      navigate(`/almora2-settings?device=${devId}&mqttId=${mId}`);
+                    } else {
+                      navigate(`/cold-storage?device=${devId}&mqttId=${mId}`);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-xs font-semibold text-sky-400 hover:bg-sky-500 hover:text-white transition-all shadow-md shadow-sky-500/5"
+                >
+                  <Sliders className="h-3.5 w-3.5" /> Configure Setpoints
                 </button>
               </div>
 

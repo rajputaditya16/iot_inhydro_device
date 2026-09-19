@@ -370,7 +370,7 @@ def update_ui():
         return
 
     # ── Clock ──
-    lbl_clock.config(text=time.strftime("%H:%M:%S   %d %b %Y"))
+    lbl_clock.config(text=time.strftime("%H:%M:%S   %d-%m-%Y"))
 
     # ── Drain log queue into terminal widget ──
     with log_lock:

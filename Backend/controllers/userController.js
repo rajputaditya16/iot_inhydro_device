@@ -289,12 +289,11 @@ exports.getLocations = async (req, res) => {
   try {
     let locations;
 
-    // Admin → only locations from their superadmin-assigned devices
-    if (req.user && req.user.role === 'admin') {
-      const assignedDevices = req.user.assignedDevices || [];
-      locations = await Device.distinct('location', { _id: { $in: assignedDevices } });
+    // Admin → only locations from their superadmin-assigned devices (if restricted)
+    if (req.user && req.user.role === 'admin' && req.user.assignedDevices && req.user.assignedDevices.length > 0) {
+      locations = await Device.distinct('location', { _id: { $in: req.user.assignedDevices } });
     } else {
-      // Superadmin → all locations
+      // Superadmin or unrestricted Admin → all locations
       locations = await Device.distinct('location');
     }
 

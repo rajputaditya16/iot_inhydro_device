@@ -22,6 +22,7 @@ import {
 import { SkeletonTable } from '../../components/Skeleton';
 import EmptyState from '../../components/EmptyState';
 import Modal from '../../components/Modal';
+import { formatDateDMY } from '../../utils/helpers';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -889,7 +890,7 @@ const AdminManagement = () => {
                                   </span>
                                 </td>
                                 <td className="py-3 px-4 text-xs text-slate-400">
-                                  {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : 'N/A'}
+                                  {u.createdAt ? formatDateDMY(u.createdAt) : 'N/A'}
                                 </td>
                               </tr>
                             );
