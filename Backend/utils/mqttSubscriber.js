@@ -116,7 +116,7 @@ const startMqttSubscriber = () => {
           fs.writeFileSync(cropFile, JSON.stringify(updated, null, 4));
         }
 
-        const targetIds = Array.from(new Set([mqttId, 'cold_room', 'cold_storage', 'control123'].filter(Boolean)));
+        const targetIds = Array.from(new Set([mqttId, mqttId.toLowerCase()].filter(Boolean)));
 
         if (payloadData?.sensor_setpoints && typeof payloadData.sensor_setpoints === 'object') {
           for (const id of targetIds) {

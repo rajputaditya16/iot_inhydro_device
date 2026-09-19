@@ -1,10 +1,10 @@
 {
     "relay_port": "/dev/serial/by-path/platform-xhci-hcd.1-usb-0:2:1.0-port0",
     "upload_hours": 0,
-    "upload_mins": 5,
-    "upload_secs": 0,
-    "upload_frequency_min": 5,
-    "upload_frequency_sec": 300,
+    "upload_mins": 0,
+    "upload_secs": 1,
+    "upload_frequency_min": 0.0167,
+    "upload_frequency_sec": 1,
     "temp_alarm_offset": 5,
     "humi_alarm_offset": 5,
     "room_paused": {

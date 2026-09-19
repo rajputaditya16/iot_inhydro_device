@@ -285,6 +285,17 @@ def generate_default_almora_schedule():
         "settings": stages
     }
 
+def get_sensor_display_name(skey):
+    custom_names = system_config.get("sensor_names", {})
+    if skey in custom_names and custom_names[skey].strip():
+        return custom_names[skey].strip()
+    if skey == "S7": return "Greenhouse"
+    return f"Cold Room {skey.replace('S', '')}"
+
+def get_f_name(skey):
+    if skey == "S7": return "Fanpad"
+    return "AC"
+
 def log_alarm_event(skey, msg, actual_val, target_val):
     ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
     now_iso = datetime.datetime.now(ist_tz).isoformat()
@@ -363,6 +374,22 @@ def load_config():
             with open(CONFIG_FILE, 'r') as f:
                 system_config = json.load(f)
         except Exception: pass
+
+    if "sensor_names" not in system_config or not isinstance(system_config["sensor_names"], dict):
+        system_config["sensor_names"] = {}
+    default_sensor_names = {
+        "S1": "Cold Room 1",
+        "S2": "Cold Room 2",
+        "S3": "Cold Room 3",
+        "S4": "Cold Room 4",
+        "S5": "Cold Room 5",
+        "S6": "Cold Room 6",
+        "S7": "Greenhouse"
+    }
+    for sk, def_nm in default_sensor_names.items():
+        if sk not in system_config["sensor_names"] or not str(system_config["sensor_names"][sk]).strip():
+            system_config["sensor_names"][sk] = def_nm
+
     if 'upload_frequency_min' not in system_config:
         system_config['upload_frequency_min'] = 0
     if 'upload_hours' not in system_config or 'upload_mins' not in system_config or 'upload_secs' not in system_config:
@@ -422,6 +449,11 @@ def load_setpoints():
         else:
             if "program_name" not in sensor_setpoints[skey] or not str(sensor_setpoints[skey]["program_name"]).strip():
                 sensor_setpoints[skey]["program_name"] = "Default Program"
+            if "crop_name" not in sensor_setpoints[skey] or not str(sensor_setpoints[skey]["crop_name"]).strip():
+                sensor_setpoints[skey]["crop_name"] = "Default Crop"
+            if "setup_name" not in sensor_setpoints[skey] or not str(sensor_setpoints[skey]["setup_name"]).strip():
+                sensor_setpoints[skey]["setup_name"] = f"Cold Room Setup {skey.replace('S', '')}"
+
             if "settings" not in sensor_setpoints[skey] or not isinstance(sensor_setpoints[skey]["settings"], dict):
                 defaults = copy.deepcopy(generate_default_almora_schedule())
                 defaults.update(sensor_setpoints[skey])
@@ -478,60 +510,51 @@ def broadcast_current_state():
         norm_rooms = {}
         for idx, (skey, port) in enumerate(SENSOR_MAP.items()):
             d = snap_sensor_data.get(port)
-            if d and d.get('status') == 'OK':
-                norm_rooms[skey] = {
-                    "id": idx + 1,
-                    "t": d.get('temp', 0.0),
-                    "h": d.get('humi', 0.0),
-                    "co2": d.get('co2'),
-                    "status": "OK"
-                }
-            elif d and d.get('status') == 'ERROR':
-                norm_rooms[skey] = {"id": idx + 1, "t": 0.0, "h": 0.0, "co2": None, "status": "ERROR"}
-            else:
-                norm_rooms[skey] = {"id": idx + 1, "t": 0.0, "h": 0.0, "co2": None, "status": "OFFLINE"}
+            sp_eval = get_active_setpoints(skey)
+            is_paused = is_room_paused(skey)
+            norm_rooms[skey] = {
+                "name": get_sensor_display_name(skey),
+                "temp": d.get('temp') if d and d.get('status') == 'OK' else None,
+                "humi": d.get('humi') if d and d.get('status') == 'OK' else None,
+                "co2": d.get('co2') if d and d.get('status') == 'OK' else None,
+                "status": d.get('status', 'OFFLINE') if d else 'OFFLINE',
+                "paused": is_paused,
+                "program_name": sp_eval.get("program_name", "Default Program"),
+                "stage_name": sp_eval.get("stage_name") or sp_eval.get("setting_name", "Crop Stage 1"),
+                "slot_name": sp_eval.get("slot_name", "Slot 1"),
+                "slot_id": sp_eval.get("slot_id", 1),
+                "target_temp": sp_eval.get("target_temp", 24.0),
+                "target_humi": sp_eval.get("target_humi", 60.0),
+                "cooling": bool(relay_states.get((idx * 3) + 1, False)),
+                "humidifier": bool(relay_states.get((idx * 3) + 2, False)),
+                "grow_lights": bool(relay_states.get((idx * 3) + 3, False)),
+                "photoperiod_on": sp_eval.get("photoperiod_on", "06:00 AM"),
+                "photoperiod_off": sp_eval.get("photoperiod_off", "08:00 PM"),
+                "T MIN": sp_eval.get("T MIN", 10.0),
+                "T MAX": sp_eval.get("T MAX", 30.0),
+                "H MIN": sp_eval.get("H MIN", 30.0),
+                "H MAX": sp_eval.get("H MAX", 80.0)
+            }
 
-        load_crop_programs()
-        all_progs = get_all_crop_programs()
-        payload = {
-            "source": "device",
-            "device": DEVICE_NAME,
+        state_payload = {
             "device_id": DEVICE_NAME,
             "timestamp": ts_str,
-            "system_config": system_config,
-            "room_paused_states": room_paused_states,
+            "source": "device",
+            "rooms": norm_rooms,
             "sensor_setpoints": sensor_setpoints,
-            "crop_programs": all_progs,
-            "saved_programs": all_progs,
-            "room_crop_programs": crop_programs,
-            "sensor_data": snap_sensor_data,
-            "S1": norm_rooms.get("S1"),
-            "S2": norm_rooms.get("S2"),
-            "S3": norm_rooms.get("S3"),
-            "S4": norm_rooms.get("S4"),
-            "S5": norm_rooms.get("S5"),
-            "S6": norm_rooms.get("S6"),
-            "S7": norm_rooms.get("S7"),
-            "active_warnings": active_warnings,
-            "relay_states": relay_states
+            "system_config": system_config,
+            "crop_programs": crop_programs
         }
-        json_payload = json.dumps(payload)
         try:
-            control_client.publish(CURRENT_SETP_TOPIC, json_payload, retain=True)
-            control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", json_payload, retain=False)
-            if DEVICE_NAME != DEVICE_NAME.lower():
-                control_client.publish(f"inhydro/{DEVICE_NAME.lower()}/setpoints/current", json_payload, retain=True)
-                control_client.publish(f"inhydro/{DEVICE_NAME.lower()}/telemetry/live", json_payload, retain=False)
-            for fallback_id in ["cold_room", "cold_storage", "control123"]:
-                if DEVICE_NAME.lower() != fallback_id:
-                    control_client.publish(f"inhydro/{fallback_id}/setpoints/current", json_payload, retain=True)
-                    control_client.publish(f"inhydro/{fallback_id}/telemetry/live", json_payload, retain=False)
-            print(f"[SYNC→WEB] Sent setpoints & telemetry update to inhydro/{DEVICE_NAME}/setpoints/current")
-        except Exception as e: print(f"Broadcast err: {e}")
+            control_client.publish(f"inhydro/{DEVICE_NAME}/state", json.dumps(state_payload), retain=True)
+            control_client.publish(f"inhydro/{DEVICE_NAME}/setpoints/current", json.dumps(state_payload), retain=True)
+        except Exception as e:
+            print(f"[BROADCAST ERROR] {e}")
 
 def get_setpoints(skey):
+    global sensor_setpoints
     if skey not in sensor_setpoints:
-        sensor_setpoints[skey] = generate_default_almora_schedule()
+        sensor_setpoints[skey] = copy.deepcopy(generate_default_almora_schedule())
     return sensor_setpoints[skey]
 
 def get_active_setpoints(skey):
@@ -543,27 +566,30 @@ def get_active_setpoints(skey):
     h_min = float(sp_data.get("H MIN", 30.0))
     h_max = float(sp_data.get("H MAX", 80.0))
     
-    active_info = {
-        "skey": skey,
-        "setting_name": "STATIC",
-        "program_name": sp_data.get("program_name", "Default Program"),
-        "stage_name": "Stage 1",
-        "slot_id": 1,
-        "start": "08:00 AM",
-        "stop": "12:00 PM",
-        "target_temp": round((t_min + t_max) / 2.0, 1),
-        "target_humi": round((h_min + h_max) / 2.0, 1),
-        "photoperiod_on": "06:00 AM",
-        "photoperiod_off": "08:00 PM",
-        "lighting_enabled": True,
-        "T MIN": t_min,
-        "T MAX": t_max,
-        "H MIN": h_min,
-        "H MAX": h_max
-    }
+    prog_name = sp_data.get("program_name") or "Default Program"
+    crop_name = sp_data.get("crop_name") or "Default Crop"
 
-    if mode != "SCHEDULED":
-        return active_info
+    if mode == "STATIC":
+        return {
+            "skey": skey,
+            "setting_name": "Static Mode",
+            "stage_name": "Static Mode",
+            "slot_name": "Static Setpoints",
+            "slot_id": 1,
+            "program_name": prog_name,
+            "crop_name": crop_name,
+            "start": "12:00 AM",
+            "stop": "11:59 PM",
+            "target_temp": round((t_min + t_max) / 2.0, 1),
+            "target_humi": round((h_min + h_max) / 2.0, 1),
+            "photoperiod_on": "06:00 AM",
+            "photoperiod_off": "08:00 PM",
+            "lighting_enabled": True,
+            "T MIN": t_min,
+            "T MAX": t_max,
+            "H MIN": h_min,
+            "H MAX": h_max
+        }
 
     ist_tz = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
     now = datetime.datetime.now(ist_tz)
@@ -574,66 +600,129 @@ def get_active_setpoints(skey):
     setting_keys = ["Setting A", "Setting B", "Setting C", "Setting D", "Setting E", 
                     "Setting F", "Setting G", "Setting H", "Setting I", "Setting J"]
 
+    # 1. Stage Resolution: Find stage by date match, or fallback to active_setting / first enabled stage
+    active_stage = None
+    active_stage_key = None
+
     for set_key in setting_keys:
-        setting = settings.get(set_key)
-        if not setting or not setting.get("enabled", True):
+        st = settings.get(set_key)
+        if not st or not st.get("enabled", True):
             continue
-
-        s_date_obj = parse_date_str(setting.get("start_date", ""))
-        e_date_obj = parse_date_str(setting.get("end_date", ""))
-
+        s_date_obj = parse_date_str(st.get("start_date", ""))
+        e_date_obj = parse_date_str(st.get("end_date", ""))
         if s_date_obj and e_date_obj:
-            if not (s_date_obj <= today_dt <= e_date_obj):
-                continue
+            if s_date_obj <= today_dt <= e_date_obj:
+                active_stage = st
+                active_stage_key = set_key
+                break
 
-        p_on = setting.get("photoperiod_on", "06:00 AM")
-        p_off = setting.get("photoperiod_off", "08:00 PM")
-        l_enabled = setting.get("lighting_enabled", True)
+    # If no date match, fallback to configured active_setting if enabled
+    if not active_stage:
+        pref_key = sp_data.get("active_setting", "Setting A")
+        if pref_key in settings and settings[pref_key].get("enabled", True):
+            active_stage = settings[pref_key]
+            active_stage_key = pref_key
 
-        time_slots = setting.get("time_slots", [])
+    # If still none, fallback to first enabled stage
+    if not active_stage:
+        for set_key in setting_keys:
+            st = settings.get(set_key)
+            if st and st.get("enabled", True):
+                active_stage = st
+                active_stage_key = set_key
+                break
+
+    # If no stages enabled, fallback to Setting A or default
+    if not active_stage:
+        active_stage = settings.get("Setting A", {
+            "name": "Crop Stage 1",
+            "start_date": "01-01-2026",
+            "end_date": "31-12-2026",
+            "enabled": True,
+            "photoperiod_on": "06:00 AM",
+            "photoperiod_off": "08:00 PM",
+            "lighting_enabled": True,
+            "time_slots": [
+                {"id": 1, "name": "Slot 1", "start": "12:00 AM", "stop": "11:59 PM", "t_set": 24.0, "t_max": 25.0, "t_min": 20.0, "h_set": 60.0, "h_max": 70.0, "h_min": 55.0, "enabled": True}
+            ]
+        })
+        active_stage_key = "Setting A"
+
+    stage_display_name = active_stage.get("name") or f"Crop Stage {setting_keys.index(active_stage_key) + 1 if active_stage_key in setting_keys else 1}"
+    p_on = active_stage.get("photoperiod_on", "06:00 AM")
+    p_off = active_stage.get("photoperiod_off", "08:00 PM")
+    l_enabled = active_stage.get("lighting_enabled", True)
+
+    # 2. Slot Resolution: Find slot matching current time, or fallback to first enabled slot
+    time_slots = active_stage.get("time_slots", [])
+    active_slot = None
+
+    for slot in time_slots:
+        if not slot.get("enabled", True):
+            continue
+        start_t = format_time_24h(slot.get("start", "00:00"))
+        stop_t = format_time_24h(slot.get("stop", "23:59"))
+        if start_t <= stop_t:
+            is_in_slot = (start_t <= current_time_str <= stop_t)
+        else:
+            is_in_slot = (current_time_str >= start_t or current_time_str <= stop_t)
+        if is_in_slot:
+            active_slot = slot
+            break
+
+    # Fallback to first enabled slot
+    if not active_slot:
         for slot in time_slots:
-            if not slot.get("enabled", True):
-                continue
+            if slot.get("enabled", True):
+                active_slot = slot
+                break
 
-            start_t = format_time_24h(slot.get("start", "00:00"))
-            stop_t = format_time_24h(slot.get("stop", "23:59"))
+    # Absolute fallback slot if list is empty
+    if not active_slot:
+        active_slot = {
+            "id": 1,
+            "name": "Slot 1",
+            "start": "12:00 AM",
+            "stop": "11:59 PM",
+            "t_set": (t_min + t_max) / 2.0,
+            "t_max": t_max,
+            "t_min": t_min,
+            "h_set": (h_min + h_max) / 2.0,
+            "h_max": h_max,
+            "h_min": h_min,
+            "enabled": True
+        }
 
-            is_in_slot = False
-            if start_t <= stop_t:
-                is_in_slot = (start_t <= current_time_str <= stop_t)
-            else:
-                is_in_slot = (current_time_str >= start_t or current_time_str <= stop_t)
+    slot_id = active_slot.get("id", 1)
+    slot_display_name = active_slot.get("name") or f"Slot {slot_id}"
 
-            if is_in_slot:
-                t_set_v = float(slot.get("t_set", slot.get("temp_setpoint", 24.0)))
-                h_set_v = float(slot.get("h_set", slot.get("humi_setpoint", 60.0)))
-                t_max_v = float(slot.get("t_max", t_set_v + 1.0))
-                t_min_v = float(slot.get("t_min", t_set_v - 1.0))
-                h_max_v = float(slot.get("h_max", h_set_v + 5.0))
-                h_min_v = float(slot.get("h_min", h_set_v - 5.0))
+    t_set_v = float(active_slot.get("t_set", active_slot.get("temp_setpoint", 24.0)))
+    h_set_v = float(active_slot.get("h_set", active_slot.get("humi_setpoint", 60.0)))
+    t_max_v = float(active_slot.get("t_max", t_set_v + 1.0))
+    t_min_v = float(active_slot.get("t_min", t_set_v - 1.0))
+    h_max_v = float(active_slot.get("h_max", h_set_v + 5.0))
+    h_min_v = float(active_slot.get("h_min", h_set_v - 5.0))
 
-                s_name = slot.get("name", slot.get("stage_name", f"Slot {slot.get('id', 1)}"))
-
-                active_info.update({
-                    "setting_name": setting.get("name", set_key),
-                    "program_name": sp_data.get("program_name", "Default Program"),
-                    "stage_name": s_name,
-                    "slot_id": slot.get("id", 1),
-                    "start": slot.get("start", "08:00 AM"),
-                    "stop": slot.get("stop", "12:00 PM"),
-                    "target_temp": round(t_set_v, 1),
-                    "target_humi": round(h_set_v, 1),
-                    "photoperiod_on": p_on,
-                    "photoperiod_off": p_off,
-                    "lighting_enabled": l_enabled,
-                    "T MIN": round(t_min_v, 1),
-                    "T MAX": round(t_max_v, 1),
-                    "H MIN": round(h_min_v, 1),
-                    "H MAX": round(h_max_v, 1)
-                })
-                return active_info
-
-    return active_info
+    return {
+        "skey": skey,
+        "setting_name": stage_display_name,
+        "stage_name": stage_display_name,
+        "slot_name": slot_display_name,
+        "slot_id": slot_id,
+        "program_name": prog_name,
+        "crop_name": crop_name,
+        "start": active_slot.get("start", "12:00 AM"),
+        "stop": active_slot.get("stop", "11:59 PM"),
+        "target_temp": round(t_set_v, 1),
+        "target_humi": round(h_set_v, 1),
+        "photoperiod_on": p_on,
+        "photoperiod_off": p_off,
+        "lighting_enabled": l_enabled,
+        "T MIN": round(t_min_v, 1),
+        "T MAX": round(t_max_v, 1),
+        "H MIN": round(h_min_v, 1),
+        "H MAX": round(h_max_v, 1)
+    }
 
 def trigger_buzzer_30s():
     global buzzer_active
@@ -1353,6 +1442,10 @@ def on_control_message(client, userdata, msg):
             topic.endswith("/state")):
             return
 
+        # Ignore stale retained messages so broker buffer never overwrites device disk files on restart
+        if getattr(msg, 'retain', False):
+            return
+
         try:
             payload_str = msg.payload.decode('utf-8')
             new_data = json.loads(payload_str)
@@ -1705,13 +1798,14 @@ def on_control_connect(client, userdata, flags, rc=0, properties=None, *args, **
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
-        client.subscribe(f"inhydro/{DEVICE_NAME}/#")
-        if DEVICE_NAME != DEVICE_NAME.lower():
-            client.subscribe(f"inhydro/{DEVICE_NAME.lower()}/#")
-        for fallback_id in ["cold_room", "cold_storage", "control123"]:
-            if DEVICE_NAME.lower() != fallback_id:
-                client.subscribe(f"inhydro/{fallback_id}/#")
-        print(f"[MQTT] Connected & fully subscribed to inhydro/{DEVICE_NAME}/# and fallback topics")
+        for dev_id in list(set([DEVICE_NAME, DEVICE_NAME.lower(), "cold_room"])):
+            client.subscribe(f"inhydro/{dev_id}/setpoints/update")
+            client.subscribe(f"inhydro/{dev_id}/config/update")
+            client.subscribe(f"inhydro/{dev_id}/command")
+            client.subscribe(f"inhydro/{dev_id}/setpoints/request_sync")
+            client.subscribe(f"inhydro/{dev_id}/request_sync")
+            client.subscribe(f"inhydro/{dev_id}/programs/update")
+        print(f"[MQTT] Connected & subscribed to incoming control topics for {DEVICE_NAME}")
         broadcast_current_state()
     else:
         is_mqtt_connected = False
@@ -2254,16 +2348,6 @@ def show(frame):
     if active_notification_frame and active_notification_frame.winfo_exists():
         active_notification_frame.lift()
 
-def get_sensor_display_name(skey):
-    custom_names = system_config.get("sensor_names", {})
-    if skey in custom_names and custom_names[skey].strip():
-        return custom_names[skey].strip()
-    if skey == "S7": return "GREEN HOUSE"
-    return f"COLD ROOM {skey.replace('S', '')}"
-
-def get_f_name(skey):
-    if skey == "S7": return "Fanpad"
-    return "AC"
 
 # --- MAIN DASHBOARD HEADER ---
 lbl_title = tk.Label(frame_main, text="INHYDRO COLD ROOM DASHBOARD", font=big, fg="#1565c0", bg="white")
@@ -2499,7 +2583,8 @@ def update_ui():
                 sp_eval = get_active_setpoints(skey)
                 
                 prog_name = sp_eval.get('program_name') or 'Default Program'
-                setting_nm = sp_eval.get('setting_name') or 'Crop Stage 1'
+                stage_name = sp_eval.get('stage_name') or sp_eval.get('setting_name') or 'Crop Stage 1'
+                slot_name = sp_eval.get('slot_name') or f"Slot {sp_eval.get('slot_id', 1)}"
                 slot_id = sp_eval.get('slot_id', 1)
                 t_min, t_max = sp_eval['T MIN'], sp_eval['T MAX']
                 h_min, h_max = sp_eval['H MIN'], sp_eval['H MAX']
@@ -2533,7 +2618,7 @@ def update_ui():
                     box_text = (
                         f"{disp_name}\n"
                         f"{prog_name}\n"
-                        f"[{setting_nm} - Slot {slot_id}]\n"
+                        f"[{stage_name} - {slot_name}]\n"
                         f"Temp: {t:.1f}°C (Set: {t_target:.1f}°C)\n"
                         f"Humi: {h:.1f}%  (Set: {h_target:.1f}%)\n"
                         f"CO2: {co2_str}"
@@ -2586,9 +2671,9 @@ def update_ui():
             h_min, h_max = sp_eval['H MIN'], sp_eval['H MAX']
 
             prog_name = sp_eval.get('program_name') or 'Default Program'
-            stage_name = sp_eval.get('setting_name') or 'Crop Stage 1'
+            stage_name = sp_eval.get('stage_name') or sp_eval.get('setting_name') or 'Crop Stage 1'
             slot_id = sp_eval.get('slot_id', 1)
-            slot_name = sp_eval.get('stage_name') or f"Slot {slot_id}"
+            slot_name = sp_eval.get('slot_name') or f"Slot {slot_id}"
 
             txt_detail_data.config(state="normal")
             txt_detail_data.delete("1.0", "end")
@@ -3781,6 +3866,16 @@ def edit_stagename():
         lbl_val_stagename.config(text=v)
         sp = get_setpoints(skey)
         sp.setdefault("settings", {}).setdefault(setting_nm, {})["name"] = v
+        save_setpoints()
+        act_prog = sp.get("program_name")
+        if act_prog and act_prog != "Default Program":
+            load_crop_programs()
+            st_content = copy.deepcopy(sp.get("settings", {}))
+            crop_programs[act_prog] = st_content
+            if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
+                crop_programs[skey] = {}
+            crop_programs[skey][act_prog] = st_content
+            save_crop_programs()
         mark_schedule_dirty()
         load_schedule_form()
     open_almora_keypad(f"{room_nm}: Edit Crop Stage Name", lbl_val_stagename.cget("text"), _on_stagename, is_alphanumeric=True)
@@ -3800,6 +3895,16 @@ def on_sdate_changed(val):
     st = sp.setdefault("settings", {}).setdefault(setting_nm, {})
     st["start_date"] = formatted
     auto_chain_crop_stage_dates(skey, setting_nm)
+    save_setpoints()
+    act_prog = sp.get("program_name")
+    if act_prog and act_prog != "Default Program":
+        load_crop_programs()
+        st_content = copy.deepcopy(sp.get("settings", {}))
+        crop_programs[act_prog] = st_content
+        if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
+            crop_programs[skey] = {}
+        crop_programs[skey][act_prog] = st_content
+        save_crop_programs()
     mark_schedule_dirty()
     load_schedule_form()
 
@@ -3827,6 +3932,16 @@ def on_edate_changed(val):
     st = sp.setdefault("settings", {}).setdefault(setting_nm, {})
     st["end_date"] = formatted
     auto_chain_crop_stage_dates(skey, setting_nm)
+    save_setpoints()
+    act_prog = sp.get("program_name")
+    if act_prog and act_prog != "Default Program":
+        load_crop_programs()
+        st_content = copy.deepcopy(sp.get("settings", {}))
+        crop_programs[act_prog] = st_content
+        if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
+            crop_programs[skey] = {}
+        crop_programs[skey][act_prog] = st_content
+        save_crop_programs()
     mark_schedule_dirty()
     load_schedule_form()
 
@@ -3854,8 +3969,6 @@ def toggle_current_stage_activation():
     load_schedule_form()
     broadcast_current_state()
 
-
-
 # PHOTOPERIOD LIGHTING CONTROL ROW
 light_frame = tk.Frame(sched_scroll_inner, bg="#f8fafc", bd=1, relief="solid")
 light_frame.pack(pady=6, anchor="center", padx=10)
@@ -3877,6 +3990,16 @@ def edit_pon():
         formatted = format_time_12h(v)
         lbl_val_pon.config(text=formatted)
         sp.setdefault("settings", {}).setdefault(setting_nm, {})["photoperiod_on"] = formatted
+        save_setpoints()
+        act_prog = sp.get("program_name")
+        if act_prog and act_prog != "Default Program":
+            load_crop_programs()
+            st_content = copy.deepcopy(sp.get("settings", {}))
+            crop_programs[act_prog] = st_content
+            if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
+                crop_programs[skey] = {}
+            crop_programs[skey][act_prog] = st_content
+            save_crop_programs()
         mark_schedule_dirty()
         load_schedule_form()
     open_almora_keypad(f"{room_nm} [{stage_disp}]: Light ON Time", lbl_val_pon.cget("text"), _on_pon)
@@ -3898,6 +4021,16 @@ def edit_poff():
         formatted = format_time_12h(v)
         lbl_val_poff.config(text=formatted)
         sp.setdefault("settings", {}).setdefault(setting_nm, {})["photoperiod_off"] = formatted
+        save_setpoints()
+        act_prog = sp.get("program_name")
+        if act_prog and act_prog != "Default Program":
+            load_crop_programs()
+            st_content = copy.deepcopy(sp.get("settings", {}))
+            crop_programs[act_prog] = st_content
+            if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
+                crop_programs[skey] = {}
+            crop_programs[skey][act_prog] = st_content
+            save_crop_programs()
         mark_schedule_dirty()
         load_schedule_form()
     open_almora_keypad(f"{room_nm} [{stage_disp}]: Light OFF Time", lbl_val_poff.cget("text"), _on_poff)
@@ -4144,6 +4277,16 @@ def edit_slot_popup(idx):
                     "h_min": round(float(l_hmin_val.cget("text").strip()), 1),
                     "enabled": True
                 }
+                save_setpoints()
+                act_prog = sp.get("program_name")
+                if act_prog and act_prog != "Default Program":
+                    load_crop_programs()
+                    st_content = copy.deepcopy(sp.get("settings", {}))
+                    crop_programs[act_prog] = st_content
+                    if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
+                        crop_programs[skey] = {}
+                    crop_programs[skey][act_prog] = st_content
+                    save_crop_programs()
             except Exception as e:
                 print(f"Error updating slot: {e}")
         mark_schedule_dirty()

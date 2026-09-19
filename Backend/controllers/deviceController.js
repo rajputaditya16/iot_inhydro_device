@@ -27,131 +27,45 @@ exports.getDevices = async (req, res) => {
       }
     }
 
-    const devices = await Device.find(query).sort({ createdAt: -1 });
+    const devices = await Device.find(query).sort({ createdAt: -1 }).lean();
     const now = new Date();
 
-    const updatedDevices = await Promise.all(
-      devices.map(async (device) => {
-        const mqttId = (device.mqttId || '').trim();
-        let latestPacket = null;
+    const fs = require('fs');
+    const path = require('path');
+    const rootDir = path.resolve(__dirname, '../..');
+    const cropFile = path.join(rootDir, 'crop_programs.json');
+    let localCropPrograms = {};
+    if (fs.existsSync(cropFile)) {
+      try { localCropPrograms = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
+    }
 
-        if (mqttId) {
-          try {
-            const TelemetryModel = getTelemetryModel(mqttId);
-            latestPacket = await TelemetryModel.findOne({
-              $or: [
-                { deviceId: device._id },
-                { mqttId: mqttId },
-                { mqttId: mqttId.toLowerCase() }
-              ]
-            }).sort({ timestamp: -1 });
-          } catch (e) { }
+    const updatedDevices = devices.map((device) => {
+      const mqttId = (device.mqttId || '').trim();
+      const lastSeenTime = device.lastUpdated || null;
+      const diffMs = lastSeenTime ? (now.getTime() - new Date(lastSeenTime).getTime()) : Infinity;
+      const isOnline = Boolean(lastSeenTime && Math.abs(diffMs) < 3 * 60 * 1000);
 
-          if (!latestPacket) {
-            try {
-              latestPacket = await TelemetryLog.findOne({
-                $or: [
-                  { deviceId: device._id },
-                  { mqttId: mqttId },
-                  { mqttId: mqttId.toLowerCase() }
-                ]
-              }).sort({ timestamp: -1 });
-            } catch (e) { }
-          }
-        }
+      let status = device.status;
+      if (device.status !== 'blocked') {
+        status = isOnline ? 'online' : 'offline';
+      }
 
-        const lastSeenTime = latestPacket ? latestPacket.timestamp : (device.lastUpdated || null);
-        const diffMs = lastSeenTime ? (now.getTime() - new Date(lastSeenTime).getTime()) : Infinity;
-        // Device is online if it has a fresh packet or fresh lastUpdated within 3 minutes (allowing minor clock skew)
-        const isOnline = Boolean(lastSeenTime && Math.abs(diffMs) < 3 * 60 * 1000);
+      const devId = (mqttId || (device?._id ? device._id.toString() : '')).toString();
+      const setpFile = devId ? path.join(rootDir, `setpoints_${devId}.json`) : null;
+      let localSetpoints = {};
+      if (setpFile && fs.existsSync(setpFile)) {
+        try { localSetpoints = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
+      }
 
-        let status = device.status;
-        if (device.status !== 'blocked') {
-          if (isOnline) {
-            status = 'online';
-            if (device.status !== 'online' || !device.lastUpdated || (latestPacket && new Date(device.lastUpdated) < new Date(latestPacket.timestamp))) {
-              device.status = 'online';
-              if (latestPacket) device.lastUpdated = latestPacket.timestamp;
-              await device.save();
-            }
-          } else {
-            status = 'offline';
-            if (device.status === 'online') {
-              device.status = 'offline';
-              await device.save();
-            }
-          }
-        }
-
-        let latestData = {};
-        if (latestPacket && latestPacket.data) {
-          latestData = latestPacket.data;
-        }
-
-        // Map live stats strictly based on separate device types
-        let liveStats = { temp: 0, moisture: 0, ph: 0, ec: 0 };
-        if (device.deviceType === 'office_control' || device.deviceType === 'system2') {
-          const room1 = latestData.room1 || latestData || {};
-          liveStats.temp = parseFloat(room1.room?.room_temp || room1.temp || 0);
-          liveStats.moisture = parseFloat(room1.soil?.moisture || room1.humidity || 0);
-          liveStats.ph = parseFloat(room1.soil?.ph || room1.ph || 0);
-          liveStats.ec = parseFloat(room1.soil?.ec || room1.ec || 0);
-        } else if (device.deviceType === 'controlling') {
-          const tel = latestData.telemetry || latestData || {};
-          liveStats.temp = parseFloat(tel.water_temp || tel.room_temp || 0);
-          liveStats.moisture = parseFloat(tel.moisture || tel.room_humi || 0);
-          liveStats.ph = parseFloat(tel.ph || 0);
-          liveStats.ec = parseFloat(tel.ec || 0);
-        } else if (device.deviceType === 'cold_storage' || device.deviceType === 'cold_room' || device.deviceType === 'multi_sensor') {
-          const s1 = latestData.s1 || latestData.S1 || {};
-          liveStats.temp = parseFloat(s1.t ?? s1.temp ?? 0);
-          liveStats.moisture = parseFloat(s1.h ?? s1.humi ?? 0);
-          liveStats.ph = parseFloat(latestData.ph ?? 0);
-          liveStats.ec = parseFloat(s1.co2 ?? latestData.co2 ?? 0);
-        } else if (device.deviceType === 'almora' || device.deviceType === 'almora2') {
-          // Almora single-box devices (distinct from cold storage)
-          liveStats.temp = parseFloat(latestData.temp ?? latestData.t ?? latestData.field1 ?? 0);
-          liveStats.moisture = parseFloat(latestData.humi ?? latestData.h ?? latestData.field2 ?? 0);
-          liveStats.ph = parseFloat(latestData.ph ?? latestData.field3 ?? 0);
-          liveStats.ec = parseFloat(latestData.co2 ?? latestData.field4 ?? 0);
-        } else if (device.deviceType === 'monit' || device.deviceType === 'monnet') {
-          liveStats.temp = parseFloat(latestData.room_temp ?? latestData.temp ?? 0);
-          liveStats.moisture = parseFloat(latestData.room_humi ?? latestData.humidity ?? 0);
-          liveStats.ph = parseFloat(latestData.ph ?? 0);
-          liveStats.ec = parseFloat(latestData.ec ?? 0);
-        } else {
-          liveStats.temp = parseFloat(latestData.field1 || latestData.temp || 0);
-          liveStats.moisture = parseFloat(latestData.field2 || latestData.humidity || 0);
-          liveStats.ph = parseFloat(latestData.field3 || latestData.ph || 0);
-          liveStats.ec = parseFloat(latestData.field4 || latestData.ec || 0);
-        }
-
-        const fs = require('fs');
-        const path = require('path');
-        const rootDir = path.resolve(__dirname, '../..');
-        const cropFile = path.join(rootDir, 'crop_programs.json');
-        let localCropPrograms = {};
-        if (fs.existsSync(cropFile)) {
-          try { localCropPrograms = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
-        }
-        const devId = (mqttId || (device?._id ? device._id.toString() : '')).toString();
-        const setpFile = devId ? path.join(rootDir, `setpoints_${devId}.json`) : null;
-        let localSetpoints = {};
-        if (setpFile && fs.existsSync(setpFile)) {
-          try { localSetpoints = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
-        }
-
-        return {
-          ...device.toObject(),
-          status,
-          liveStats,
-          crop_programs: localCropPrograms,
-          saved_programs: localCropPrograms,
-          sensor_setpoints: localSetpoints,
-          latestPacketTime: latestPacket ? latestPacket.timestamp : null
-        };
-      })
-    );
+      return {
+        ...device,
+        status,
+        crop_programs: localCropPrograms,
+        saved_programs: localCropPrograms,
+        sensor_setpoints: localSetpoints,
+        latestPacketTime: lastSeenTime
+      };
+    });
 
     res.status(200).json({ success: true, count: updatedDevices.length, data: updatedDevices });
   } catch (err) {
