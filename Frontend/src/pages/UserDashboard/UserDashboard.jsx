@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { MapPin, Cpu, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
 import StatCard from '../../components/StatCard';
@@ -6,80 +6,179 @@ import DeviceCard from '../../components/DeviceCard';
 import { SkeletonCard, SkeletonDeviceCard } from '../../components/Skeleton';
 import { useNavigate } from 'react-router-dom';
 
+// Parse raw or ISO timestamp safely
+const parseDateSafe = (ts) => {
+  if (!ts) return null;
+  const str = typeof ts === 'string' && ts.includes(' ') && !ts.includes('T') ? ts.replace(' ', 'T') : ts;
+  const d = new Date(str);
+  return isNaN(d.getTime()) || d.getTime() === 0 ? null : d;
+};
+
+// Check if telemetry is fresh (arrived within last 45 seconds)
+const FRESH_TELEMETRY_WINDOW_MS = 45 * 1000;
+
+const isTelemetryFresh = (lastUpdatedTime) => {
+  const d = parseDateSafe(lastUpdatedTime);
+  if (!d) return false;
+  const diffMs = Date.now() - d.getTime();
+  return diffMs >= 0 && diffMs <= FRESH_TELEMETRY_WINDOW_MS;
+};
+
 const UserDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [devices, setDevices] = useState([]);
   const [filter, setFilter] = useState('all');
-  const [hasNewData, setHasNewData] = useState(true);
-  const previousMetricsRef = useRef(null); 
+  const [, setTick] = useState(0);
   const navigate = useNavigate();
   const token = localStorage.getItem('token');
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        // Step 1: Fetch all devices assigned to user from backend (connected via Mosquitto Private MQTT broker)
-        const res = await fetch(`${API_BASE}/api/devices`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+  const processDevices = useCallback((dbDevices) => {
+    return dbDevices.map((d) => {
+      const stats = d.liveStats || { temp: 0, moisture: 0, ph: 0, ec: 0 };
+      const lastUpdatedTime = d.latestPacketTime || d.lastUpdated || null;
+      const fresh = isTelemetryFresh(lastUpdatedTime);
 
-        const contentType = res.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-          throw new Error("Received non-JSON response from server (Backend might be down)");
-        }
-
-        const data = await res.json();
-        if (!data.success) {
-          setDevices([]);
-          setLoading(false);
-          return;
-        }
-
-        const dbDevices = data.data || [];
-
-        // Step 2: Map backend devices containing MongoDB-backed live metrics
-        const allDevices = dbDevices.map((d) => {
-          const stats = d.liveStats || { temp: 0, moisture: 0, ph: 0, ec: 0 };
-          const lastUpdatedTime = d.latestPacketTime || null;
-          const diffMs = lastUpdatedTime ? (Date.now() - new Date(lastUpdatedTime).getTime()) : Infinity;
-          // Device is online ONLY if not blocked, backend says online, and fresh telemetry packet exists
-          const isFreshTelemetry = Boolean(lastUpdatedTime && diffMs >= 0 && diffMs < 2 * 60 * 1000);
-          const computedStatus = d.status === 'blocked' ? 'blocked' : (d.status === 'online' && isFreshTelemetry ? 'online' : 'offline');
-
-          return {
-            id: d._id,
-            name: d.name,
-            location: d.location,
-            status: computedStatus,
-            temp: stats.temp,
-            moisture: stats.moisture,
-            ph: stats.ph,
-            ec: stats.ec,
-            lastUpdated: lastUpdatedTime,
-          };
-        });
-
-        // Check if data changed
-        const currentKey = JSON.stringify(allDevices.map((d) => ({ t: d.temp, m: d.moisture, e: d.ec, p: d.ph, s: d.status })));
-        const changed = previousMetricsRef.current !== currentKey;
-        setHasNewData(changed);
-        previousMetricsRef.current = currentKey;
-        setDevices(allDevices);
-
-        setLoading(false);
-      } catch (err) {
-        console.error('Dashboard fetch error:', err);
-        setDevices([]);
-        setHasNewData(false);
-        setLoading(false);
+      let computedStatus = 'offline';
+      if (d.status === 'blocked') {
+        computedStatus = 'blocked';
+      } else if (fresh) {
+        computedStatus = 'online';
+      } else {
+        computedStatus = 'offline';
       }
-    };
 
+      return {
+        id: d._id || d.id,
+        _id: d._id || d.id,
+        mqttId: d.mqttId || '',
+        name: d.name,
+        location: d.location,
+        status: computedStatus,
+        temp: stats.temp || 0,
+        moisture: stats.moisture || 0,
+        ph: stats.ph || 0,
+        ec: stats.ec || 0,
+        lastUpdated: lastUpdatedTime,
+      };
+    });
+  }, []);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/devices`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error("Received non-JSON response from server (Backend might be down)");
+      }
+
+      const data = await res.json();
+      if (!data.success) {
+        setDevices([]);
+        setLoading(false);
+        return;
+      }
+
+      const dbDevices = data.data || [];
+      const allDevices = processDevices(dbDevices);
+      setDevices(allDevices);
+      setLoading(false);
+    } catch (err) {
+      console.error('User Dashboard fetch error:', err);
+      setDevices([]);
+      setLoading(false);
+    }
+  }, [API_BASE, token, processDevices]);
+
+  useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
-  }, [token]);
+  }, [fetchData]);
+
+  // Real-time SSE stream
+  useEffect(() => {
+    const sseUrl = `${API_BASE}/api/devices/stream`;
+    let eventSource = null;
+
+    try {
+      eventSource = new EventSource(sseUrl);
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (!payload) return;
+
+          const incomingDevId = payload.deviceId ? String(payload.deviceId) : null;
+          const incomingMqttId = payload.mqttId ? String(payload.mqttId).toLowerCase() : null;
+          const nowIso = new Date().toISOString();
+          const isExplicitOffline = payload.data?.status === 'offline';
+
+          setDevices((prevDevices) =>
+            prevDevices.map((dev) => {
+              const matchesId = incomingDevId && String(dev.id) === incomingDevId;
+              const matchesMqtt = incomingMqttId && dev.mqttId && dev.mqttId.toLowerCase() === incomingMqttId;
+
+              if (matchesId || matchesMqtt) {
+                if (dev.status === 'blocked') return dev;
+                if (isExplicitOffline) return { ...dev, status: 'offline' };
+
+                const data = payload.data || {};
+                const temp = data.temp ?? data.temperature ?? data.room_temp ?? data.soil_temp ?? dev.temp;
+                const moisture = data.moisture ?? data.humidity ?? data.soil_moisture ?? dev.moisture;
+                const ph = data.ph ?? dev.ph;
+                const ec = data.ec ?? dev.ec;
+
+                return {
+                  ...dev,
+                  status: 'online',
+                  lastUpdated: nowIso,
+                  temp: typeof temp === 'number' ? temp : dev.temp,
+                  moisture: typeof moisture === 'number' ? moisture : dev.moisture,
+                  ph: typeof ph === 'number' ? ph : dev.ph,
+                  ec: typeof ec === 'number' ? ec : dev.ec,
+                };
+              }
+              return dev;
+            })
+          );
+        } catch (_ignore) {
+          // Ignore non-JSON heartbeat pings
+        }
+      };
+    } catch (_err) {
+      console.warn('[Dashboard SSE] Real-time stream failed, using polling fallback');
+    }
+
+    return () => {
+      if (eventSource) eventSource.close();
+    };
+  }, [API_BASE]);
+
+  // Local time decay watchdog
+  useEffect(() => {
+    const decayTimer = setInterval(() => {
+      setDevices((prevDevices) => {
+        let hasChanges = false;
+        const updated = prevDevices.map((dev) => {
+          if (dev.status === 'online') {
+            const fresh = isTelemetryFresh(dev.lastUpdated);
+            if (!fresh) {
+              hasChanges = true;
+              return { ...dev, status: 'offline' };
+            }
+          }
+          return dev;
+        });
+        return hasChanges ? updated : prevDevices;
+      });
+      setTick((t) => (t + 1) % 1000);
+    }, 3000);
+
+    return () => clearInterval(decayTimer);
+  }, []);
 
   // Get unique locations
   const uniqueLocations = [...new Set(devices.map((d) => d.location))];
@@ -200,7 +299,6 @@ const UserDashboard = () => {
             ))}
           </motion.div>
         )}
-        
         
         {!loading && filteredDevices.length === 0 && (
           <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-700/50 py-16">

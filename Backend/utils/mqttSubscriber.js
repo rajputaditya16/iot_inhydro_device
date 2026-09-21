@@ -94,19 +94,49 @@ const startMqttSubscriber = () => {
       const parsedTime = rawTs && !isNaN(new Date(typeof rawTs === 'string' && rawTs.includes(' ') && !rawTs.includes('T') ? rawTs.replace(' ', 'T') : rawTs).getTime())
         ? new Date(typeof rawTs === 'string' && rawTs.includes(' ') && !rawTs.includes('T') ? rawTs.replace(' ', 'T') : rawTs)
         : null;
-      
+
       const now = new Date();
-      // Live incoming packet (!isRetain) is 100% fresh right now
-      const isFresh = !isRetain || Boolean(parsedTime && Math.abs(now.getTime() - parsedTime.getTime()) < 3 * 60 * 1000);
-      const packetTimestamp = !isRetain ? now : (parsedTime || now);
+
+      // Check if this is an outbound server command / setpoint push topic
+      const isOutboundTopic =
+        topic.endsWith('/setpoints/update') ||
+        topic.endsWith('/config/update') ||
+        topic.endsWith('/command') ||
+        topic.endsWith('/setpoints/request_sync') ||
+        topic.includes('/command/') ||
+        topic.endsWith('/command/status');
+
+      // Check if this payload contains actual sensor/device telemetry data from hardware
+      const hasTelemetryData = Boolean(
+        payloadData && typeof payloadData === 'object' && (
+          payloadData.sensor_data ||
+          payloadData.rooms ||
+          payloadData.S1 || payloadData.S2 || payloadData.S3 || payloadData.S4 || payloadData.S5 || payloadData.S6 || payloadData.S7 ||
+          payloadData.temp !== undefined || payloadData.t !== undefined || payloadData.temperature !== undefined ||
+          payloadData.humi !== undefined || payloadData.h !== undefined || payloadData.humidity !== undefined ||
+          payloadData.co2 !== undefined || payloadData.ec !== undefined || payloadData.ph !== undefined ||
+          payloadData.relays || payloadData.relay_states ||
+          payloadData.sensors || Array.isArray(payloadData.data) || Array.isArray(payloadData.readings)
+        )
+      );
+
+      // Genuine fresh incoming telemetry check
+      const isFresh = !isOutboundTopic && hasTelemetryData && (
+        !isRetain
+          ? (parsedTime ? Math.abs(now.getTime() - parsedTime.getTime()) < 45 * 1000 : true)
+          : Boolean(parsedTime && Math.abs(now.getTime() - parsedTime.getTime()) < 45 * 1000)
+      );
+
+      const packetTimestamp = parsedTime || (!isOutboundTopic && !isRetain && hasTelemetryData ? now : null);
 
       // Update MongoDB with incoming telemetry / settings / config / crop programs
       const deviceId = await resolveDeviceId(mqttId, topic);
       if (deviceId) {
-        const updateFields = {
-          lastUpdated: packetTimestamp || now
-        };
-        if (isFresh) {
+        const updateFields = {};
+
+        // Only update lastUpdated and status if this is genuine fresh telemetry with sensor readings
+        if (isFresh && packetTimestamp) {
+          updateFields.lastUpdated = packetTimestamp;
           updateFields.status = 'online';
         }
 
@@ -145,7 +175,9 @@ const startMqttSubscriber = () => {
           updateFields['config'] = cfgUpdate;
         }
 
-        Device.findByIdAndUpdate(deviceId, { $set: updateFields }).catch(() => { });
+        if (Object.keys(updateFields).length > 0) {
+          Device.findByIdAndUpdate(deviceId, { $set: updateFields }).catch(() => { });
+        }
       }
 
       // Broadcast in-memory SSE telemetry event IMMEDIATELY for zero-latency streaming with resolved deviceId
@@ -177,8 +209,8 @@ const startMqttSubscriber = () => {
         }
       }
 
-      // Heartbeat packets only refresh online status, no telemetry doc needed
-      if (topic.includes('/heartbeat') || topic.endsWith('/command/status')) {
+      // Outbound commands, heartbeats or non-telemetry packets don't need telemetry doc records
+      if (isOutboundTopic || topic.includes('/heartbeat') || topic.endsWith('/command/status') || !hasTelemetryData) {
         return;
       }
 

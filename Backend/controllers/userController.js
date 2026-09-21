@@ -289,15 +289,16 @@ exports.getLocations = async (req, res) => {
   try {
     let locations;
 
-    // Admin → only locations from their superadmin-assigned devices (if restricted)
-    if (req.user && req.user.role === 'admin' && req.user.assignedDevices && req.user.assignedDevices.length > 0) {
-      locations = await Device.distinct('location', { _id: { $in: req.user.assignedDevices } });
+    // Superadmin → all locations
+    // Non-superadmin (admin and user) → only locations from their assigned devices
+    if (req.user && req.user.role !== 'superadmin') {
+      const assignedDevices = req.user.assignedDevices || [];
+      locations = await Device.distinct('location', { _id: { $in: assignedDevices } });
     } else {
-      // Superadmin or unrestricted Admin → all locations
       locations = await Device.distinct('location');
     }
 
-    res.status(200).json({ success: true, data: locations });
+    res.status(200).json({ success: true, data: locations || [] });
   } catch (err) {
     console.error('[GetLocations Error]', err.message);
     res.status(500).json({ success: false, message: 'Server error fetching locations.' });

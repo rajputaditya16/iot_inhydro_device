@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const Device = require('../models/Device');
+const User = require('../models/User');
+const Admin = require('../models/Admin');
 const TelemetryLog = require('../models/TelemetryLog');
 const { getTelemetryModel } = require('../models/TelemetryLog');
 const { publishToDevice } = require('../utils/mqttPublisher');
@@ -8,37 +10,42 @@ const { telemetryEmitter } = require('../utils/mqttSubscriber');
 
 // @route   GET /api/devices
 // @desc    Get all devices
-// @access  Private (Admin only or All depending on requirement, usually viewer can view, admin can edit)
+// @access  Private
 exports.getDevices = async (req, res) => {
   try {
     let query = {};
 
-    // Regular (non-admin) users → only their assigned devices
-    if (req.user && req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+    // Only superadmin can view all devices.
+    // Admins and regular users can ONLY view devices explicitly assigned to them.
+    if (req.user && req.user.role !== 'superadmin') {
       const assignedDevices = req.user.assignedDevices || [];
       query = { _id: { $in: assignedDevices } };
     }
 
-    // Admin (not superadmin) → only restrict if specific devices are assigned, otherwise show all
-    if (req.user && req.user.role === 'admin') {
-      const assignedDevices = req.user.assignedDevices || [];
-      if (assignedDevices.length > 0) {
-        query = { _id: { $in: assignedDevices } };
-      }
+    const isMinimal = req.query.minimal === 'true';
+    let findQuery = Device.find(query).sort({ createdAt: -1 });
+    if (isMinimal) {
+      findQuery = findQuery.select('_id name location status deviceType mqttId clientName locationCode model unit nicknameByClient cropName setupName lastUpdated createdAt updatedAt');
     }
-
-    const devices = await Device.find(query).sort({ createdAt: -1 }).lean();
+    const devices = await findQuery.lean();
     const now = new Date();
 
     const updatedDevices = devices.map((device) => {
-      const mqttId = (device.mqttId || '').trim();
       const lastSeenTime = device.lastUpdated || null;
       const diffMs = lastSeenTime ? (now.getTime() - new Date(lastSeenTime).getTime()) : Infinity;
-      const isOnline = Boolean(lastSeenTime && Math.abs(diffMs) < 3 * 60 * 1000);
+      const isOnline = Boolean(lastSeenTime && diffMs >= 0 && diffMs <= 45 * 1000);
 
       let status = device.status;
       if (device.status !== 'blocked') {
         status = isOnline ? 'online' : 'offline';
+      }
+
+      if (isMinimal) {
+        return {
+          ...device,
+          status,
+          latestPacketTime: lastSeenTime
+        };
       }
 
       const progs = (device.cropPrograms && typeof device.cropPrograms === 'object') ? device.cropPrograms : {};
@@ -73,6 +80,14 @@ exports.createDevice = async (req, res) => {
   try {
     console.log('[DEBUG] createDevice incoming req.body:', req.body);
     const device = await Device.create(req.body);
+
+    // If created by an Admin (not superadmin), automatically add it to their assigned devices
+    if (req.user && req.user.role === 'admin') {
+      await Admin.findByIdAndUpdate(req.user._id, {
+        $addToSet: { assignedDevices: device._id }
+      });
+    }
+
     console.log('[DEBUG] createDevice saved document:', device);
     res.status(201).json({ success: true, data: device });
   } catch (err) {
@@ -111,6 +126,13 @@ exports.deleteDevice = async (req, res) => {
   try {
     const device = await Device.findByIdAndDelete(req.params.id);
     if (!device) return res.status(404).json({ success: false, message: 'Device not found' });
+
+    // Clean up references in User and Admin models
+    await Promise.all([
+      User.updateMany({ assignedDevices: req.params.id }, { $pull: { assignedDevices: req.params.id } }),
+      Admin.updateMany({ assignedDevices: req.params.id }, { $pull: { assignedDevices: req.params.id } })
+    ]);
+
     res.status(200).json({ success: true, message: 'Device deleted' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -378,66 +400,76 @@ exports.getDeviceAnalytics = async (req, res) => {
       device._id.toString()
     ].filter(Boolean);
 
-    const query = {
-      timestamp: { $gte: start, $lte: end },
-      $or: [
-        { deviceId: device._id },
-        { mqttId: device.mqttId || '' },
-        { mqttId: 'system2' },
-      ].filter(c => c.deviceId || c.mqttId)
-    };
+    // Check if this is a live monitoring fast-fetch
+    const isLive = req.query.live === 'true' || (req.query.limit && parseInt(req.query.limit) <= 50);
+    const queryLimit = isLive ? (parseInt(req.query.limit) || 30) : (parseInt(req.query.limit) || 1000);
+
+    const query = isLive
+      ? {
+        $or: [
+          { deviceId: device._id },
+          { mqttId: device.mqttId || '' },
+          { mqttId: 'system2' },
+        ].filter(c => c.deviceId || c.mqttId)
+      }
+      : {
+        timestamp: { $gte: start, $lte: end },
+        $or: [
+          { deviceId: device._id },
+          { mqttId: device.mqttId || '' },
+          { mqttId: 'system2' },
+        ].filter(c => c.deviceId || c.mqttId)
+      };
+
+    // 1. Direct dynamic collection resolution (Parallel Zero-Latency Execution)
+    const primaryMqttId = device.mqttId || (device.deviceType === 'office_control' ? 'system2' : null) || device.name;
+    const targetModel = primaryMqttId ? getTelemetryModel(primaryMqttId) : null;
+    const sortOrder = isLive ? { timestamp: -1 } : { timestamp: 1 };
+    const targetQuery = isLive ? {} : { timestamp: { $gte: start, $lte: end } };
 
     let packets = [];
-    let targetModel = null;
     let totalCollectionDocs = 0;
 
-    // 1. Identify which dynamic collection belongs to this device
-    for (const mId of candidateMqttIds) {
-      try {
-        const TelemetryModel = getTelemetryModel(mId);
-        const count = await TelemetryModel.estimatedDocumentCount().maxTimeMS(2000);
-        if (count > 0) {
-          targetModel = TelemetryModel;
-          totalCollectionDocs = count;
-          break;
-        }
-      } catch (e) { }
-    }
-
-    // 2. Query within the date range from the target collection or fallback to TelemetryLog
     if (targetModel) {
       try {
-        packets = await targetModel.find({
-          timestamp: { $gte: start, $lte: end }
-        }).sort({ timestamp: 1 }).limit(1000).maxTimeMS(3000).lean();
+        // Execute find and count in parallel in a SINGLE network roundtrip
+        const [docs, count] = await Promise.all([
+          targetModel.find(targetQuery)
+            .sort(sortOrder)
+            .limit(queryLimit)
+            .select('timestamp data topic room deviceId mqttId')
+            .maxTimeMS(2500)
+            .lean(),
+          targetModel.estimatedDocumentCount().maxTimeMS(1000).catch(() => 0)
+        ]);
+
+        packets = docs || [];
+        totalCollectionDocs = count || packets.length;
       } catch (tErr) {
         console.warn('[Analytics API] Target collection query warning, falling back to TelemetryLog:', tErr.message);
         packets = [];
       }
+    }
 
-      if (packets.length === 0) {
-        try {
-          const fallbackPackets = await TelemetryLog.find(query).sort({ timestamp: 1 }).limit(1000).maxTimeMS(3000).lean();
-          if (fallbackPackets && fallbackPackets.length > 0) {
-            packets = fallbackPackets;
-          }
-        } catch (e) { }
-      }
-    } else {
+    // Fallback to main TelemetryLog only if dynamic collection returned 0 packets
+    if (packets.length === 0) {
       try {
-        packets = await TelemetryLog.find(query).sort({ timestamp: 1 }).limit(1000).maxTimeMS(3000).lean();
+        const fallbackDocs = await TelemetryLog.find(query)
+          .sort(sortOrder)
+          .limit(queryLimit)
+          .select('timestamp data topic room deviceId mqttId')
+          .maxTimeMS(2500)
+          .lean();
+        packets = fallbackDocs || [];
+        totalCollectionDocs = totalCollectionDocs || packets.length;
       } catch (e) {
         packets = [];
       }
-      try {
-        totalCollectionDocs = await TelemetryLog.countDocuments({
-          $or: [
-            { deviceId: device._id },
-            { mqttId: device.mqttId || '' },
-            { mqttId: 'system2' },
-          ].filter(c => c.deviceId || c.mqttId)
-        }).maxTimeMS(2000);
-      } catch (e) { }
+    }
+
+    // For live queries, reverse back to chronological order (oldest to newest) for chart rendering
+    if (isLive && packets.length > 1) {
+      packets.reverse();
     }
 
     const totalDbCount = packets.length;
@@ -746,53 +778,53 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field8 = 'CO2';
     }
 
-const formatHumanReadableDate = (dateInput, tz = 'Asia/Kolkata') => {
-  if (!dateInput) return '';
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return String(dateInput);
-  
-  try {
-    const formatter = new Intl.DateTimeFormat('en-IN', {
-      timeZone: tz || 'Asia/Kolkata',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true
-    });
-    const parts = formatter.formatToParts(d);
-    const getPart = (type) => parts.find(p => p.type === type)?.value || '';
-    const year = getPart('year');
-    const month = getPart('month').padStart(2, '0');
-    const day = getPart('day').padStart(2, '0');
-    const hour = getPart('hour').padStart(2, '0');
-    const minute = getPart('minute').padStart(2, '0');
-    const second = getPart('second').padStart(2, '0');
-    const dayPeriod = (getPart('dayPeriod') || '').toUpperCase();
-    
-    return `${year}-${month}-${day} ${hour}:${minute}:${second} ${dayPeriod}`.trim();
-  } catch (e) {
-    const pad = (n) => String(n).padStart(2, '0');
-    const year = d.getFullYear();
-    const month = pad(d.getMonth() + 1);
-    const day = pad(d.getDate());
-    let hours = d.getHours();
-    const minutes = pad(d.getMinutes());
-    const seconds = pad(d.getSeconds());
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    const hours12 = pad(hours % 12 || 12);
-    return `${year}-${month}-${day} ${hours12}:${minutes}:${seconds} ${ampm}`;
-  }
-};
+    const formatHumanReadableDate = (dateInput, tz = 'Asia/Kolkata') => {
+      if (!dateInput) return '';
+      const d = new Date(dateInput);
+      if (isNaN(d.getTime())) return String(dateInput);
+
+      try {
+        const formatter = new Intl.DateTimeFormat('en-IN', {
+          timeZone: tz || 'Asia/Kolkata',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true
+        });
+        const parts = formatter.formatToParts(d);
+        const getPart = (type) => parts.find(p => p.type === type)?.value || '';
+        const year = getPart('year');
+        const month = getPart('month').padStart(2, '0');
+        const day = getPart('day').padStart(2, '0');
+        const hour = getPart('hour').padStart(2, '0');
+        const minute = getPart('minute').padStart(2, '0');
+        const second = getPart('second').padStart(2, '0');
+        const dayPeriod = (getPart('dayPeriod') || '').toUpperCase();
+
+        return `${year}-${month}-${day} ${hour}:${minute}:${second} ${dayPeriod}`.trim();
+      } catch (e) {
+        const pad = (n) => String(n).padStart(2, '0');
+        const year = d.getFullYear();
+        const month = pad(d.getMonth() + 1);
+        const day = pad(d.getDate());
+        let hours = d.getHours();
+        const minutes = pad(d.getMinutes());
+        const seconds = pad(d.getSeconds());
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        const hours12 = pad(hours % 12 || 12);
+        return `${year}-${month}-${day} ${hours12}:${minutes}:${seconds} ${ampm}`;
+      }
+    };
 
     if (req.query.format === 'csv') {
       const isBoth = room === 'both';
       const timezone = req.query.timezone || 'Asia/Kolkata';
       const headers = ['Timestamp'];
       if (isBoth) headers.push('Room');
-      
+
       const activeFields = [];
       for (let i = 1; i <= 17; i++) {
         const key = `field${i}`;
@@ -815,7 +847,7 @@ const formatHumanReadableDate = (dateInput, tz = 'Asia/Kolkata') => {
           else if (lower.includes('nitrogen') || lower.includes('(n)')) unit = ' (mg/kg)';
           else if (lower.includes('phosphorus') || lower.includes('(p)')) unit = ' (mg/kg)';
           else if (lower.includes('potassium') || lower.includes('(k)')) unit = ' (mg/kg)';
-          
+
           activeFields.push({ key, name: `${rawName}${unit}` });
           headers.push(`"${rawName}${unit}"`);
         }
@@ -1020,7 +1052,7 @@ exports.getCropPrograms = async (req, res) => {
     const path = require('path');
     const cropFile = path.resolve(__dirname, '../../crop_programs.json');
     let progs = { S1: {}, S2: {}, S3: {}, S4: {}, S5: {}, S6: {}, S7: {} };
-    
+
     // Check DB first
     const device = await resolveDeviceByIdOrMqtt(req.params.id);
     if (device?.cropPrograms && typeof device.cropPrograms === 'object') {
@@ -1046,10 +1078,10 @@ exports.saveCropProgram = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Program name required' });
     }
     const rKey = (room || port || 'S1').toUpperCase();
-    
+
     const device = await resolveDeviceByIdOrMqtt(req.params.id);
     const devId = (device?.mqttId || (device?._id ? device._id.toString() : req.params.id)).toString();
-    
+
     let progs = { S1: {}, S2: {}, S3: {}, S4: {}, S5: {}, S6: {}, S7: {} };
     if (device?.cropPrograms && typeof device.cropPrograms === 'object') {
       progs = { ...progs, ...device.cropPrograms };
@@ -1159,7 +1191,7 @@ exports.applyCropProgram = async (req, res) => {
     const pName = decodeURIComponent(req.params.programName || '').trim();
     const { room, port } = req.body;
     const rKey = (room || port || 'S1').toUpperCase();
-    
+
     const device = await resolveDeviceByIdOrMqtt(req.params.id);
     const devId = (device?.mqttId || (device?._id ? device._id.toString() : req.params.id)).toString();
 

@@ -101,7 +101,7 @@ const parseRobustFloat = (val) => {
           return parsedArr.reduce((a, b) => a + b, 0) / parsedArr.length;
         }
       }
-    } catch (e) {}
+    } catch (e) { }
   }
   const parsed = parseFloat(val);
   return isNaN(parsed) ? 0 : parsed;
@@ -137,8 +137,8 @@ const mapFeedsToCharts = (feeds, filter, channelFields, isBothRooms = false, dur
   const timeFormat = isMultiDay
     ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
     : showSeconds
-    ? { hour: '2-digit', minute: '2-digit', second: '2-digit' }
-    : { hour: '2-digit', minute: '2-digit' };
+      ? { hour: '2-digit', minute: '2-digit', second: '2-digit' }
+      : { hour: '2-digit', minute: '2-digit' };
 
   if (!isBothRooms) {
     const mappedData = {};
@@ -155,17 +155,17 @@ const mapFeedsToCharts = (feeds, filter, channelFields, isBothRooms = false, dur
     validFeeds.forEach(f => {
       const timeObj = new Date(f.created_at);
       const roundedMs = Math.round(timeObj.getTime() / 15000) * 15000;
-      
+
       if (!timeGroupsMap.has(roundedMs)) {
         timeGroupsMap.set(roundedMs, {
           time: new Date(roundedMs).toLocaleString('en-US', timeFormat),
           rawTimestamp: roundedMs
         });
       }
-      
+
       const group = timeGroupsMap.get(roundedMs);
       const suffix = f.room === 'room3' ? 'Room3' : f.room === 'room2' ? 'Room2' : 'Room1';
-      
+
       channelFields.forEach(field => {
         group[`${field.key}${suffix}`] = parseRobustFloat(f[field.key]);
       });
@@ -218,7 +218,7 @@ const formatCSVTimestamp = (dateInput) => {
 
 const downloadCSV = (feeds, channelFields, filterLabel, deviceName = 'Device', isBoth = false) => {
   if (!feeds || feeds.length === 0) return;
-  
+
   const headers = ['Timestamp'];
   if (isBoth) {
     headers.push('Room');
@@ -227,9 +227,9 @@ const downloadCSV = (feeds, channelFields, filterLabel, deviceName = 'Device', i
     const cleanName = normalizeMetricName(f.name);
     headers.push(`${cleanName} (${getFieldMeta(cleanName).unit || ''})`);
   });
-  
+
   const headerLine = headers.join(',') + '\n';
-  
+
   const rows = feeds.map((f) => {
     const readableTime = formatCSVTimestamp(f.created_at);
     const rowCells = [`"${readableTime}"`];
@@ -346,7 +346,7 @@ const AnalyticsPage = () => {
       const { start, end } = getDateRange(filter, customStartDate, customEndDate, durationVal, durationUnit);
       const roomParam = selectedDevice?.deviceType === 'office_control' ? `&room=${selectedRoom}` : '';
       const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics?start=${start.toISOString()}&end=${end.toISOString()}${roomParam}`;
-      
+
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await fetch(url, { headers });
       if (res.status === 404) {
@@ -518,10 +518,10 @@ const AnalyticsPage = () => {
     }
   }, [filter, customStartDate, customEndDate, durationVal, durationUnit]);
 
-  const filterLabel = filter === 'duration' 
-    ? `last_${durationVal}_${durationUnit}` 
-    : filter === 'custom' 
-      ? (customStartDate && customEndDate ? `${customStartDate}_to_${customEndDate}` : customStartDate || 'custom') 
+  const filterLabel = filter === 'duration'
+    ? `last_${durationVal}_${durationUnit}`
+    : filter === 'custom'
+      ? (customStartDate && customEndDate ? `${customStartDate}_to_${customEndDate}` : customStartDate || 'custom')
       : filter;
 
   const filterButtons = [
@@ -688,8 +688,8 @@ const AnalyticsPage = () => {
                   }
                 }}
                 className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${filter === btn.key
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-sm'
-                    : 'text-slate-400 hover:text-white'
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-sm'
+                  : 'text-slate-400 hover:text-white'
                   }`}
               >
                 {btn.label}
@@ -737,11 +737,10 @@ const AnalyticsPage = () => {
                   <button
                     key={preset.label}
                     onClick={() => { setDurationVal(preset.val); setDurationUnit(preset.unit); }}
-                    className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all ${
-                      durationVal === preset.val && durationUnit === preset.unit
+                    className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all ${durationVal === preset.val && durationUnit === preset.unit
                         ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-sm'
                         : 'text-slate-400 hover:text-white hover:bg-slate-700/40'
-                    }`}
+                      }`}
                   >
                     {preset.label}
                   </button>

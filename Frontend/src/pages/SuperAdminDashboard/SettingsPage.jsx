@@ -151,21 +151,58 @@ const SettingsPage = () => {
       console.error('Error parsing user data from localStorage', error);
     }
   }, []);
+  const [userDevices, setUserDevices] = useState([]);
+  const [devicesFetched, setDevicesFetched] = useState(false);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const API_BASE = import.meta.env.VITE_API_URL || '';
+    if (!token) return;
+
+    fetch(`${API_BASE}/api/devices?minimal=true`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.data)) {
+          setUserDevices(data.data);
+        }
+        setDevicesFetched(true);
+      })
+      .catch(() => setDevicesFetched(true));
+  }, []);
+
+  const isSuperadmin = currentUser.role === 'superadmin';
+  const hasType = (types, nameCheck = false) => {
+    if (isSuperadmin) return true;
+    return userDevices.some(d => {
+      const type = (d.deviceType || '').toLowerCase();
+      const name = (d.name || '').toLowerCase();
+      if (types.includes(type)) return true;
+      if (nameCheck && (name.includes('cold') || name.includes('storage') || name.includes('room'))) return true;
+      return false;
+    });
+  };
+
   const tabs = [
     { key: 'profile', label: 'Profile', icon: User },
-    ...((currentUser.role === 'admin' || currentUser.role === 'superadmin') ? [
-      { key: 'device_config', label: 'Device Control', icon: Settings },
-      { key: 'almora_config', label: 'Almora Setup', icon: Monitor },
-      { key: 'almora2_config', label: 'Almora Setup 2', icon: Monitor },
-      { key: 'cold_storage_config', label: 'Cold Storage Setup', icon: Monitor },
-      { key: 'light_motor_pump_config', label: 'Light Motor Pump Setup', icon: Monitor },
-      { key: 'office_control_config', label: 'Office Control Setup', icon: Monitor },
-      { key: 'controlling_config', label: 'Controller Setup', icon: Monitor },
-      { key: 'monit_config', label: 'Monnet Setup', icon: Monitor },
+    ...((currentUser.role === 'admin' || isSuperadmin) ? [
+      ...(hasType(['system2', 'standard', '']) ? [{ key: 'device_config', label: 'Device Control', icon: Settings }] : []),
+      ...(hasType(['almora']) ? [{ key: 'almora_config', label: 'Almora Setup', icon: Monitor }] : []),
+      ...(hasType(['almora2', 'almora2_full']) ? [{ key: 'almora2_config', label: 'Almora Setup 2', icon: Monitor }] : []),
+      ...(hasType(['cold_storage', 'multi_sensor'], true) ? [{ key: 'cold_storage_config', label: 'Cold Storage Setup', icon: Monitor }] : []),
+      ...(hasType(['light_motor_pump']) ? [{ key: 'light_motor_pump_config', label: 'Light Motor Pump Setup', icon: Monitor }] : []),
+      ...(hasType(['office_control']) ? [{ key: 'office_control_config', label: 'Office Control Setup', icon: Monitor }] : []),
+      ...(hasType(['controlling']) ? [{ key: 'controlling_config', label: 'Controller Setup', icon: Monitor }] : []),
+      ...(hasType(['monit', 'monnet', 'monit_device', 'dosing']) ? [{ key: 'monit_config', label: 'Monnet Setup', icon: Monitor }] : []),
     ] : []),
-    // { key: 'notifications', label: 'Notifications', icon: Bell },
-    // { key: 'appearance', label: 'Appearance', icon: Palette },
   ];
+
+  useEffect(() => {
+    if (devicesFetched && !tabs.some(t => t.key === activeTab)) {
+      setActiveTab('profile');
+    }
+  }, [devicesFetched, tabs, activeTab]);
 
   return (
     <div className="space-y-6">

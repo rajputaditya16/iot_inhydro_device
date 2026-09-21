@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Save, CheckCircle2, RefreshCw, ChevronDown, Server,
   Thermometer, Droplets, Zap, Clock, ShieldCheck, Activity, Sliders,
-  Power, FlaskConical, AlertCircle, Wind, Fan, RotateCw, Edit3, X
+  FlaskConical, AlertCircle, Wind, Fan, RotateCw, Edit3, X,
+  PowerOff, AlertTriangle, Eye, EyeOff, Sparkles, Sun, Moon
 } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
@@ -87,6 +88,93 @@ const defaultSetpoints = {
   "USER 2 PASSWORD": "2222",
 };
 
+// 13 Modbus RTU Relays Definition
+const relaysList = [
+  { key: 'relay_ec1', name: 'EC1 Dosing Pump', icon: Zap },
+  { key: 'relay_ec2', name: 'EC2 Dosing Pump', icon: Zap },
+  { key: 'relay_ph', name: 'pH Minus Dosing Pump', icon: FlaskConical },
+  { key: 'relay_solenoid', name: 'S-Tank Solenoid Valve', icon: RotateCw },
+  { key: 'relay_fan1', name: 'Stage 1 Fan 1 (1st 50%)', icon: Fan },
+  { key: 'relay_fan2', name: 'Stage 2 Fan 2 (2nd 50%)', icon: Fan },
+  { key: 'relay_pad', name: 'Cooling Pad Pump', icon: Droplets },
+  { key: 'relay_fogger', name: 'Fogger Humidifier', icon: Wind },
+  { key: 'relay_acf', name: 'Air Circulation Fan (ACF)', icon: Fan },
+  { key: 'relay_sprinkler', name: 'Overhead Sprinkler', icon: Droplets },
+  { key: 'relay_irrigation', name: 'Daytime Irrigation Pump', icon: RotateCw },
+  { key: 'timer1', name: 'Cyclic Timer 1 (Water Mixing)', icon: Clock },
+  { key: 'timer2', name: 'Cyclic Timer 2', icon: Clock },
+];
+
+// 6 Equipment Cyclic Timers Configuration
+const equipmentTimersConfig = [
+  {
+    title: "Cooling Pad Pump",
+    prefix: "PAD",
+    nameKey: "PAD Name", defaultName: "COOLING PAD PUMP",
+    startKey: "PAD Start", defaultStart: "06:00",
+    stopKey: "PAD Stop", defaultStop: "18:00",
+    onKey: "PAD ON Min", defaultOn: 5,
+    offKey: "PAD OFF Min", defaultOff: 15,
+    relayKey: "relay_pad",
+    icon: Droplets
+  },
+  {
+    title: "Air Circulation Fan (ACF)",
+    prefix: "ACF",
+    nameKey: "ACF Name", defaultName: "AIR CIRCULATION FAN",
+    startKey: "ACF Start", defaultStart: "06:00",
+    stopKey: "ACF Stop", defaultStop: "22:00",
+    onKey: "ACF ON Min", defaultOn: 10,
+    offKey: "ACF OFF Min", defaultOff: 20,
+    relayKey: "relay_acf",
+    icon: Fan
+  },
+  {
+    title: "Overhead Sprinkler",
+    prefix: "Sprinkler",
+    nameKey: "Sprinkler Name", defaultName: "SPRINKLER",
+    startKey: "Sprinkler Start", defaultStart: "08:00",
+    stopKey: "Sprinkler Stop", defaultStop: "17:00",
+    onKey: "Sprinkler ON Min", defaultOn: 2,
+    offKey: "Sprinkler OFF Min", defaultOff: 30,
+    relayKey: "relay_sprinkler",
+    icon: Droplets
+  },
+  {
+    title: "Daytime Irrigation",
+    prefix: "Irrigation",
+    nameKey: "Irrigation Name", defaultName: "IRRIGATION",
+    startKey: "Irrigation Start", defaultStart: "06:00",
+    stopKey: "Irrigation Stop", defaultStop: "18:00",
+    onKey: "Irrigation ON Min", defaultOn: 15,
+    offKey: "Irrigation OFF Min", defaultOff: 45,
+    relayKey: "relay_irrigation",
+    icon: RotateCw
+  },
+  {
+    title: "Cyclic Timer 1 (Water Mixing)",
+    prefix: "Timer1",
+    nameKey: "Timer1 Name", defaultName: "WATER MIXING PUMP",
+    startKey: "Timer1 Start", defaultStart: "06:00",
+    stopKey: "Timer1 Stop", defaultStop: "18:00",
+    onKey: "Timer1 ON Min", defaultOn: 5,
+    offKey: "Timer1 OFF Min", defaultOff: 15,
+    relayKey: "timer1",
+    icon: Clock
+  },
+  {
+    title: "Cyclic Timer 2",
+    prefix: "Timer2",
+    nameKey: "Timer2 Name", defaultName: "CYCLIC TIMER 2",
+    startKey: "Timer2 Start", defaultStart: "00:00",
+    stopKey: "Timer2 Stop", defaultStop: "23:59",
+    onKey: "Timer2 ON Min", defaultOn: 10,
+    offKey: "Timer2 OFF Min", defaultOff: 20,
+    relayKey: "timer2",
+    icon: Clock
+  },
+];
+
 const MonitSettings = () => {
   const [viewMode, setViewMode] = useState('setpoints'); // 'setpoints' | 'monitoring'
   const [monitDevices, setMonitDevices] = useState([]);
@@ -100,6 +188,19 @@ const MonitSettings = () => {
   const lastTelemetryTimeRef = useRef(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Operator PIN reveal states
+  const [showPin1, setShowPin1] = useState(false);
+  const [showPin2, setShowPin2] = useState(false);
+
+  // Status message / toast
+  const [toast, setToast] = useState({ show: false, type: 'success', message: '' });
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState('');
+  const [confirmModal, setConfirmModal] = useState({ open: false, action: null });
+  const [commandLoading, setCommandLoading] = useState(false);
+  const [commandCooldown, setCommandCooldown] = useState(0);
+
+  // Heartbeat watchdog: checks every 3s if fresh packet was received in the last 45s
   useEffect(() => {
     const ticker = setInterval(() => {
       const isFresh = Boolean(
@@ -110,14 +211,7 @@ const MonitSettings = () => {
     return () => clearInterval(ticker);
   }, []);
 
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [toast, setToast] = useState({ show: false, type: 'success', message: '' });
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [tempName, setTempName] = useState('');
-  const [confirmModal, setConfirmModal] = useState({ open: false, action: null });
-  const [commandLoading, setCommandLoading] = useState(false);
-  const [commandCooldown, setCommandCooldown] = useState(0);
-
+  // Cooldown timer countdown
   useEffect(() => {
     if (commandCooldown <= 0) return;
     const timer = setInterval(() => {
@@ -150,7 +244,9 @@ const MonitSettings = () => {
         }
         const data = await res.json();
         if (data.success) {
-          const filtered = data.data.filter(d => d.deviceType === 'monit' || d.deviceType === 'monnet' || d.deviceType === 'monit_device' || d.deviceType === 'dosing');
+          const filtered = data.data.filter(d =>
+            d.deviceType === 'monit' || d.deviceType === 'monnet' || d.deviceType === 'monit_device' || d.deviceType === 'dosing'
+          );
           setMonitDevices(filtered);
           if (filtered.length > 0 && !deviceRoot) {
             setDeviceRoot(filtered[0].mqttId || filtered[0]._id);
@@ -208,6 +304,7 @@ const MonitSettings = () => {
       mqttClient.subscribe(`inhydro/${deviceRoot}/telemetry/live`);
       mqttClient.subscribe(`inhydro/${deviceRoot}/room1/telemetry/live`);
       mqttClient.subscribe(`inhydro/${deviceRoot}/command/status`);
+      // Request current configuration on initial mount
       mqttClient.publish(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
     });
 
@@ -216,9 +313,11 @@ const MonitSettings = () => {
         try {
           const parsed = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
           const payload = Array.isArray(parsed) ? parsed[parsed.length - 1] : parsed;
-          setLiveData(payload);
-          lastTelemetryTimeRef.current = Date.now();
-          setIsMachineOnline(true);
+          if (payload && (payload.ec !== undefined || payload.ph !== undefined || payload.room_temp !== undefined || payload.temp !== undefined || payload.relay_ec1 !== undefined)) {
+            setLiveData(payload);
+            lastTelemetryTimeRef.current = Date.now();
+            setIsMachineOnline(true);
+          }
         } catch (e) { }
       }
       else if (topic === `inhydro/${deviceRoot}/command/status` || topic?.endsWith('/command/status')) {
@@ -308,7 +407,7 @@ const MonitSettings = () => {
         const data = await res.json();
         if (data.success) {
           setSaveSuccess(true);
-          showToast('success', `Setpoints pushed to device "${selectedDevice?.name || deviceRoot}" successfully via Private Broker!`);
+          showToast('success', `Setpoints pushed to device "${selectedDevice?.name || deviceRoot}" successfully via Broker!`);
           setTimeout(() => setSaveSuccess(false), 3000);
         } else {
           showToast('error', data.message || "Failed to push setpoints to device.");
@@ -354,16 +453,14 @@ const MonitSettings = () => {
       return;
     }
     setCommandLoading(true);
-    // Enforce brief 6s debounce cooldown in background (no timer countdown displayed)
     setCommandCooldown(6);
-    // Close modal immediately so user cannot double-click
     setConfirmModal({ open: false, action: null });
 
     const cmd_id = `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     const cmdPayload = { action, cmd_id, timestamp: Date.now() };
     let sentViaWs = false;
 
-    // 1. Instant Direct WebSocket MQTT publish (sub-millisecond)
+    // 1. Instant Direct WebSocket MQTT publish
     if (client && client.connected) {
       try {
         client.publish(`inhydro/${deviceRoot}/command`, JSON.stringify(cmdPayload), { retain: false });
@@ -375,7 +472,7 @@ const MonitSettings = () => {
       }
     }
 
-    // 2. Fallback via backend REST API ONLY if WebSocket was not connected or failed
+    // 2. Fallback via backend REST API
     if (!sentViaWs) {
       try {
         const deviceId = selectedDevice?._id || deviceRoot;
@@ -404,18 +501,18 @@ const MonitSettings = () => {
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center rounded-2xl border border-slate-700 bg-slate-800/20">
-        <RefreshCw className="h-8 w-8 animate-spin text-green-500" />
+      <div className="flex h-64 items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-sm shadow-lg">
+        <RefreshCw className="h-8 w-8 animate-spin text-emerald-400" />
       </div>
     );
   }
 
   if (monitDevices.length === 0) {
     return (
-      <div className="flex h-64 flex-col items-center justify-center rounded-2xl border border-slate-700 bg-slate-800/20 p-8 text-center">
+      <div className="flex h-64 flex-col items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center backdrop-blur-sm shadow-lg">
         <Server className="mb-4 h-12 w-12 text-slate-600" />
-        <h3 className="text-lg font-semibold text-white">No Monnet Controllers Found</h3>
-        <p className="mt-2 text-sm text-slate-400">Please register a device with type <code className="text-green-400 bg-slate-800 px-2 py-0.5 rounded">monit</code> on the Devices page first.</p>
+        <h3 className="text-lg font-bold text-white">No Monnet Controllers Found</h3>
+        <p className="mt-2 text-sm text-slate-400">Please register a device with type <code className="text-emerald-400 bg-slate-950 px-2 py-0.5 rounded font-mono border border-slate-800">monit</code> on the Devices page first.</p>
       </div>
     );
   }
@@ -423,102 +520,21 @@ const MonitSettings = () => {
   const ecVal = isMachineOnline && liveData?.ec != null && Number(liveData.ec) > 0 ? Number(liveData.ec) : null;
   const tdsPpm = isMachineOnline && Number.isFinite(ecVal) && ecVal > 0 ? Math.round(ecVal * 500) : null;
 
-  // List of all 13 relays according to monit.py
-  const relaysList = [
-    { key: 'relay_ec1', name: 'EC1 Dosing Pump', icon: Zap },
-    { key: 'relay_ec2', name: 'EC2 Dosing Pump', icon: Zap },
-    { key: 'relay_ph', name: 'pH Minus Dosing Pump', icon: FlaskConical },
-    { key: 'relay_solenoid', name: 'S-Tank Solenoid Valve', icon: RotateCw },
-    { key: 'relay_fan1', name: 'Stage 1 Fan 1 (Fan 1st 50%)', icon: Fan },
-    { key: 'relay_fan2', name: 'Stage 2 Fan 2 (Fan 2nd 50%)', icon: Fan },
-    { key: 'relay_pad', name: 'Cooling Pad Pump', icon: Droplets },
-    { key: 'relay_fogger', name: 'Fogger Humidifier', icon: Wind },
-    { key: 'relay_acf', name: 'Air Circulation Fan (ACF)', icon: Fan },
-    { key: 'relay_sprinkler', name: 'Overhead Sprinkler', icon: Droplets },
-    { key: 'relay_irrigation', name: 'Daytime Irrigation Pump', icon: RotateCw },
-    { key: 'timer1', name: 'Cyclic Timer 1 (Water Mixing)', icon: Clock },
-    { key: 'timer2', name: 'Cyclic Timer 2', icon: Clock },
-  ];
-
-  // List of equipment cyclic timers according to monit.py
-  const equipmentTimersConfig = [
-    {
-      title: "Cooling Pad Pump (PAD)",
-      prefix: "PAD",
-      nameKey: "PAD Name", defaultName: "COOLING PAD PUMP",
-      startKey: "PAD Start", defaultStart: "06:00",
-      stopKey: "PAD Stop", defaultStop: "18:00",
-      onKey: "PAD ON Min", defaultOn: 5,
-      offKey: "PAD OFF Min", defaultOff: 15,
-      relayKey: "relay_pad"
-    },
-    {
-      title: "Air Circulation Fan (ACF)",
-      prefix: "ACF",
-      nameKey: "ACF Name", defaultName: "AIR CIRCULATION FAN",
-      startKey: "ACF Start", defaultStart: "06:00",
-      stopKey: "ACF Stop", defaultStop: "22:00",
-      onKey: "ACF ON Min", defaultOn: 10,
-      offKey: "ACF OFF Min", defaultOff: 20,
-      relayKey: "relay_acf"
-    },
-    {
-      title: "Overhead Sprinkler",
-      prefix: "Sprinkler",
-      nameKey: "Sprinkler Name", defaultName: "SPRINKLER",
-      startKey: "Sprinkler Start", defaultStart: "08:00",
-      stopKey: "Sprinkler Stop", defaultStop: "17:00",
-      onKey: "Sprinkler ON Min", defaultOn: 2,
-      offKey: "Sprinkler OFF Min", defaultOff: 30,
-      relayKey: "relay_sprinkler"
-    },
-    {
-      title: "Daytime Irrigation",
-      prefix: "Irrigation",
-      nameKey: "Irrigation Name", defaultName: "IRRIGATION",
-      startKey: "Irrigation Start", defaultStart: "06:00",
-      stopKey: "Irrigation Stop", defaultStop: "18:00",
-      onKey: "Irrigation ON Min", defaultOn: 15,
-      offKey: "Irrigation OFF Min", defaultOff: 45,
-      relayKey: "relay_irrigation"
-    },
-    {
-      title: "Cyclic Timer 1",
-      prefix: "Timer1",
-      nameKey: "Timer1 Name", defaultName: "WATER MIXING PUMP",
-      startKey: "Timer1 Start", defaultStart: "06:00",
-      stopKey: "Timer1 Stop", defaultStop: "18:00",
-      onKey: "Timer1 ON Min", defaultOn: 5,
-      offKey: "Timer1 OFF Min", defaultOff: 15,
-      relayKey: "timer1"
-    },
-    {
-      title: "Cyclic Timer 2",
-      prefix: "Timer2",
-      nameKey: "Timer2 Name", defaultName: "CYCLIC TIMER 2",
-      startKey: "Timer2 Start", defaultStart: "00:00",
-      stopKey: "Timer2 Stop", defaultStop: "23:59",
-      onKey: "Timer2 ON Min", defaultOn: 10,
-      offKey: "Timer2 OFF Min", defaultOff: 20,
-      relayKey: "timer2"
-    },
-  ];
-
   return (
-    <div className="space-y-6">
+    <div className="max-w-7xl mx-auto space-y-5 pb-16 text-slate-100 font-sans px-2 sm:px-4">
       {/* Toast Notification Popup */}
       {toast.show && (
-        <div className={`fixed top-6 right-6 z-50 flex items-center gap-3 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 max-w-sm ${toast.type === 'success'
-          ? 'border-emerald-500/30 bg-slate-900/95 text-emerald-400 shadow-emerald-950/20'
-          : 'border-red-500/30 bg-slate-900/95 text-red-400 shadow-red-950/20'
+        <div className={`fixed top-6 right-6 z-50 flex items-center gap-3 rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-md transition-all duration-300 max-w-sm ${toast.type === 'success'
+          ? 'border-emerald-500/30 bg-slate-950/95 text-emerald-400 shadow-emerald-950/30'
+          : 'border-rose-500/30 bg-slate-950/95 text-rose-400 shadow-rose-950/30'
           }`}>
           {toast.type === 'success' ? (
-            <CheckCircle2 className="h-5 w-5 shrink-0 animate-pulse" />
+            <CheckCircle2 className="h-5 w-5 shrink-0 animate-pulse text-emerald-400" />
           ) : (
-            <AlertCircle className="h-5 w-5 shrink-0 animate-pulse" />
+            <AlertCircle className="h-5 w-5 shrink-0 animate-pulse text-rose-400" />
           )}
           <div className="flex flex-col">
-            <span className="text-sm font-semibold text-white">
+            <span className="text-xs font-bold text-white uppercase tracking-wider">
               {toast.type === 'success' ? 'Success' : 'Error'}
             </span>
             <span className="text-xs text-slate-300">{toast.message}</span>
@@ -526,21 +542,21 @@ const MonitSettings = () => {
         </div>
       )}
 
-      {/* Remote Script Action Confirmation Modal */}
+      {/* Remote Action Confirmation Modal */}
       {confirmModal.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-2xl space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <h3 className="flex items-center gap-2 text-base font-bold text-white">
                 {confirmModal.action === 'restart' ? (
                   <>
                     <RotateCw className="h-4 w-4 text-amber-400" />
-                    Restart Device
+                    Restart Controller
                   </>
                 ) : (
                   <>
-                    <Power className="h-4 w-4 text-rose-400" />
-                    Exit
+                    <PowerOff className="h-4 w-4 text-rose-400" />
+                    Exit Controller
                   </>
                 )}
               </h3>
@@ -561,32 +577,31 @@ const MonitSettings = () => {
               <button
                 onClick={() => setConfirmModal({ open: false, action: null })}
                 disabled={commandLoading}
-                className="rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 transition-all"
+                className="rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition-all"
               >
                 Cancel
               </button>
               <button
                 onClick={() => handleDeviceCommand(confirmModal.action)}
                 disabled={commandLoading || commandCooldown > 0}
-                className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-lg active:scale-95 disabled:opacity-50 transition-all ${
-                  confirmModal.action === 'restart'
-                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 shadow-amber-500/20 hover:from-amber-400 hover:to-orange-400'
-                    : 'bg-gradient-to-r from-rose-600 to-red-600 shadow-rose-600/20 hover:from-rose-500 hover:to-red-500'
-                }`}
+                className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold text-white shadow-lg active:scale-95 disabled:opacity-50 transition-all ${confirmModal.action === 'restart'
+                  ? 'border border-amber-500/40 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                  : 'border border-rose-500/40 bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
+                  }`}
               >
                 {commandLoading ? (
                   <>
-                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                     Sending...
                   </>
                 ) : confirmModal.action === 'restart' ? (
                   <>
-                    <RotateCw className="h-4 w-4" />
+                    <RotateCw className="h-3.5 w-3.5" />
                     Restart
                   </>
                 ) : (
                   <>
-                    <Power className="h-4 w-4" />
+                    <PowerOff className="h-3.5 w-3.5" />
                     Exit
                   </>
                 )}
@@ -596,753 +611,878 @@ const MonitSettings = () => {
         </div>
       )}
 
-      {/* Top Header Controls */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            {isEditingName ? (
-              <div className="flex items-center gap-2">
-                <input
-                  autoFocus
-                  type="text"
-                  value={tempName}
-                  onChange={(e) => setTempName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleNameSave()}
-                  className="rounded border border-green-500 bg-slate-900/50 px-2 py-0.5 text-base font-semibold text-white outline-none"
-                />
-                <button onClick={handleNameSave} className="rounded bg-green-500/20 px-2 py-1 text-xs font-semibold text-green-400 hover:bg-green-500/30 transition-all">Save</button>
-              </div>
-            ) : (
-              <h3 className="flex items-center gap-2 text-base font-semibold text-white">
-                {selectedDevice?.name || 'Monnet Device'}
-                <button onClick={() => setIsEditingName(true)} className="text-slate-500 transition hover:text-green-400" title="Rename Machine">
-                  <Edit3 className="h-4 w-4" />
-                </button>
-              </h3>
-            )}
+      {/* ── 1. CLEAN TOP HEADER & CONTROLS ── */}
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-slate-800/80 backdrop-blur-sm shadow-lg shadow-black/20">
+        <div className="flex items-center gap-3.5">
+          <div className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+            <Activity className="h-5 w-5" />
           </div>
-          <p className="text-sm text-slate-400 mt-1">Configure Monnet Farm Automation Setpoints & Live Telemetry</p>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              {isEditingName ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={tempName}
+                    onChange={(e) => setTempName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleNameSave()}
+                    className="rounded-xl border border-emerald-500/80 bg-slate-950 px-2.5 py-1 text-sm font-semibold text-white outline-none focus:ring-1 focus:ring-emerald-500/30"
+                  />
+                  <button
+                    onClick={handleNameSave}
+                    className="rounded-xl bg-emerald-500 hover:bg-emerald-400 px-3 py-1 text-xs font-bold text-slate-950 transition-all shadow-sm"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setIsEditingName(false)}
+                    className="rounded-xl bg-slate-800 hover:bg-slate-700 px-2.5 py-1 text-xs font-medium text-slate-400 hover:text-white transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <h1 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                    {selectedDevice?.name || 'Monnet Device'}
+                  </h1>
+                  <button
+                    onClick={() => setIsEditingName(true)}
+                    className="p-1 rounded-lg text-slate-500 hover:text-emerald-400 hover:bg-slate-800/60 transition-colors"
+                    title="Rename Controller"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Status Badges */}
+              <div className="flex items-center gap-1.5">
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${status === 'connected'
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                  }`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${status === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
+                  Broker: {status === 'connected' ? 'Connected' : 'Disconnected'}
+                </span>
+
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${isMachineOnline
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${isMachineOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                  Machine {isMachineOnline ? 'Online' : 'Offline'}
+                </span>
+              </div>
+            </div>
+            {/* <p className="text-xs text-slate-400 mt-0.5">Automated Dosing, Climate Thresholds & Relay Timers</p> */}
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-4">
+        {/* Action Controls */}
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-start sm:justify-end">
           {/* Device Selector */}
-          <div className="relative">
-            <button
-              onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium text-white outline-none transition-all ${isDropdownOpen ? 'border-green-500 bg-slate-800' : 'border-slate-700 bg-slate-900/50 hover:border-green-500 hover:bg-slate-800'}`}
+          <div className="relative flex-1 sm:flex-initial min-w-[170px]">
+            <select
+              value={deviceRoot}
+              onChange={(e) => setDeviceRoot(e.target.value)}
+              className="w-full appearance-none bg-slate-950 border border-slate-700/80 text-white text-xs font-semibold rounded-xl pl-8 pr-8 py-2 outline-none hover:border-slate-600 focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/30 cursor-pointer transition-colors"
             >
-              <Server className="h-4 w-4 text-green-400" />
-              <span className="max-w-[150px] truncate">{selectedDevice?.name || 'Select Device'}</span>
-              <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            {isDropdownOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setIsDropdownOpen(false)}></div>
-                <div className="absolute right-0 top-full z-50 mt-2 flex w-56 flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl">
-                  {monitDevices.map((d) => {
-                    const rootKey = d.mqttId || d._id;
-                    return (
-                      <button
-                        key={d._id}
-                        onClick={() => {
-                          setDeviceRoot(rootKey);
-                          setIsDropdownOpen(false);
-                        }}
-                        className={`flex items-center w-full justify-between px-4 py-3 text-sm transition-colors hover:bg-slate-800 ${deviceRoot === rootKey ? 'bg-green-500/10 text-green-400 font-semibold' : 'text-slate-300'}`}
-                      >
-                        <span className="truncate">{d.name}</span>
-                        <span className={`h-1.5 w-1.5 rounded-full ${d.status === 'online' ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
+              {monitDevices.map(d => (
+                <option key={d._id} value={d.mqttId || d._id}>
+                  {d.name.replace(/\s*\([^)]*\)/g, '').trim() || d.name}
+                </option>
+              ))}
+            </select>
+            <Server className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-emerald-400 pointer-events-none" />
+            <ChevronDown className="absolute right-2.5 top-2.5 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
           </div>
 
+          {/* Sync Button */}
           <button
             onClick={handleSyncRequest}
             title="Request setpoints sync from device"
-            className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-xs font-medium text-slate-300 hover:border-green-500 hover:text-white transition-all"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-200 hover:text-white transition-all shadow-sm"
           >
-            <RefreshCw className="h-4 w-4 text-slate-400" /> Sync Device
+            <RefreshCw className="h-3.5 w-3.5 text-slate-400" />
+            <span>Sync</span>
           </button>
 
-          {/* Remote Script Controls */}
+          {/* Restart */}
           <button
             onClick={() => setConfirmModal({ open: true, action: 'restart' })}
-            disabled={commandCooldown > 0}
+            disabled={commandCooldown > 0 || commandLoading}
             title="Restart Device"
-            className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 hover:border-amber-400 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 active:scale-95 text-xs font-semibold text-amber-300 hover:text-amber-200 transition-all disabled:opacity-50 shadow-sm"
           >
-            <RotateCw className={`h-4 w-4 text-amber-400 ${commandCooldown > 0 ? 'animate-spin' : ''}`} />
-            Restart Device
+            <RotateCw className={`h-3.5 w-3.5 text-amber-400 ${commandCooldown > 0 ? 'animate-spin' : ''}`} />
+            <span>Restart</span>
           </button>
 
+          {/* Exit */}
           <button
             onClick={() => setConfirmModal({ open: true, action: 'exit' })}
-            disabled={commandCooldown > 0}
+            disabled={commandCooldown > 0 || commandLoading}
             title="Exit"
-            className="flex items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3.5 py-2.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 hover:border-rose-400 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 active:scale-95 text-xs font-semibold text-rose-300 hover:text-rose-200 transition-all disabled:opacity-50 shadow-sm"
           >
-            <Power className="h-4 w-4 text-rose-400" />
-            Exit
+            <PowerOff className="h-3.5 w-3.5 text-rose-400" />
+            <span>Exit</span>
           </button>
 
-          {/* Differentiated Status Indicators: Broker vs Machine */}
-          <div className="flex items-center gap-2.5">
-            {/* Broker Status */}
-            <div className="flex items-center gap-1.5 rounded-lg bg-slate-900/60 border border-slate-700/50 px-2.5 py-1 text-xs">
-              <span className="text-slate-400">Broker:</span>
-              {status === 'connected' ? (
-                <span className="flex items-center gap-1 font-semibold text-emerald-400">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400" /> Connected
-                </span>
-              ) : status === 'saving' ? (
-                <span className="flex items-center gap-1 font-semibold text-green-400">
-                  <RefreshCw className="h-3 w-3 animate-spin" /> Pushing...
-                </span>
-              ) : status === 'saved' || saveSuccess ? (
-                <span className="flex items-center gap-1 font-semibold text-emerald-400">
-                  <CheckCircle2 className="h-3 w-3" /> Pushed
-                </span>
-              ) : status === 'error' ? (
-                <span className="flex items-center gap-1 font-semibold text-red-400">
-                  <AlertCircle className="h-3 w-3" /> Error
-                </span>
-              ) : (
-                <span className="flex items-center gap-1 font-semibold text-slate-400">
-                  <span className="h-2 w-2 rounded-full bg-slate-600" /> Connecting...
-                </span>
-              )}
-            </div>
-
-            {/* Machine Hardware Status */}
-            <div className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold ${
-              isMachineOnline
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                : 'border-slate-700/50 bg-slate-900/60 text-slate-400'
-            }`}>
-              <span className={`h-2 w-2 rounded-full ${isMachineOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-              {isMachineOnline ? 'Machine Online' : 'Machine Offline'}
-            </div>
-          </div>
+          {/* Save Button */}
+          <button
+            onClick={handleSaveSetpoints}
+            disabled={!selectedDevice || saveSuccess}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-bold text-xs transition-all shadow-sm shadow-emerald-500/20 disabled:opacity-50"
+          >
+            {saveSuccess ? (
+              <>
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                <span>Pushed!</span>
+              </>
+            ) : (
+              <>
+                <Save className="h-3.5 w-3.5" />
+                <span>Save Changes</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Machine Offline Retained-Message Notice */}
+      {/* ── Offline Retained Notice Banner ── */}
       {!isMachineOnline && (
-        <div className="flex items-center gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5 text-xs text-amber-300/90 shadow-sm">
-          <AlertCircle className="h-4 w-4 shrink-0 text-amber-400" />
+        <div className="flex items-center gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium animate-in fade-in">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
           <span>
-            Physical machine <strong>"{selectedDevice?.name || deviceRoot}"</strong> is currently offline/standby. Any setpoints updated here will be <strong>retained on the Private Mosquitto Broker</strong> and automatically synced to the machine as soon as it powers on.
+            <strong>Machine is currently offline:</strong> New setpoints and cyclic timer values will be safely retained on the server and automatically synced when the controller connects.
           </span>
         </div>
       )}
 
-      {/* Mode Tabs */}
-      <div className="flex border-b border-slate-700">
-        <button
-          onClick={() => setViewMode('setpoints')}
-          className={`flex-1 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${viewMode === 'setpoints' ? 'border-b-2 border-green-500 text-green-400' : 'text-slate-400 hover:text-white'}`}
-        >
-          <Sliders className="w-4 h-4" /> Setpoints Setup
-        </button>
-        <button
-          onClick={() => setViewMode('monitoring')}
-          className={`flex-1 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${viewMode === 'monitoring' ? 'border-b-2 border-green-500 text-green-400' : 'text-slate-400 hover:text-white'}`}
-        >
-          <Activity className="w-4 h-4" /> Live Monitor
-        </button>
+      {/* ── 2. VIEW MODE TABS SWITCHER ── */}
+      <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+        <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs w-full sm:w-auto">
+          <button
+            onClick={() => setViewMode('setpoints')}
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all flex-1 sm:flex-initial ${viewMode === 'setpoints' ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+          >
+            <Sliders className="w-3.5 h-3.5" /> Setpoints Setup
+          </button>
+          <button
+            onClick={() => setViewMode('monitoring')}
+            className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all flex-1 sm:flex-initial ${viewMode === 'monitoring' ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm' : 'text-slate-400 hover:text-white'
+              }`}
+          >
+            <Activity className="w-3.5 h-3.5" /> Live Monitor & Relays
+          </button>
+        </div>
       </div>
 
-      {/* SECTION 1: SYSTEM SETPOINTS CONFIGURATION */}
+      {/* ── SECTION 1: SYSTEM SETPOINTS CONFIGURATION ── */}
       {viewMode === 'setpoints' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-6 animate-in fade-in duration-200">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
             {/* LEFT COLUMN: NUTRIENTS & PH + FOGGER HUMIDIFIER DAY/NIGHT */}
-            <div className="space-y-6">
+            <div className="space-y-5">
               {/* Nutrients & pH Limits Card */}
-              <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4">
-                <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2 border-b border-slate-700/50 pb-3">
-                  <Zap className="w-4 h-4" /> Nutrients & pH Threshold Limits
-                </h4>
+              <div className="rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-lg shadow-black/20 p-5 sm:p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                  <div className="flex items-center gap-2 text-sm font-bold text-white">
+                    <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      <Zap className="w-4 h-4" />
+                    </span>
+                    Nutrients & pH Threshold Limits
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                    Dosing
+                  </span>
+                </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">EC MIN (mS/cm)</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800/90">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">EC MIN (mS/cm)</label>
                     <input
                       type="number"
                       step="0.1"
                       value={setpoints["EC MIN"] ?? 1.2}
                       onChange={(e) => handleInputChange("EC MIN", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-2 text-sm text-white font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all"
                     />
                   </div>
 
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">EC MAX (mS/cm)</label>
+                  <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800/90">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">EC MAX (mS/cm)</label>
                     <input
                       type="number"
                       step="0.1"
                       value={setpoints["EC MAX"] ?? 1.8}
                       onChange={(e) => handleInputChange("EC MAX", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-2 text-sm text-white font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all"
                     />
                   </div>
 
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">pH LOW Limit</label>
+                  <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800/90">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">pH LOW Limit</label>
                     <input
                       type="number"
                       step="0.1"
                       value={setpoints["PH LOW"] ?? 5.8}
                       onChange={(e) => handleInputChange("PH LOW", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-2 text-sm text-white font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all"
                     />
                   </div>
 
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">pH HIGH Limit</label>
+                  <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800/90">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">pH HIGH Limit</label>
                     <input
                       type="number"
                       step="0.1"
                       value={setpoints["PH HIGH"] ?? 6.5}
                       onChange={(e) => handleInputChange("PH HIGH", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-2 text-sm text-white font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all"
                     />
                   </div>
 
-                  <div className="col-span-2 flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">S-TANK Solenoid Threshold (mS/cm)</label>
+                  <div className="sm:col-span-2 flex flex-col gap-1.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800/90">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">S-TANK Solenoid Threshold (mS/cm)</label>
                     <input
                       type="number"
                       step="0.05"
                       value={setpoints["S_TANK"] ?? 0.45}
                       onChange={(e) => handleInputChange("S_TANK", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-2 text-sm text-white font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all"
                     />
                   </div>
                 </div>
               </div>
 
               {/* Fogger Day/Night Cycle Table Card */}
-              <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4 overflow-x-auto">
-                <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2 border-b border-slate-700/50 pb-3">
-                  <Wind className="w-4 h-4" /> Fogger Humidifier Day/Night Cycle
-                </h4>
-
-                <div className="flex justify-between items-center bg-slate-900/60 p-2.5 rounded-lg border border-slate-700/50">
-                  <span className="text-xs font-semibold text-slate-300">Timer Label:</span>
-                  <input
-                    type="text"
-                    value={setpoints["HUMI Name"] ?? "FOGGER TIMER"}
-                    onChange={(e) => handleInputChange("HUMI Name", e.target.value)}
-                    className="w-48 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-white font-bold text-center outline-none focus:border-green-500"
-                  />
+              <div className="rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-lg shadow-black/20 p-5 sm:p-6 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                  <div className="flex items-center gap-2 text-sm font-bold text-white">
+                    <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      <Wind className="w-4 h-4" />
+                    </span>
+                    Fogger Humidifier Day/Night Cycle
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold text-slate-400">Label:</span>
+                    <input
+                      type="text"
+                      value={setpoints["HUMI Name"] ?? "FOGGER TIMER"}
+                      onChange={(e) => handleInputChange("HUMI Name", e.target.value)}
+                      className="rounded-xl border border-slate-700/80 bg-slate-950 px-2.5 py-1 text-xs text-emerald-400 font-bold outline-none focus:border-emerald-500"
+                    />
+                  </div>
                 </div>
 
-                <table className="w-full text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-700/60 bg-slate-800/40">
-                      <th className="py-2.5 px-3 text-left font-bold text-slate-400">Setting</th>
-                      <th className="py-2.5 px-3 text-center font-bold  rounded-tl-lg">Day Cycle</th>
-                      <th className="py-2.5 px-3 text-center font-bold rounded-tr-lg">Night Cycle</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    <tr>
-                      <td className="py-2.5 px-3 font-semibold text-slate-300">Start Time:</td>
-                      <td className="py-2 px-3">
+                {/* Responsive Day & Night Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {/* Day Cycle Card */}
+                  <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <span className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                        <Sun className="h-3.5 w-3.5 text-amber-400" /> Day Cycle
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400">06:00 - 18:00</span>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Start Time:</span>
                         <input
                           type="text"
                           value={setpoints["HUMI D_Start"] ?? "06:00"}
                           onChange={(e) => handleInputChange("HUMI D_Start", e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
                         />
-                      </td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="text"
-                          value={setpoints["HUMI N_Start"] ?? "18:00"}
-                          onChange={(e) => handleInputChange("HUMI N_Start", e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2.5 px-3 font-semibold text-slate-300">Stop Time:</td>
-                      <td className="py-2 px-3">
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Stop Time:</span>
                         <input
                           type="text"
                           value={setpoints["HUMI D_Stop"] ?? "18:00"}
                           onChange={(e) => handleInputChange("HUMI D_Stop", e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
                         />
-                      </td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="text"
-                          value={setpoints["HUMI N_Stop"] ?? "06:00"}
-                          onChange={(e) => handleInputChange("HUMI N_Stop", e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2.5 px-3 font-semibold text-slate-300">ON Duration (Min):</td>
-                      <td className="py-2 px-3">
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">ON Time (min):</span>
                         <input
                           type="number"
                           value={setpoints["HUMI D_ON Min"] ?? 10}
                           onChange={(e) => handleInputChange("HUMI D_ON Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
                         />
-                      </td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="number"
-                          value={setpoints["HUMI N_ON Min"] ?? 5}
-                          onChange={(e) => handleInputChange("HUMI N_ON Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2.5 px-3 font-semibold text-slate-300">OFF Duration (Min):</td>
-                      <td className="py-2 px-3">
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">OFF Time (min):</span>
                         <input
                           type="number"
                           value={setpoints["HUMI D_OFF Min"] ?? 20}
                           onChange={(e) => handleInputChange("HUMI D_OFF Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
                         />
-                      </td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="number"
-                          value={setpoints["HUMI N_OFF Min"] ?? 40}
-                          onChange={(e) => handleInputChange("HUMI N_OFF Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2.5 px-3 font-semibold text-slate-300">Target Humidity Max (%):</td>
-                      <td className="py-2 px-3">
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Target Max %:</span>
                         <input
                           type="number"
                           value={setpoints["HUMI D_Max"] ?? 75.0}
                           onChange={(e) => handleInputChange("HUMI D_Max", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-emerald-400 font-mono text-center outline-none focus:border-emerald-500"
                         />
-                      </td>
-                      <td className="py-2 px-3">
-                        <input
-                          type="number"
-                          value={setpoints["HUMI N_Max"] ?? 80.0}
-                          onChange={(e) => handleInputChange("HUMI N_Max", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
-                        />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="py-2.5 px-3 font-semibold text-slate-300">Target Humidity Min (%):</td>
-                      <td className="py-2 px-3">
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Target Min %:</span>
                         <input
                           type="number"
                           value={setpoints["HUMI D_Min"] ?? 55.0}
                           onChange={(e) => handleInputChange("HUMI D_Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-emerald-400 font-mono text-center outline-none focus:border-emerald-500"
                         />
-                      </td>
-                      <td className="py-2 px-3">
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Night Cycle Card */}
+                  <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <span className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
+                        <Moon className="h-3.5 w-3.5 text-slate-400" /> Night Cycle
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400">18:00 - 06:00</span>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Start Time:</span>
+                        <input
+                          type="text"
+                          value={setpoints["HUMI N_Start"] ?? "18:00"}
+                          onChange={(e) => handleInputChange("HUMI N_Start", e.target.value)}
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Stop Time:</span>
+                        <input
+                          type="text"
+                          value={setpoints["HUMI N_Stop"] ?? "06:00"}
+                          onChange={(e) => handleInputChange("HUMI N_Stop", e.target.value)}
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">ON Time (min):</span>
+                        <input
+                          type="number"
+                          value={setpoints["HUMI N_ON Min"] ?? 5}
+                          onChange={(e) => handleInputChange("HUMI N_ON Min", parseFloat(e.target.value) || 0)}
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">OFF Time (min):</span>
+                        <input
+                          type="number"
+                          value={setpoints["HUMI N_OFF Min"] ?? 40}
+                          onChange={(e) => handleInputChange("HUMI N_OFF Min", parseFloat(e.target.value) || 0)}
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Target Max %:</span>
+                        <input
+                          type="number"
+                          value={setpoints["HUMI N_Max"] ?? 80.0}
+                          onChange={(e) => handleInputChange("HUMI N_Max", parseFloat(e.target.value) || 0)}
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-emerald-400 font-mono text-center outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Target Min %:</span>
                         <input
                           type="number"
                           value={setpoints["HUMI N_Min"] ?? 60.0}
                           onChange={(e) => handleInputChange("HUMI N_Min", parseFloat(e.target.value) || 0)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
+                          className="w-24 rounded-lg border border-slate-700/80 bg-slate-900 px-2 py-1 text-xs text-emerald-400 font-mono text-center outline-none focus:border-emerald-500"
                         />
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
             {/* RIGHT COLUMN: CLIMATE CONTROL + USER CREDENTIALS */}
-            <div className="space-y-6">
-              {/* Climate Control Limits Card (Including TEMP MED and Hysteresis) */}
-              <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4">
-                <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2 border-b border-slate-700/50 pb-3">
-                  <Thermometer className="w-4 h-4" /> Climate Control & 2-Stage Fan Thresholds
-                </h4>
+            <div className="space-y-5">
+              {/* Climate Control Limits Card */}
+              <div className="rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-lg shadow-black/20 p-5 sm:p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                  <div className="flex items-center gap-2 text-sm font-bold text-white">
+                    <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      <Thermometer className="w-4 h-4" />
+                    </span>
+                    Climate Control & 2-Stage Fan Thresholds
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                    MD02 Sensor
+                  </span>
+                </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">TEMP MIN (°C)</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800/90">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">TEMP MIN (°C)</label>
                     <input
                       type="number"
                       step="0.1"
                       value={setpoints["TEMP MIN"] ?? 22.0}
                       onChange={(e) => handleInputChange("TEMP MIN", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-2 text-sm text-white font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all"
                     />
                   </div>
 
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">TEMP MED (Stage 1 Fan 1 °C)</label>
+                  <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800/90">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">TEMP MED (Stage 1 Fan °C)</label>
                     <input
                       type="number"
                       step="0.1"
                       value={setpoints["TEMP MED"] ?? 25.0}
                       onChange={(e) => handleInputChange("TEMP MED", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2  font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-2 text-sm text-white font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all"
                     />
                   </div>
 
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">TEMP MAX (Stage 2 Fan 2 & Pad °C)</label>
+                  <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800/90">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">TEMP MAX (Stage 2 Fan & Pad °C)</label>
                     <input
                       type="number"
                       step="0.1"
                       value={setpoints["TEMP MAX"] ?? 28.0}
                       onChange={(e) => handleInputChange("TEMP MAX", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm  font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-2 text-sm text-white font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all"
                     />
                   </div>
 
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">TEMP Hysteresis (°C)</label>
+                  <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800/90">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">TEMP Hysteresis (°C)</label>
                     <input
                       type="number"
                       step="0.1"
                       value={setpoints["TEMP Hyst"] ?? 0.5}
                       onChange={(e) => handleInputChange("TEMP Hyst", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-2 text-sm text-white font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all"
                     />
                   </div>
 
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">Pad Max Humi Cutoff (PAD H_Max %)</label>
+                  <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800/90">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pad Max Humi Cutoff (PAD H_Max %)</label>
                     <input
                       type="number"
                       step="0.1"
                       value={setpoints["PAD H_Max"] ?? 75.0}
                       onChange={(e) => handleInputChange("PAD H_Max", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 px-3 py-2 text-sm font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-2 text-sm text-white font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all"
                     />
                   </div>
 
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-400">Pad Safety Buffer (PAD Safety %)</label>
+                  <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-slate-950/70 border border-slate-800/90">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pad Safety Buffer (PAD Safety %)</label>
                     <input
                       type="number"
                       step="0.1"
                       value={setpoints["PAD Safety"] ?? 2.0}
                       onChange={(e) => handleInputChange("PAD Safety", parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm  font-bold outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 font-mono"
+                      className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-2 text-sm text-white font-mono font-bold outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-all"
                     />
                   </div>
                 </div>
               </div>
 
               {/* Security Credentials Card */}
-              <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4">
-                <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2 border-b border-slate-700/50 pb-3">
-                  <ShieldCheck className="w-4 h-4" /> Two-User Security Access Credentials
-                </h4>
+              <div className="rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-lg shadow-black/20 p-5 sm:p-6 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                  <div className="flex items-center gap-2 text-sm font-bold text-white">
+                    <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      <ShieldCheck className="w-4 h-4" />
+                    </span>
+                    Two-User Security Access Credentials
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                    Auth PIN
+                  </span>
+                </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-2">
-                    <label className="text-[11px] font-bold text-slate-400 block">Operator 1</label>
-                    <input
-                      type="text"
-                      value={setpoints["USER 1 Name"] ?? "Operator 1"}
-                      onChange={(e) => handleInputChange("USER 1 Name", e.target.value)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-white outline-none focus:border-green-500 mb-1"
-                      placeholder="Name"
-                    />
-                    <input
-                      type="password"
-                      value={setpoints["USER 1 PASSWORD"] ?? "1111"}
-                      onChange={(e) => handleInputChange("USER 1 PASSWORD", e.target.value)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-green-500"
-                      placeholder="PIN"
-                    />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {/* Operator 1 */}
+                  <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-2.5">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Operator 1</label>
+                    <div>
+                      <input
+                        type="text"
+                        value={setpoints["USER 1 Name"] ?? "Operator 1"}
+                        onChange={(e) => handleInputChange("USER 1 Name", e.target.value)}
+                        className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
+                        placeholder="Operator 1 Name"
+                      />
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showPin1 ? "text" : "password"}
+                        value={setpoints["USER 1 PASSWORD"] ?? "1111"}
+                        onChange={(e) => handleInputChange("USER 1 PASSWORD", e.target.value)}
+                        className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-1.5 pr-8 text-xs text-white font-mono outline-none focus:border-emerald-500"
+                        placeholder="PIN (e.g. 1111)"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPin1(!showPin1)}
+                        className="absolute right-2.5 top-2 text-slate-500 hover:text-white"
+                      >
+                        {showPin1 ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-slate-900/50 border border-slate-700/50 space-y-2">
-                    <label className="text-[11px] font-bold text-slate-400 block">Operator 2</label>
-                    <input
-                      type="text"
-                      value={setpoints["USER 2 Name"] ?? "Operator 2"}
-                      onChange={(e) => handleInputChange("USER 2 Name", e.target.value)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-white outline-none focus:border-green-500 mb-1"
-                      placeholder="Name"
-                    />
-                    <input
-                      type="password"
-                      value={setpoints["USER 2 PASSWORD"] ?? "2222"}
-                      onChange={(e) => handleInputChange("USER 2 PASSWORD", e.target.value)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-white font-mono outline-none focus:border-green-500"
-                      placeholder="PIN"
-                    />
+                  {/* Operator 2 */}
+                  <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-2.5">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Operator 2</label>
+                    <div>
+                      <input
+                        type="text"
+                        value={setpoints["USER 2 Name"] ?? "Operator 2"}
+                        onChange={(e) => handleInputChange("USER 2 Name", e.target.value)}
+                        className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
+                        placeholder="Operator 2 Name"
+                      />
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showPin2 ? "text" : "password"}
+                        value={setpoints["USER 2 PASSWORD"] ?? "2222"}
+                        onChange={(e) => handleInputChange("USER 2 PASSWORD", e.target.value)}
+                        className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-1.5 pr-8 text-xs text-white font-mono outline-none focus:border-emerald-500"
+                        placeholder="PIN (e.g. 2222)"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPin2(!showPin2)}
+                        className="absolute right-2.5 top-2 text-slate-500 hover:text-white"
+                      >
+                        {showPin2 ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* FULL EQUIPMENT CYCLIC TIMERS CONFIGURATION (ALL 6 TIMERS MATCHING MONIT.PY) */}
-          <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-4 overflow-x-auto">
-            <h4 className="text-sm font-semibold text-green-400 flex items-center gap-2 border-b border-slate-700/50 pb-3">
-              <Clock className="w-4 h-4" /> Equipment Cyclic Timers Configuration (All 6 Timers)
-            </h4>
+          {/* ── EQUIPMENT CYCLIC TIMERS CONFIGURATION (ALL 6 TIMERS) ── */}
+          <div className="rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-lg shadow-black/20 p-5 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <div className="flex items-center gap-2 text-sm font-bold text-white">
+                <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <Clock className="w-4 h-4" />
+                </span>
+                Equipment Cyclic Timers Configuration (All 6 Timers)
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                6 Equipment Channels
+              </span>
+            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {equipmentTimersConfig.map((timer) => (
-                <div key={timer.prefix} className="p-4 rounded-xl bg-slate-900/60 border border-slate-700/60 space-y-3">
-                  <div className="border-b border-slate-700/60 pb-2">
-                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Timer Label Name:</span>
-                    <input
-                      type="text"
-                      value={setpoints[timer.nameKey] ?? timer.defaultName}
-                      onChange={(e) => handleInputChange(timer.nameKey, e.target.value)}
-                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-green-400 font-bold outline-none focus:border-green-500"
-                    />
-                  </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {equipmentTimersConfig.map((timer) => {
+                const IconComponent = timer.icon;
+                return (
+                  <div key={timer.prefix} className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-3 shadow-sm hover:border-slate-700 transition-colors">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <IconComponent className="h-4 w-4 text-emerald-400 shrink-0" />
+                        <span className="text-xs font-bold text-white">{timer.title}</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-500">{timer.prefix}</span>
+                    </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <label className="text-[11px] font-medium text-slate-400">Start Time</label>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Timer Label Name</label>
                       <input
                         type="text"
-                        value={setpoints[timer.startKey] ?? timer.defaultStart}
-                        onChange={(e) => handleInputChange(timer.startKey, e.target.value)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
+                        value={setpoints[timer.nameKey] ?? timer.defaultName}
+                        onChange={(e) => handleInputChange(timer.nameKey, e.target.value)}
+                        className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-3 py-1.5 text-xs text-emerald-400 font-bold outline-none focus:border-emerald-500"
                       />
                     </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-slate-400">Stop Time</label>
-                      <input
-                        type="text"
-                        value={setpoints[timer.stopKey] ?? timer.defaultStop}
-                        onChange={(e) => handleInputChange(timer.stopKey, e.target.value)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white font-mono text-center outline-none focus:border-green-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-medium ">ON Min</label>
-                      <input
-                        type="number"
-                        value={setpoints[timer.onKey] ?? timer.defaultOn}
-                        onChange={(e) => handleInputChange(timer.onKey, parseFloat(e.target.value) || 0)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs font-mono text-center outline-none focus:border-green-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-medium">OFF Min</label>
-                      <input
-                        type="number"
-                        value={setpoints[timer.offKey] ?? timer.defaultOff}
-                        onChange={(e) => handleInputChange(timer.offKey, parseFloat(e.target.value) || 0)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs  font-mono text-center outline-none focus:border-green-500"
-                      />
+
+                    <div className="grid grid-cols-2 gap-2.5 text-xs pt-1">
+                      <div>
+                        <label className="text-[11px] font-medium text-slate-400 block mb-1">Start Time</label>
+                        <input
+                          type="text"
+                          value={setpoints[timer.startKey] ?? timer.defaultStart}
+                          onChange={(e) => handleInputChange(timer.startKey, e.target.value)}
+                          className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-2.5 py-1.5 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-medium text-slate-400 block mb-1">Stop Time</label>
+                        <input
+                          type="text"
+                          value={setpoints[timer.stopKey] ?? timer.defaultStop}
+                          onChange={(e) => handleInputChange(timer.stopKey, e.target.value)}
+                          className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-2.5 py-1.5 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-medium text-slate-400 block mb-1">ON (min)</label>
+                        <input
+                          type="number"
+                          value={setpoints[timer.onKey] ?? timer.defaultOn}
+                          onChange={(e) => handleInputChange(timer.onKey, parseFloat(e.target.value) || 0)}
+                          className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-2.5 py-1.5 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-medium text-slate-400 block mb-1">OFF (min)</label>
+                        <input
+                          type="number"
+                          value={setpoints[timer.offKey] ?? timer.defaultOff}
+                          onChange={(e) => handleInputChange(timer.offKey, parseFloat(e.target.value) || 0)}
+                          className="w-full rounded-xl border border-slate-700/80 bg-slate-900 px-2.5 py-1.5 text-xs text-white font-mono text-center outline-none focus:border-emerald-500"
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
-          <div className="pt-4">
+          {/* Bottom Prominent Save Button */}
+          <div className="flex justify-end pt-2">
             <button
               onClick={handleSaveSetpoints}
-              disabled={!selectedDevice}
-              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 active:scale-95 disabled:opacity-50 hover:opacity-90 transition-all"
+              disabled={!selectedDevice || saveSuccess}
+              className="flex items-center gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 px-6 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-emerald-500/20 active:scale-95 disabled:opacity-50 transition-all"
             >
-              <Save className="h-4 w-4" /> Save & Push Monnet Setpoints
+              {saveSuccess ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span>Setpoints Pushed Successfully!</span>
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4" />
+                  <span>Save & Push Monnet Setpoints</span>
+                </>
+              )}
             </button>
           </div>
         </div>
       )}
 
-      {/* SECTION 2: DEVICE CONTROLLER & MONITOR DASHBOARD */}
+      {/* ── SECTION 2: DEVICE CONTROLLER & LIVE MONITOR DASHBOARD ── */}
       {viewMode === 'monitoring' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-            {/* COLUMN 1: WATER SENSOR & ROOM SENSOR */}
-            <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-6">
-              {/* Water Sensor */}
-              <div>
-                <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-700/50 pb-2">
-                  <Droplets className="w-4 h-4" /> Water Sensors Data
-                </h4>
-                <div className="space-y-2.5 text-xs font-mono">
-                  <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
-                    <span className="text-slate-400">Water EC</span>
-                    <span className={`font-bold ${isMachineOnline && liveData?.ec != null && Number(liveData.ec) > 0 ? 'text-emerald-400' : 'text-slate-400 font-mono text-xs'}`}>
-                      {isMachineOnline && liveData?.ec != null && Number(liveData.ec) > 0 ? `${liveData.ec} mS/cm` : 'N/A'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
-                    <span className="text-slate-400">Water pH</span>
-                    <span className={`font-bold ${isMachineOnline && liveData?.ph != null && Number(liveData.ph) > 0 ? 'text-emerald-400' : 'text-slate-400 font-mono text-xs'}`}>
-                      {isMachineOnline && liveData?.ph != null && Number(liveData.ph) > 0 ? `${liveData.ph} pH` : 'N/A'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
-                    <span className="text-slate-400">Calculated TDS</span>
-                    <span className={`font-bold ${isMachineOnline && tdsPpm !== null ? 'text-white' : 'text-slate-400 font-mono text-xs'}`}>
-                      {isMachineOnline && tdsPpm !== null ? `${tdsPpm} PPM` : 'N/A'}
-                    </span>
-                  </div>
-                </div>
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Top Live Sensor Metrics Banner */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+            {/* Water EC */}
+            <div className="p-4 rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-md flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Water EC</span>
+                <Droplets className="h-4 w-4 text-emerald-400" />
               </div>
-
-              {/* Room Sensor (MD02) */}
-              <div>
-                <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-700/50 pb-2">
-                  <Thermometer className="w-4 h-4" /> Room Climate Sensor (MD02)
-                </h4>
-                <div className="space-y-2.5 text-xs font-mono">
-                  <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
-                    <span className="text-slate-400">Room Temp</span>
-                    <span className={`font-bold ${isMachineOnline && liveData?.room_temp != null && Number(liveData.room_temp) > 0 ? 'text-emerald-400' : 'text-slate-400 font-mono text-xs'}`}>
-                      {isMachineOnline && liveData?.room_temp != null && Number(liveData.room_temp) > 0 ? `${liveData.room_temp} °C` : 'N/A'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center py-1.5 px-3 rounded-lg bg-slate-900/50 border border-slate-700/40">
-                    <span className="text-slate-400">Room Humidity</span>
-                    <span className={`font-bold ${isMachineOnline && liveData?.room_humi != null && Number(liveData.room_humi) > 0 ? 'text-emerald-400' : 'text-slate-400 font-mono text-xs'}`}>
-                      {isMachineOnline && liveData?.room_humi != null && Number(liveData.room_humi) > 0 ? `${liveData.room_humi} %` : 'N/A'}
-                    </span>
-                  </div>
-                </div>
+              <div className="mt-2">
+                <span className={`text-xl sm:text-2xl font-black font-mono ${ecVal !== null ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {ecVal !== null ? ecVal.toFixed(2) : '--'}
+                </span>
+                <span className="text-[11px] text-slate-400 ml-1">mS/cm</span>
               </div>
-
-              {/* Telemetry Status Card */}
-              {/* <div>
-                <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider mb-3 flex items-center gap-2 border-b border-slate-700/50 pb-2">
-                  <Activity className="w-4 h-4" /> Telemetry Info
-                </h4>
-                <div className="space-y-2 text-xs">
-                  <div className="p-2.5 rounded-lg bg-slate-900/50 border border-slate-700/40 font-mono">
-                    <span className="text-slate-400 block text-[10px]">MQTT Topic:</span>
-                    <span className="text-green-400 font-bold truncate block">inhydro/{deviceRoot}/telemetry/live</span>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-slate-900/50 border border-slate-700/40 flex justify-between items-center">
-                    <span className="text-slate-400 text-[11px]">Stream Status:</span>
-                    <span className={`font-semibold text-xs flex items-center gap-1.5 ${liveData ? 'text-emerald-400' : ''}`}>
-                      <span className={`w-2 h-2 rounded-full ${liveData ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-                      {liveData ? 'Live Telemetry' : 'Waiting...'}
-                    </span>
-                  </div>
-                </div>
-              </div> */}
             </div>
 
-            {/* COLUMN 2 & 3: ALL 12 RELAYS OUTPUT DASHBOARD */}
-            <div className="lg:col-span-2 rounded-xl border border-slate-700/50 bg-slate-800/30 p-5 space-y-5">
-              <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider flex items-center justify-between border-b border-slate-700/50 pb-2">
-                <span className="flex items-center gap-2"><Power className="w-4 h-4" /> All 12 Relay Output Status (Modbus RTU)</span>
-                <span className="text-[11px] text-slate-400 font-normal">Slave ID: 1</span>
-              </h4>
+            {/* Water pH */}
+            <div className="p-4 rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-md flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Water pH</span>
+                <FlaskConical className="h-4 w-4 text-emerald-400" />
+              </div>
+              <div className="mt-2">
+                <span className={`text-xl sm:text-2xl font-black font-mono ${isMachineOnline && liveData?.ph != null && Number(liveData.ph) > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {isMachineOnline && liveData?.ph != null && Number(liveData.ph) > 0 ? Number(liveData.ph).toFixed(2) : '--'}
+                </span>
+                <span className="text-[11px] text-slate-400 ml-1">pH</span>
+              </div>
+            </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {relaysList.map((relay) => {
-                  const RelayIcon = relay.icon;
-                  const isRelayOn = liveData ? Boolean(liveData[relay.key]) : false;
-                  return (
-                    <div
-                      key={relay.key}
-                      className={`p-3 rounded-xl border transition-all flex flex-col justify-between gap-2 ${isRelayOn
-                        ? 'bg-emerald-500/10 border-emerald-500/30 shadow-lg shadow-emerald-950/20'
-                        : 'bg-slate-900/60 border-slate-700/50'}`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <div className={`p-1.5 rounded-lg ${isRelayOn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}`}>
-                            <RelayIcon className="w-4 h-4" />
-                          </div>
-                          <span className="text-xs font-semibold text-white truncate">{relay.name}</span>
+            {/* Calculated TDS */}
+            <div className="p-4 rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-md flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Calc TDS</span>
+                <Zap className="h-4 w-4 text-emerald-400" />
+              </div>
+              <div className="mt-2">
+                <span className={`text-xl sm:text-2xl font-black font-mono ${tdsPpm !== null ? 'text-white' : 'text-slate-500'}`}>
+                  {tdsPpm !== null ? tdsPpm : '--'}
+                </span>
+                <span className="text-[11px] text-slate-400 ml-1">PPM</span>
+              </div>
+            </div>
+
+            {/* Room Temperature */}
+            <div className="p-4 rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-md flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Room Temp</span>
+                <Thermometer className="h-4 w-4 text-emerald-400" />
+              </div>
+              <div className="mt-2">
+                <span className={`text-xl sm:text-2xl font-black font-mono ${isMachineOnline && liveData?.room_temp != null && Number(liveData.room_temp) > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {isMachineOnline && liveData?.room_temp != null && Number(liveData.room_temp) > 0 ? Number(liveData.room_temp).toFixed(1) : '--'}
+                </span>
+                <span className="text-[11px] text-slate-400 ml-1">°C</span>
+              </div>
+            </div>
+
+            {/* Room Humidity */}
+            <div className="p-4 rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-md flex flex-col justify-between col-span-2 sm:col-span-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Room Humidity</span>
+                <Droplets className="h-4 w-4 text-emerald-400" />
+              </div>
+              <div className="mt-2">
+                <span className={`text-xl sm:text-2xl font-black font-mono ${isMachineOnline && liveData?.room_humi != null && Number(liveData.room_humi) > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {isMachineOnline && liveData?.room_humi != null && Number(liveData.room_humi) > 0 ? Number(liveData.room_humi).toFixed(1) : '--'}
+                </span>
+                <span className="text-[11px] text-slate-400 ml-1">%</span>
+              </div>
+            </div>
+          </div>
+
+          {/* ALL 13 MODBUS RELAYS OUTPUT DASHBOARD */}
+          <div className="rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-lg shadow-black/20 p-5 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <div className="flex items-center gap-2 text-sm font-bold text-white">
+                <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <Activity className="w-4 h-4" />
+                </span>
+                Modbus RTU Relay Channels (13 Relays)
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                Slave ID: 1
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3.5">
+              {relaysList.map((relay) => {
+                const RelayIcon = relay.icon;
+                const isRelayOn = isMachineOnline && liveData ? Boolean(liveData[relay.key]) : false;
+                return (
+                  <div
+                    key={relay.key}
+                    className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between gap-2.5 ${isRelayOn
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-white ring-1 ring-emerald-500/20 shadow-md shadow-emerald-950/20'
+                      : 'bg-slate-950/70 border-slate-800/90 text-slate-400'
+                      }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`p-2 rounded-xl ${isRelayOn ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-900 text-slate-500'}`}>
+                          <RelayIcon className="w-4 h-4" />
                         </div>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-800">
-                        <span className="text-[10px] font-mono text-slate-500">{relay.key}</span>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1.5 ${isRelayOn ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400 border border-slate-700'}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${isRelayOn ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
-                          {isRelayOn ? 'ACTIVE (ON)' : 'OFF'}
-                        </span>
+                        <span className="text-xs font-bold text-white truncate">{relay.name}</span>
                       </div>
                     </div>
-                  );
-                })}
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                      <span className="text-[10px] font-mono text-slate-500">{relay.key}</span>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1.5 ${isRelayOn
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        : 'bg-slate-900 text-slate-500 border border-slate-800'
+                        }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${isRelayOn ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+                        {isRelayOn ? 'ACTIVE' : 'OFF'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* LIVE EQUIPMENT TIMERS STATUS SUMMARY GRID */}
+          <div className="rounded-2xl bg-slate-900/80 backdrop-blur-sm border border-slate-800 shadow-lg shadow-black/20 p-5 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <div className="flex items-center gap-2 text-sm font-bold text-white">
+                <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <Clock className="w-4 h-4" />
+                </span>
+                Live Equipment Timers Status
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                7 Cyclic Programs
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 text-xs">
+              {/* Fogger Humidifier Timer Summary */}
+              <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-white text-xs">{setpoints["HUMI Name"] || "FOGGER TIMER"}</span>
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${isMachineOnline && (liveData?.relay_fogger || liveData?.relay_humi)
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    : 'bg-slate-900 text-slate-500 border border-slate-800'
+                    }`}>
+                    {isMachineOnline && (liveData?.relay_fogger || liveData?.relay_humi) ? 'ACTIVE' : 'OFF'}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 font-mono flex justify-between">
+                  <span>Day Cycle:</span>
+                  <span className="text-slate-200">{setpoints["HUMI D_ON Min"] || 10}m ON / {setpoints["HUMI D_OFF Min"] || 20}m OFF</span>
+                </div>
+                <div className="text-[11px] text-slate-400 font-mono flex justify-between">
+                  <span>Night Cycle:</span>
+                  <span className="text-slate-200">{setpoints["HUMI N_ON Min"] || 5}m ON / {setpoints["HUMI N_OFF Min"] || 40}m OFF</span>
+                </div>
               </div>
 
-              {/* LIVE EQUIPMENT TIMERS STATUS SUMMARY GRID */}
-              <div className="pt-3 border-t border-slate-700/50 space-y-3">
-                <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider flex items-center gap-2">
-                  <Clock className="w-4 h-4" /> Live Equipment Timers Summary
-                </h4>
+              {/* 6 Equipment Timers Summary */}
+              {equipmentTimersConfig.map(t => {
+                const isTimerActive = isMachineOnline && liveData ? Boolean(liveData[t.relayKey]) : false;
+                const timerName = setpoints[t.nameKey] || t.defaultName;
+                const startTime = setpoints[t.startKey] || t.defaultStart;
+                const stopTime = setpoints[t.stopKey] || t.defaultStop;
+                const onMin = setpoints[t.onKey] || t.defaultOn;
+                const offMin = setpoints[t.offKey] || t.defaultOff;
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-                  {/* Fogger Humidifier Timer Summary */}
-                  <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-1.5">
+                return (
+                  <div key={t.prefix} className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-2">
                     <div className="flex justify-between items-center">
-                      <span className="font-bold text-white text-xs">{setpoints["HUMI Name"] || "FOGGER TIMER"}</span>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${liveData?.relay_fogger || liveData?.relay_humi ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
-                        {liveData?.relay_fogger || liveData?.relay_humi ? 'ON' : 'OFF'}
+                      <span className="font-bold text-white text-xs truncate max-w-[140px]">{timerName}</span>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${isTimerActive
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        : 'bg-slate-900 text-slate-500 border border-slate-800'
+                        }`}>
+                        {isTimerActive ? 'ACTIVE' : 'OFF'}
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-400 font-mono flex justify-between">
-                      <span>Day Cycle:</span>
-                      <span className="">{setpoints["HUMI D_ON Min"] || 10}m ON / {setpoints["HUMI D_OFF Min"] || 20}m OFF</span>
+                      <span>Window:</span>
+                      <span className="text-slate-200">{startTime} - {stopTime}</span>
                     </div>
                     <div className="text-[11px] text-slate-400 font-mono flex justify-between">
-                      <span>Night Cycle:</span>
-                      <span className="">{setpoints["HUMI N_ON Min"] || 5}m ON / {setpoints["HUMI N_OFF Min"] || 40}m OFF</span>
+                      <span>Interval:</span>
+                      <span className="text-emerald-400">{onMin}m ON / {offMin}m OFF</span>
                     </div>
                   </div>
-
-                  {/* 6 Equipment Timers Summary */}
-                  {equipmentTimersConfig.map(t => {
-                    const isTimerActive = liveData ? Boolean(liveData[t.relayKey]) : false;
-                    const timerName = setpoints[t.nameKey] || t.defaultName;
-                    const startTime = setpoints[t.startKey] || t.defaultStart;
-                    const stopTime = setpoints[t.stopKey] || t.defaultStop;
-                    const onMin = setpoints[t.onKey] || t.defaultOn;
-                    const offMin = setpoints[t.offKey] || t.defaultOff;
-
-                    return (
-                      <div key={t.prefix} className="p-3 rounded-xl bg-slate-900/60 border border-slate-700/50 space-y-1.5">
-                        <div className="flex justify-between items-center">
-                          <span className="font-bold text-white text-xs truncate max-w-[130px]">{timerName}</span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${isTimerActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
-                            {isTimerActive ? 'ON' : 'OFF'}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 font-mono flex justify-between">
-                          <span>Window:</span>
-                          <span className="text-slate-200">{startTime} - {stopTime}</span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 font-mono flex justify-between">
-                          <span>Cycle:</span>
-                          <span className="text-emerald-400">{onMin}m ON / {offMin}m OFF</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
+                );
+              })}
             </div>
-
           </div>
         </div>
       )}

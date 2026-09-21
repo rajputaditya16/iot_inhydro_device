@@ -51,7 +51,7 @@ const DEFAULT_ROOM_NAMES = {
   S7: 'Greenhouse',
 };
 
-export const DEFAULT_COLD_ROOM_CROPS = {
+const DEFAULT_COLD_ROOM_CROPS = {
   S1: 'Cold Room 1 Program',
   S2: 'Cold Room 2 Program',
   S3: 'Cold Room 3 Program',
@@ -61,7 +61,7 @@ export const DEFAULT_COLD_ROOM_CROPS = {
   S7: 'Greenhouse Program',
 };
 
-export const DEFAULT_COLD_ROOM_SETUPS = {
+const DEFAULT_COLD_ROOM_SETUPS = {
   S1: 'Cold Room 1 Setup',
   S2: 'Cold Room 2 Setup',
   S3: 'Cold Room 3 Setup',
@@ -71,13 +71,13 @@ export const DEFAULT_COLD_ROOM_SETUPS = {
   S7: 'Greenhouse Setup',
 };
 
-export const DEFAULT_OFFICE_ROOM_CROPS = {
+const DEFAULT_OFFICE_ROOM_CROPS = {
   1: 'Room 1 - Lettuce / Greens',
   2: 'Room 2 - Herbs / Greens',
   3: 'Room 3 - Climate Crop',
 };
 
-export const DEFAULT_OFFICE_ROOM_SETUPS = {
+const DEFAULT_OFFICE_ROOM_SETUPS = {
   1: 'Room 1 Hydroponics Setup',
   2: 'Room 2 Hydroponics Setup',
   3: 'Room 3 Climate Setup',
@@ -101,7 +101,7 @@ const getProbeName = (sensorId, deviceMeta, customNames = {}) => {
   return DEFAULT_ROOM_NAMES[upper] || `Cold Room ${upper.replace('S', '')}`;
 };
 
-export const resolveRoomSetpointInfo = (setpoints, sensorId) => {
+const resolveRoomSetpointInfo = (setpoints, sensorId) => {
   if (!setpoints) {
     return {
       targetTemp: null,
@@ -585,43 +585,68 @@ const ColdRoomProbeCard = memo(
 const LiveMonitoring = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [loading, setLoading] = useState(true);
-  const [initLoading, setInitLoading] = useState(true);
+  const queryParamDevice = searchParams.get('device') || '';
+
+  // ── Retrieve initial cached devices for instant 0ms mount ──
+  const cachedDevicesRaw = typeof window !== 'undefined' ? sessionStorage.getItem('devices_cache') : null;
+  let initialDevices = [];
+  try {
+    if (cachedDevicesRaw) initialDevices = JSON.parse(cachedDevicesRaw);
+  } catch (e) { }
+
+  const initialSelectedId = queryParamDevice || (initialDevices.length > 0 ? initialDevices[0]._id : '');
+
+  // ── Retrieve initial cached live metrics for instant 0ms metrics display ──
+  const cachedLiveRaw = typeof window !== 'undefined' && initialSelectedId ? sessionStorage.getItem(`live_cache_${initialSelectedId}`) : null;
+  let initialCachedSnapshot = null;
+  try {
+    if (cachedLiveRaw) initialCachedSnapshot = JSON.parse(cachedLiveRaw);
+  } catch (e) { }
+
+  const [loading, setLoading] = useState(!initialCachedSnapshot);
+  const [initLoading, setInitLoading] = useState(initialDevices.length === 0);
 
   // ── All devices from DB ────────────────────────────────────────────────────
-  const [allDevices, setAllDevices] = useState([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState(searchParams.get('device') || '');
+  const [allDevices, setAllDevices] = useState(initialDevices);
+  const [selectedDeviceId, setSelectedDeviceId] = useState(initialSelectedId);
 
   // ── Live data state ────────────────────────────────────────────────────────
-  const [liveDevice, setLiveDevice] = useState(null);
-  const [activeFields, setActiveFields] = useState([]);
-  const [activeMetrics, setActiveMetrics] = useState({});
-  const [chartData, setChartData] = useState({});
+  const [liveDevice, setLiveDevice] = useState(initialCachedSnapshot?.liveDevice || null);
+  const [activeFields, setActiveFields] = useState(initialCachedSnapshot?.activeFields || []);
+  const [activeMetrics, setActiveMetrics] = useState(initialCachedSnapshot?.activeMetrics || {});
+  const [chartData, setChartData] = useState(initialCachedSnapshot?.chartData || {});
   const [hasNewData, setHasNewData] = useState(true);
   const previousMetricsRef = useRef(null);
   const newDataTimeoutRef = useRef(null);
+
+  // High-performance micro-batch buffer refs (prevents UI freeze/lag during high-frequency telemetry)
+  const incomingBufferRef = useRef([]);
+  const flushTimeoutRef = useRef(null);
 
   useEffect(() => {
     return () => {
       if (newDataTimeoutRef.current) {
         clearTimeout(newDataTimeoutRef.current);
       }
+      if (flushTimeoutRef.current) {
+        clearTimeout(flushTimeoutRef.current);
+      }
     };
   }, []);
 
   // ── Multi-Sensor Live States ────────────────────────────────────────────────
-  const [multiSensorData, setMultiSensorData] = useState({});
-  const [sensorHistory, setSensorHistory] = useState({}); // { S1: { t: [...], h: [...], co2: [...] } }
-  const [multiSensorSetpoints, setMultiSensorSetpoints] = useState({});
-  const [multiSensorRelays, setMultiSensorRelays] = useState({});
-  const [activeWarnings, setActiveWarnings] = useState([]);
-  const [customSensorNames, setCustomSensorNames] = useState({});
+  const [multiSensorData, setMultiSensorData] = useState(initialCachedSnapshot?.multiSensorData || {});
+  const [sensorHistory, setSensorHistory] = useState(initialCachedSnapshot?.sensorHistory || {}); // { S1: { t: [...], h: [...], co2: [...] } }
+  const [multiSensorSetpoints, setMultiSensorSetpoints] = useState(initialCachedSnapshot?.multiSensorSetpoints || {});
+  const [multiSensorRelays, setMultiSensorRelays] = useState(initialCachedSnapshot?.multiSensorRelays || {});
+  const [activeWarnings, setActiveWarnings] = useState(initialCachedSnapshot?.activeWarnings || []);
+  const [customSensorNames, setCustomSensorNames] = useState(initialCachedSnapshot?.customSensorNames || {});
   const [activeMultiTab, setActiveMultiTab] = useState('S1'); // 'S1'..'S7'
 
   // ── Office Control Dual Room Live States ────────────────────────────────────
-  const [officeControlData, setOfficeControlData] = useState({ 1: null, 2: null, 3: null });
-  const [officeControlSetpoints, setOfficeControlSetpoints] = useState({ 1: null, 2: null, 3: null });
-  const [officeControlHistory, setOfficeControlHistory] = useState({
+  const [officeControlData, setOfficeControlData] = useState(initialCachedSnapshot?.officeControlData || { 1: null, 2: null, 3: null });
+  const [officeControlSetpoints, setOfficeControlSetpoints] = useState(initialCachedSnapshot?.officeControlSetpoints || { 1: null, 2: null, 3: null });
+  const [officeControlHistory, setOfficeControlHistory] = useState(initialCachedSnapshot?.officeControlHistory || {
     1: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
     2: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
     3: { soil_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [] },
@@ -629,8 +654,8 @@ const LiveMonitoring = () => {
   const [activeRoomTab, setActiveRoomTab] = useState(1);
 
   // ── InHydro Controller Live States ──────────────────────────────────────────
-  const [controllingData, setControllingData] = useState(null);
-  const [controllingHistory, setControllingHistory] = useState({
+  const [controllingData, setControllingData] = useState(initialCachedSnapshot?.controllingData || null);
+  const [controllingHistory, setControllingHistory] = useState(initialCachedSnapshot?.controllingHistory || {
     water_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [],
     vpd: [], dli: [], wind_speed: [], wind_dir: [], do: [], ppfd: [], n: [], p: [], k: [],
   });
@@ -639,16 +664,20 @@ const LiveMonitoring = () => {
   const token = localStorage.getItem('token');
   const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
-  // ── Step 1: Fetch all devices from backend ─────────────────────────────────
+  // ── Step 1: Fetch all devices from backend (Parallel Background Refresh) ───
   useEffect(() => {
+    let isMounted = true;
     const fetchDevices = async () => {
       try {
         const res = await fetch(`${API_BASE}/api/devices`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         const data = await res.json();
-        if (data.success) {
+        if (data.success && isMounted) {
           setAllDevices(data.data);
+          try {
+            sessionStorage.setItem('devices_cache', JSON.stringify(data.data));
+          } catch (e) { }
           if (!selectedDeviceId && data.data.length > 0) {
             const firstConfigured =
               data.data.find((d) => d.mqttId) || data.data[0];
@@ -661,11 +690,12 @@ const LiveMonitoring = () => {
       } catch (err) {
         console.error('Failed to fetch devices', err);
       } finally {
-        setInitLoading(false);
+        if (isMounted) setInitLoading(false);
       }
     };
     fetchDevices();
-  }, [token]);
+    return () => { isMounted = false; };
+  }, [token, selectedDeviceId, setSearchParams, API_BASE]);
 
   // ── Get current selected device meta ───────────────────────────────────────
   const deviceMeta = useMemo(() => {
@@ -839,8 +869,8 @@ const LiveMonitoring = () => {
     const isControlling = isControllingDevice;
 
     const url = isOfficeControl
-      ? `${API_BASE}/api/devices/${selectedDeviceId}/analytics?room=both`
-      : `${API_BASE}/api/devices/${selectedDeviceId}/analytics`;
+      ? `${API_BASE}/api/devices/${selectedDeviceId}/analytics?live=true&limit=30&room=both`
+      : `${API_BASE}/api/devices/${selectedDeviceId}/analytics?live=true&limit=30`;
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
     fetch(url, { headers })
@@ -1235,10 +1265,11 @@ const LiveMonitoring = () => {
           deviceMeta?.id,
           deviceMeta?._id,
           selectedDeviceId,
+          queryParamDevice,
         ].filter(Boolean)
       )
     );
-  }, [deviceMeta, selectedDeviceId, isMultiSensorDevice]);
+  }, [deviceMeta, selectedDeviceId, queryParamDevice, isMultiSensorDevice]);
 
   const handleBatchedPackets = useCallback(
     (packets) => {
@@ -1277,6 +1308,7 @@ const LiveMonitoring = () => {
         const pMqtt = String(rawPayload?.device || rawPayload?.device_id || rawPayload?.devId || packetMqttId || '').toLowerCase();
 
         const matchesDevice =
+          !selectedDeviceId ||
           (selectedDeviceId && packetDevId === String(selectedDeviceId).toLowerCase()) ||
           candidateIdentifiers.length === 0 ||
           candidateIdentifiers.some(
@@ -1827,6 +1859,26 @@ const LiveMonitoring = () => {
     [candidateIdentifiers, deviceMeta, selectedDeviceId, isMultiSensorDevice, isOfficeControlDevice, isControllingDevice]
   );
 
+  // ── High-Performance Micro-Batch Queue (Prevents UI stutter and frame drops) ──
+  const queuePackets = useCallback(
+    (packets) => {
+      if (!packets || packets.length === 0) return;
+      incomingBufferRef.current.push(...packets);
+
+      if (!flushTimeoutRef.current) {
+        flushTimeoutRef.current = setTimeout(() => {
+          flushTimeoutRef.current = null;
+          const queued = [...incomingBufferRef.current];
+          incomingBufferRef.current = [];
+          if (queued.length > 0) {
+            handleBatchedPackets(queued);
+          }
+        }, 150); // 150ms batch window = ultra responsive 60fps UI
+      }
+    },
+    [handleBatchedPackets]
+  );
+
   // ── Step 3A: Direct Private Broker MQTT Connection (Fast-path when available) ──
   useEffect(() => {
     if (!selectedDeviceId || candidateIdentifiers.length === 0) return;
@@ -1850,7 +1902,7 @@ const LiveMonitoring = () => {
           const parts = topic.split('/');
           const mqttId = parts[1] || '';
           const isRetain = Boolean(packet && packet.retain);
-          handleBatchedPackets([
+          queuePackets([
             {
               deviceId: selectedDeviceId,
               mqttId,
@@ -1879,7 +1931,7 @@ const LiveMonitoring = () => {
       }
       setIsMqttConnected(false);
     };
-  }, [selectedDeviceId, candidateIdentifiers, handleBatchedPackets]);
+  }, [selectedDeviceId, candidateIdentifiers, queuePackets]);
 
   // ── Step 3B: Server-Sent Events (SSE) Live Telemetry Stream (Guaranteed for HTTPS & Production Deployments) ──
   useEffect(() => {
@@ -1906,7 +1958,7 @@ const LiveMonitoring = () => {
             if (!event.data || event.data === ': connected' || event.data.startsWith(':')) return;
             const packet = JSON.parse(event.data);
             if (packet && (packet.data || packet.telemetry || packet.sensors)) {
-              handleBatchedPackets([packet]);
+              queuePackets([packet]);
             }
           } catch (err) {
             // Heartbeat or malformed non-json
@@ -1975,11 +2027,11 @@ const LiveMonitoring = () => {
   if (allDevices.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
-        <div className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-8 text-center max-w-md">
-          <Cpu className="h-12 w-12 text-yellow-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-white mb-2">No Devices Found</h3>
+        <div className="rounded-2xl border border-slate-700/60 bg-slate-800/40 p-8 text-center max-w-md">
+          <Cpu className="h-12 w-12 text-slate-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-white mb-2">No Devices Assigned</h3>
           <p className="text-sm text-slate-400">
-            Add devices in the <strong>Devices</strong> page to start monitoring.
+            SuperAdmin has not assigned any devices to your account yet. Please contact SuperAdmin.
           </p>
         </div>
       </div>
@@ -2519,15 +2571,7 @@ const LiveMonitoring = () => {
                   );
                 })}
               </div>
-              <div className="flex items-center gap-2 pb-2 sm:pb-0">
-                <button
-                  onClick={() => navigate(`/cold-storage?device=${selectedDeviceId}&mqttId=${deviceMeta?.mqttId || ''}&room=${activeRoom}`)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold transition-all"
-                >
-                  <Sliders className="h-3.5 w-3.5" />
-                  <span>Configure Settings</span>
-                </button>
-              </div>
+             
             </div>
 
             {/* Main Content Grid: 1 col Live Readings, 2 cols Trend Charts */}

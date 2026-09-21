@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Cpu, Search, Plus, MapPin, Activity, Edit2, Trash2, PowerOff, ShieldAlert, Radio, Info, Copy, Check, Calendar, Clock, Sliders } from 'lucide-react';
+import { Cpu, Search, Plus, MapPin, Activity, BarChart3, Edit2, Trash2, PowerOff, ShieldAlert, Radio, Info, Copy, Check, Calendar, Clock, Sliders } from 'lucide-react';
 import { getStatusBg, getStatusDot, formatTimestamp } from '../../utils/helpers';
 import { SkeletonTable } from '../../components/Skeleton';
 import EmptyState from '../../components/EmptyState';
@@ -26,8 +26,24 @@ const EMPTY_FORM = {
 };
 
 const DevicesPage = () => {
-  const [loading, setLoading] = useState(true);
-  const [devices, setDevices] = useState([]);
+  // Stale-While-Revalidate Cache: Render instantly from sessionStorage if available
+  const [devices, setDevices] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('cached_devices_list');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [loading, setLoading] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('cached_devices_list');
+      return !cached || JSON.parse(cached).length === 0;
+    } catch {
+      return true;
+    }
+  });
+
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const navigate = useNavigate();
@@ -51,11 +67,11 @@ const DevicesPage = () => {
   const isSuperAdmin = user.accountType === 'superadmin';
   const API_BASE = import.meta.env.VITE_API_URL || '';
 
-  // Fetch devices
-  const fetchDevices = async () => {
+  // Fetch devices (background revalidation + minimal light payload)
+  const fetchDevices = async (showLoadingSpinner = false) => {
     try {
-      setLoading(true);
-      const res = await fetch(`${API_BASE}/api/devices`, {
+      if (showLoadingSpinner) setLoading(true);
+      const res = await fetch(`${API_BASE}/api/devices?minimal=true`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const contentType = res.headers.get("content-type");
@@ -63,8 +79,11 @@ const DevicesPage = () => {
         throw new Error("Received non-JSON response from server (Backend might be down)");
       }
       const data = await res.json();
-      if (data.success) {
+      if (data.success && Array.isArray(data.data)) {
         setDevices(data.data);
+        try {
+          sessionStorage.setItem('cached_devices_list', JSON.stringify(data.data));
+        } catch {}
       }
     } catch (error) {
       console.error('Failed to fetch devices', error);
@@ -74,8 +93,62 @@ const DevicesPage = () => {
   };
 
   useEffect(() => {
-    fetchDevices();
+    // If no cache, show skeleton loader; if cached, quietly revalidate in background
+    const hasCache = devices.length > 0;
+    fetchDevices(!hasCache);
   }, [token]);
+
+  // Real-time SSE Stream Listener to update status and lastUpdated in table without polling
+  useEffect(() => {
+    const sseUrl = `${API_BASE}/api/devices/stream`;
+    let eventSource = null;
+
+    try {
+      eventSource = new EventSource(sseUrl);
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (!payload) return;
+
+          const incomingDevId = payload.deviceId ? String(payload.deviceId) : null;
+          const incomingMqttId = payload.mqttId ? String(payload.mqttId).toLowerCase() : null;
+          const nowIso = new Date().toISOString();
+          const isExplicitOffline = payload.data?.status === 'offline';
+
+          setDevices((prevDevices) => {
+            let hasChanged = false;
+            const updated = prevDevices.map((dev) => {
+              const matchesId = incomingDevId && String(dev._id || dev.id) === incomingDevId;
+              const matchesMqtt = incomingMqttId && dev.mqttId && dev.mqttId.toLowerCase() === incomingMqttId;
+
+              if (matchesId || matchesMqtt) {
+                if (dev.status === 'blocked') return dev;
+                hasChanged = true;
+                return {
+                  ...dev,
+                  status: isExplicitOffline ? 'offline' : 'online',
+                  lastUpdated: isExplicitOffline ? dev.lastUpdated : nowIso,
+                };
+              }
+              return dev;
+            });
+
+            if (hasChanged) {
+              try {
+                sessionStorage.setItem('cached_devices_list', JSON.stringify(updated));
+              } catch {}
+              return updated;
+            }
+            return prevDevices;
+          });
+        } catch {}
+      };
+    } catch {}
+
+    return () => {
+      if (eventSource) eventSource.close();
+    };
+  }, [API_BASE]);
 
   // Open Modal
   const handleOpenModal = (device = null) => {
@@ -171,17 +244,21 @@ const DevicesPage = () => {
     }
   };
 
-  const filtered = devices.filter((d) => {
-    const searchId = String(d._id || d.id || '');
-    const mqttId = String(d.mqttId || '');
-    const matchesSearch =
-      String(d.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      searchId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      String(d.location || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      mqttId.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || d.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const filtered = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return devices.filter((d) => {
+      const searchId = String(d._id || d.id || '');
+      const mqttId = String(d.mqttId || '');
+      const matchesSearch =
+        !q ||
+        String(d.name || '').toLowerCase().includes(q) ||
+        searchId.toLowerCase().includes(q) ||
+        String(d.location || '').toLowerCase().includes(q) ||
+        mqttId.toLowerCase().includes(q);
+      const matchesStatus = statusFilter === 'all' || d.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [devices, searchTerm, statusFilter]);
 
   return (
     <div className="space-y-6">
@@ -229,7 +306,11 @@ const DevicesPage = () => {
       {loading ? (
         <SkeletonTable rows={8} cols={7} />
       ) : filtered.length === 0 ? (
-        <EmptyState icon={Cpu} title="No devices found" description="No devices match your search or filter criteria." />
+        <EmptyState
+          icon={Cpu}
+          title={devices.length === 0 ? "No devices assigned" : "No devices found"}
+          description={devices.length === 0 ? "SuperAdmin has not assigned any devices to your account yet. Please contact SuperAdmin." : "No devices match your search or filter criteria."}
+        />
       ) : (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -289,7 +370,7 @@ const DevicesPage = () => {
                             setSelectedDeviceIdDetails(deviceId);
                             setShowDetailsModal(true);
                           }}
-                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-blue-500/10 hover:text-blue-400"
+                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-blue-500/10 hover:text-blue-400 cursor-pointer"
                           title="View Device Details"
                         >
                           <Info className="h-4 w-4" />
@@ -297,10 +378,10 @@ const DevicesPage = () => {
 
                         <button
                           onClick={() => navigate(`/monitoring?device=${deviceId}`)}
-                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-green-500/10 hover:text-green-400"
-                          title="View Live Data"
+                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-green-500/10 hover:text-green-400 cursor-pointer"
+                          title="View Live Data & Charts"
                         >
-                          <Activity className="h-4 w-4" />
+                          <BarChart3 className="h-4 w-4" />
                         </button>
 
                         <button
@@ -317,7 +398,7 @@ const DevicesPage = () => {
                               navigate(`/cold-storage?device=${deviceId}&mqttId=${device.mqttId || ''}`);
                             }
                           }}
-                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-sky-500/10 hover:text-sky-400"
+                          className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-sky-500/10 hover:text-sky-400 cursor-pointer"
                           title="Device Settings & Setpoints"
                         >
                           <Sliders className="h-4 w-4" />

@@ -35,6 +35,8 @@ const telemetryLogSchema = new mongoose.Schema(
 
 // Compound index for efficient historical queries of real-time telemetry by device and time
 telemetryLogSchema.index({ deviceId: 1, timestamp: -1 });
+telemetryLogSchema.index({ mqttId: 1, timestamp: -1 });
+telemetryLogSchema.index({ timestamp: -1 });
 
 const TelemetryLog = mongoose.model('TelemetryLog', telemetryLogSchema);
 

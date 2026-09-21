@@ -11,6 +11,7 @@ const authRoutes = require('./routes/authRoutes');
 const deviceRoutes = require('./routes/deviceRoutes');
 const userRoutes = require('./routes/userRoutes');
 const superAdminRoutes = require('./routes/superAdminRoutes');
+const clientApiRoutes = require('./clientApi/clientApiRoutes');
 const app = express();
 
 const ADMIN_NAME = process.env.ADMIN_NAME || 'Rajesh Kumar';
@@ -99,6 +100,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/superadmin', superAdminRoutes);
+app.use('/api/client', clientApiRoutes);
 
 // Catch-all for API routes to clearly return a 404 JSON instead of falling through to the frontend handler
 app.use('/api', (req, res) => {

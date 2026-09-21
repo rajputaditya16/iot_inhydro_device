@@ -72,5 +72,11 @@ const deviceSchema = new mongoose.Schema(
   }
 );
 
+// Compound and single field indexes for ultra-fast query execution and sorting
+deviceSchema.index({ createdAt: -1 });
+deviceSchema.index({ mqttId: 1 });
+deviceSchema.index({ status: 1 });
+deviceSchema.index({ location: 1 });
+
 module.exports = mongoose.model('Device', deviceSchema);
 

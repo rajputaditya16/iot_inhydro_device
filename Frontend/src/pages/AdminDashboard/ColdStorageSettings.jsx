@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   Save, RefreshCw, ChevronDown, Server, Thermometer, Droplets, Activity,
   Wind, Sun, Clock, Calendar, Plus, Trash2, Edit3, Sliders, Power, Zap,
-  CheckCircle2, X, Bell, Bookmark, RotateCcw, AlertTriangle, ChevronRight,
+  CheckCircle2, X, Bell, Bookmark, AlertTriangle, ChevronRight,
   ChevronLeft, Sparkles, Check, Sprout, Layers, RotateCw, PowerOff
 } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
@@ -357,20 +357,19 @@ const ColdStorageSettings = () => {
     return candidateIdsStr ? candidateIdsStr.split(',') : [];
   }, [candidateIdsStr]);
 
-  // Active heartbeat watchdog: checks device status & telemetry freshness without false offline flips
+  // Active heartbeat watchdog: checks device status & telemetry freshness (45s window)
   useEffect(() => {
     const ticker = setInterval(() => {
       const uploadSec = Number(systemConfig.upload_frequency_sec) || (Number(systemConfig.upload_frequency_min) * 60) || 1;
-      const allowedTimeoutMs = Math.max(300000, (uploadSec * 2.5 + 60) * 1000);
+      const allowedTimeoutMs = Math.max(45000, (uploadSec * 2.5 + 10) * 1000);
 
-      const hasRecentTelemetry = Boolean(
-        lastTelemetryTimeRef.current && (Date.now() - lastTelemetryTimeRef.current < allowedTimeoutMs)
+      const isFresh = Boolean(
+        lastTelemetryTimeRef.current && (Date.now() - lastTelemetryTimeRef.current <= allowedTimeoutMs)
       );
-      const isOnline = Boolean(hasRecentTelemetry || selectedDevice?.status === 'online');
-      setIsMachineOnline((prev) => (prev !== isOnline ? isOnline : prev));
-    }, 5000);
+      setIsMachineOnline(isFresh);
+    }, 3000);
     return () => clearInterval(ticker);
-  }, [systemConfig.upload_frequency_sec, systemConfig.upload_frequency_min, selectedDevice?.status]);
+  }, [systemConfig.upload_frequency_sec, systemConfig.upload_frequency_min]);
 
   useEffect(() => {
     if (commandCooldown <= 0) return;
@@ -464,27 +463,27 @@ const ColdStorageSettings = () => {
               return true;
             }
 
-            return true;
+            return false;
           };
 
-          const list = rawList.filter(isColdStorageDevice);
-          const finalDevices = list.length > 0 ? list : rawList;
-
+          const finalDevices = rawList.filter(isColdStorageDevice);
           setDevices(finalDevices);
 
           let selected = null;
-          if (paramMqtt) {
-            const matched = finalDevices.find(d => (d.mqttId && d.mqttId.toLowerCase() === paramMqtt.toLowerCase()) || d._id === paramMqtt);
-            selected = matched ? (matched.mqttId || matched._id) : paramMqtt;
-          } else if (paramDev) {
-            const matched = finalDevices.find(d => d._id === paramDev || (d.mqttId && d.mqttId.toLowerCase() === paramDev.toLowerCase()));
-            selected = matched ? (matched.mqttId || matched._id) : paramDev;
-          } else {
-            // Pick online cold storage device, or first available device
-            const onlineCold = finalDevices.find(d => d.status === 'online');
-            selected = onlineCold ? (onlineCold.mqttId || onlineCold._id) : (finalDevices[0]?.mqttId || finalDevices[0]?._id || 'cold_room');
+          if (finalDevices.length > 0) {
+            if (paramMqtt) {
+              const matched = finalDevices.find(d => (d.mqttId && d.mqttId.toLowerCase() === paramMqtt.toLowerCase()) || d._id === paramMqtt);
+              selected = matched ? (matched.mqttId || matched._id) : (finalDevices[0]?.mqttId || finalDevices[0]?._id);
+            } else if (paramDev) {
+              const matched = finalDevices.find(d => d._id === paramDev || (d.mqttId && d.mqttId.toLowerCase() === paramDev.toLowerCase()));
+              selected = matched ? (matched.mqttId || matched._id) : (finalDevices[0]?.mqttId || finalDevices[0]?._id);
+            } else {
+              // Pick online cold storage device, or first available device
+              const onlineCold = finalDevices.find(d => d.status === 'online');
+              selected = onlineCold ? (onlineCold.mqttId || onlineCold._id) : (finalDevices[0]?.mqttId || finalDevices[0]?._id);
+            }
           }
-          setSelectedMqttId(selected || 'cold_room');
+          setSelectedMqttId(selected || '');
         }
       } catch (err) {
         console.error('Failed to fetch devices', err);
@@ -497,7 +496,7 @@ const ColdStorageSettings = () => {
 
   // Directly fetch latest crop programs and setpoints from backend MongoDB
   const fetchDiskStateDirectly = useCallback(async () => {
-    const devTarget = targetDevId || selectedMqttId || selectedDevice?.mqttId || selectedDevice?._id || 'cold_room';
+    const devTarget = targetDevId || selectedMqttId || selectedDevice?.mqttId || selectedDevice?._id;
     if (!devTarget) return;
 
     try {
@@ -577,18 +576,23 @@ const ColdStorageSettings = () => {
 
     if (selectedDevice) {
       const devTs = selectedDevice.latestPacketTime || selectedDevice.lastUpdated;
+      const uploadSec = Number(systemConfig.upload_frequency_sec) || (Number(systemConfig.upload_frequency_min) * 60) || 1;
+      const allowedTimeoutMs = Math.max(45000, (uploadSec * 2.5 + 10) * 1000);
+
+      let isFresh = false;
       if (devTs) {
         const ts = new Date(typeof devTs === 'string' && devTs.includes(' ') && !devTs.includes('T') ? devTs.replace(' ', 'T') : devTs).getTime();
-        if (!isNaN(ts) && (Date.now() - ts < 120000)) {
+        if (!isNaN(ts) && (Date.now() - ts <= allowedTimeoutMs)) {
           lastTelemetryTimeRef.current = ts;
+          isFresh = true;
+        } else {
+          lastTelemetryTimeRef.current = null;
         }
+      } else {
+        lastTelemetryTimeRef.current = null;
       }
-      if (selectedDevice.status === 'online') {
-        setIsMachineOnline(true);
-        if (!lastTelemetryTimeRef.current) {
-          lastTelemetryTimeRef.current = Date.now();
-        }
-      }
+      setIsMachineOnline(isFresh);
+
       if (selectedDevice.crop_programs || selectedDevice.cropPrograms) {
         setDevicePrograms(selectedDevice.crop_programs || selectedDevice.cropPrograms);
       }
@@ -601,9 +605,20 @@ const ColdStorageSettings = () => {
 
   // Robust Telemetry Normalizer (Extracts S1..S7 from any packet structure)
   const processIncomingTelemetry = useCallback((payload) => {
-    if (!payload) return;
-    lastTelemetryTimeRef.current = Date.now();
-    setIsMachineOnline(true);
+    if (!payload || typeof payload !== 'object') return;
+
+    // Check if packet contains genuine live telemetry readings from hardware
+    const hasLiveReadings = Boolean(
+      payload.sensor_data ||
+      payload.rooms ||
+      payload.S1 || payload.S2 || payload.S3 || payload.S4 || payload.S5 || payload.S6 || payload.S7 ||
+      payload.temp !== undefined || payload.t !== undefined || payload.humi !== undefined
+    );
+
+    if (hasLiveReadings) {
+      lastTelemetryTimeRef.current = Date.now();
+      setIsMachineOnline(true);
+    }
     setStatus(prev => prev !== 'connected' ? 'connected' : prev);
 
     // 1. Process Setpoints, Programs & Config if present
@@ -798,15 +813,19 @@ const ColdStorageSettings = () => {
       idsList.forEach((id) => {
         if (!id) return;
         mqttClient.subscribe(`inhydro/${id}/#`, { qos: 0 });
-        mqttClient.publish(`inhydro/${id}/setpoints/request_sync`, '1');
       });
     });
 
     mqttClient.on('message', (topic, message) => {
       try {
-        const payload = JSON.parse(message.toString());
-        setStatus('connected');
-        processTelemetryRef.current(payload);
+        if (topic.includes('/request_sync') || topic.includes('/command')) return;
+        const str = message.toString().trim();
+        if (str === '1' || str === '0') return;
+        const payload = JSON.parse(str);
+        if (typeof payload === 'object' && payload !== null) {
+          setStatus('connected');
+          processTelemetryRef.current(payload);
+        }
       } catch (err) {
         console.debug('MQTT parse error', err);
       }
@@ -844,38 +863,6 @@ const ColdStorageSettings = () => {
       if (eventSource) eventSource.close();
     };
   }, [candidateIdsStr, targetDevId, API_BASE, loading]);
-
-  // Request sync from physical device
-  const handleRequestSync = async () => {
-    const devTarget = targetDevId || selectedMqttId || selectedDevice?.mqttId || selectedDevice?._id || 'cold_room';
-    setStatusMsg('Requesting sync from hardware...');
-    if (client && client.connected) {
-      candidateIdentifiers.forEach((id) => {
-        try {
-          client.publish(`inhydro/${id}/setpoints/request_sync`, '1');
-        } catch (e) { }
-      });
-    }
-    try {
-      await fetch(`${API_BASE}/api/devices/${encodeURIComponent(devTarget)}/push-config?action=sync`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-    } catch (e) { }
-    await fetchDiskStateDirectly();
-    setTimeout(() => setStatusMsg(''), 2500);
-  };
-
-  // Auto-request sync immediately once when device target changes
-  const prevSyncIdRef = useRef(null);
-  useEffect(() => {
-    if (!targetDevId || prevSyncIdRef.current === targetDevId) return;
-    prevSyncIdRef.current = targetDevId;
-    const timer = setTimeout(() => {
-      handleRequestSync();
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [targetDevId]);
 
   // State update helpers (bullet-proof null safety)
   const updateRoomState = (updater) => {
@@ -1501,6 +1488,18 @@ const ColdStorageSettings = () => {
     );
   }
 
+  if (devices.length === 0) {
+    return (
+      <div className="flex h-72 flex-col items-center justify-center rounded-2xl border border-slate-800 bg-slate-900/40 backdrop-blur-sm p-8 text-center mx-auto max-w-7xl">
+        <Wind className="mb-4 h-12 w-12 text-slate-600" />
+        <h3 className="text-lg font-semibold text-white">No Cold Storage Devices Assigned</h3>
+        <p className="mt-2 text-sm text-slate-400 max-w-md">
+          SuperAdmin has not assigned any Cold Storage or Multi-Room devices to your account yet. Please contact SuperAdmin.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto space-y-5 pb-16 text-slate-100 font-sans px-2 sm:px-4">
       {/* ── 1. CLEAN TOP HEADER & CONTROLS ── */}
@@ -1555,17 +1554,6 @@ const ColdStorageSettings = () => {
             <ChevronDown className="absolute right-2.5 top-2.5 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
           </div>
 
-          {/* Sync Hardware Button */}
-          <button
-            onClick={handleRequestSync}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-200 hover:text-white transition-all shadow-sm"
-            title="Request Instant Sync from Device"
-          >
-            <RotateCcw className="h-3.5 w-3.5 text-sky-400" />
-            <span className="hidden sm:inline">Sync Hardware</span>
-            <span className="sm:hidden">Sync</span>
-          </button>
-
           {/* Programs */}
           <button
             onClick={() => setShowPresetModal(true)}
@@ -1581,7 +1569,7 @@ const ColdStorageSettings = () => {
             onClick={() => setShowConfigModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-xs font-medium text-slate-200 hover:text-white transition-all shadow-sm"
           >
-            <Sliders className="h-3.5 w-3.5 text-sky-400" />
+            <Sliders className="h-3.5 w-3.5 text-emerald-400" />
             <span>Config</span>
           </button>
 
@@ -1649,7 +1637,7 @@ const ColdStorageSettings = () => {
       )}
 
       {/* ── 3. ELEGANT ROOM SELECTOR PILLS (S1 - S7) ── */}
-      <div className="flex items-center gap-2.5 overflow-x-auto pb-1.5 scrollbar-thin">
+      <div className="flex items-center gap-2.5 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-800">
         {SENSOR_KEYS.map((sKey) => {
           const isSelected = activeRoom === sKey;
           const name = systemConfig.sensor_names[sKey] || DEFAULT_ROOM_NAMES[sKey];
@@ -1660,7 +1648,7 @@ const ColdStorageSettings = () => {
             <button
               key={sKey}
               onClick={() => setActiveRoom(sKey)}
-              className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl border text-xs whitespace-nowrap transition-all shadow-sm ${isSelected
+              className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl border text-xs whitespace-nowrap transition-all shadow-sm shrink-0 ${isSelected
                 ? 'bg-slate-900 border-emerald-500/80 text-white ring-1 ring-emerald-500/30 shadow-emerald-500/10'
                 : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                 }`}
@@ -1697,7 +1685,7 @@ const ColdStorageSettings = () => {
               <Bookmark className="h-3.5 w-3.5" />
               <span>Program: {currentRoomSetpoints.program_name || 'Default Program'}</span>
             </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs font-semibold">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
               <Sparkles className="h-3.5 w-3.5" />
               <span>Stage: {currentStage.name || `Crop Stage ${ALL_SETTING_KEYS.indexOf(activeStageKey) + 1}`}</span>
             </span>
@@ -1746,10 +1734,10 @@ const ColdStorageSettings = () => {
               <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 flex flex-col justify-between space-y-2.5 shadow-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+                    <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
                     Crop Stage
                   </span>
-                  <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                  <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
                     Stage {ALL_SETTING_KEYS.indexOf(activeStageKey) + 1}
                   </span>
                 </div>
@@ -1757,7 +1745,7 @@ const ColdStorageSettings = () => {
                 <select
                   value={activeStageKey}
                   onChange={(e) => setActiveStageKey(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700/80 hover:border-purple-500/50 focus:border-purple-500 text-white font-bold text-sm rounded-xl px-3.5 py-2.5 outline-none transition-all cursor-pointer shadow-inner"
+                  className="w-full bg-slate-900 border border-slate-700/80 hover:border-emerald-500/50 focus:border-emerald-500 text-white font-bold text-sm rounded-xl px-3.5 py-2.5 outline-none transition-all cursor-pointer shadow-inner"
                 >
                   {ALL_SETTING_KEYS.map((k, idx) => {
                     const stName = currentRoomSetpoints.settings?.[k]?.name;
@@ -1817,10 +1805,10 @@ const ColdStorageSettings = () => {
               <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 flex flex-col justify-between space-y-2.5 shadow-sm md:col-span-2 lg:col-span-1">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Bookmark className="h-3.5 w-3.5 text-sky-400" />
+                    <Bookmark className="h-3.5 w-3.5 text-emerald-400" />
                     Recipe Program
                   </span>
-                  <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                  <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
                     {systemConfig.sensor_names[activeRoom] || DEFAULT_ROOM_NAMES[activeRoom]}
                   </span>
                 </div>
@@ -1832,7 +1820,7 @@ const ColdStorageSettings = () => {
                       handleApplyPresetProgram(e.target.value);
                     }
                   }}
-                  className="w-full bg-slate-900 border border-slate-700/80 hover:border-sky-500/50 focus:border-sky-500 text-sky-300 font-bold text-sm rounded-xl px-3.5 py-2.5 outline-none transition-all cursor-pointer truncate shadow-inner"
+                  className="w-full bg-slate-900 border border-slate-700/80 hover:border-emerald-500/50 focus:border-emerald-500 text-emerald-300 font-bold text-sm rounded-xl px-3.5 py-2.5 outline-none transition-all cursor-pointer truncate shadow-inner"
                 >
                   <option value={currentRoomSetpoints.program_name || 'Default Program'} className="bg-slate-900 text-white font-medium text-sm py-2">
                     {currentRoomSetpoints.program_name || 'Default Program'} (Active)
@@ -1867,10 +1855,10 @@ const ColdStorageSettings = () => {
 
                   <button
                     onClick={() => setShowPresetModal(true)}
-                    className="flex-1 py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 border border-slate-700 text-xs font-semibold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
+                    className="flex-1 py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap"
                     title="View & manage all saved programs on device"
                   >
-                    <Bookmark className="h-3.5 w-3.5 text-sky-400" />
+                    <Bookmark className="h-3.5 w-3.5 text-emerald-400" />
                     <span>Manage ({currentRoomPrograms.length}/20)</span>
                   </button>
                 </div>
@@ -1881,7 +1869,7 @@ const ColdStorageSettings = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
               {/* Crop Stage Name */}
               <div className="flex items-center gap-3 bg-slate-950/70 border border-slate-800/90 hover:border-slate-700 rounded-xl px-4 py-3 transition-colors shadow-sm">
-                <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-400 shrink-0">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 shrink-0">
                   <Sparkles className="h-4.5 w-4.5" />
                 </div>
                 <div className="flex flex-col flex-1 min-w-0">
@@ -1902,7 +1890,7 @@ const ColdStorageSettings = () => {
 
               {/* Setup Name / Chamber Details */}
               <div className="flex items-center gap-3 bg-slate-950/70 border border-slate-800/90 hover:border-slate-700 rounded-xl px-4 py-3 transition-colors shadow-sm">
-                <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-400 shrink-0">
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 shrink-0">
                   <Layers className="h-4.5 w-4.5" />
                 </div>
                 <div className="flex flex-col flex-1 min-w-0">
@@ -2004,7 +1992,7 @@ const ColdStorageSettings = () => {
           <div className="rounded-2xl border border-slate-800 bg-slate-900/80 backdrop-blur-sm overflow-hidden shadow-lg shadow-black/20">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 sm:p-5 border-b border-slate-800 bg-slate-900/95 gap-3">
               <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl bg-sky-500/10 text-sky-400">
+                <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
                   <Clock className="h-5 w-5" />
                 </div>
                 <div>
@@ -2070,7 +2058,7 @@ const ColdStorageSettings = () => {
                         </td>
                         <td className="py-2.5 px-3 sm:px-4">
                           <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
-                            <span className="font-bold text-sky-300 bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded text-xs font-mono w-fit">
+                            <span className="font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded text-xs font-mono w-fit">
                               {safeFixed(slot.h_set, 1)}%
                             </span>
                             <span className="text-[10px] text-slate-400 font-mono">
@@ -2082,7 +2070,7 @@ const ColdStorageSettings = () => {
                           <div className="flex items-center justify-end gap-1.5">
                             <button
                               onClick={() => openEditSlot(idx)}
-                              className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-sky-400 hover:border-sky-500/30 transition-colors"
+                              className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-emerald-400 hover:border-emerald-500/30 transition-colors"
                               title="Edit Slot"
                             >
                               <Edit3 className="h-3.5 w-3.5" />
@@ -2188,15 +2176,15 @@ const ColdStorageSettings = () => {
                     {/* Humidifier */}
                     <div className={`p-2 rounded-lg border flex items-center justify-between transition-all ${
                       isHumiOn
-                        ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                         : 'bg-slate-900/60 border-slate-800/80 text-slate-500'
                     }`}>
                       <div className="flex items-center gap-2">
-                        <span className={`h-1.5 w-1.5 rounded-full ${isHumiOn ? 'bg-sky-400 animate-pulse' : 'bg-slate-600'}`} />
+                        <span className={`h-1.5 w-1.5 rounded-full ${isHumiOn ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
                         <span className="text-xs font-semibold">Humidifier</span>
                       </div>
                       <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                        isHumiOn ? 'bg-sky-500/20 text-sky-300' : 'bg-slate-800 text-slate-500'
+                        isHumiOn ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-500'
                       }`}>
                         {isHumiOn ? 'ON' : 'OFF'}
                       </span>
@@ -2336,7 +2324,7 @@ const ColdStorageSettings = () => {
               </div>
 
               <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-                <span className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
+                <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
                   <Droplets className="h-3.5 w-3.5" /> Humidity Targets (%)
                 </span>
                 <div className="grid grid-cols-3 gap-2.5 font-mono">
@@ -2347,7 +2335,7 @@ const ColdStorageSettings = () => {
                       step="0.1"
                       value={slotForm.h_set ?? 60.0}
                       onChange={(e) => setSlotForm({ ...slotForm, h_set: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700 focus:border-sky-500/60 rounded-lg px-2.5 py-1.5 text-white"
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500/60 rounded-lg px-2.5 py-1.5 text-white"
                     />
                   </div>
                   <div>
@@ -2357,7 +2345,7 @@ const ColdStorageSettings = () => {
                       step="0.1"
                       value={slotForm.h_min ?? 55.0}
                       onChange={(e) => setSlotForm({ ...slotForm, h_min: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700 focus:border-sky-500/60 rounded-lg px-2.5 py-1.5 text-white"
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500/60 rounded-lg px-2.5 py-1.5 text-white"
                     />
                   </div>
                   <div>
@@ -2367,7 +2355,7 @@ const ColdStorageSettings = () => {
                       step="0.1"
                       value={slotForm.h_max ?? 70.0}
                       onChange={(e) => setSlotForm({ ...slotForm, h_max: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700 focus:border-sky-500/60 rounded-lg px-2.5 py-1.5 text-white"
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500/60 rounded-lg px-2.5 py-1.5 text-white"
                     />
                   </div>
                 </div>
@@ -2398,7 +2386,7 @@ const ColdStorageSettings = () => {
           <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl p-5 sm:p-6 space-y-5 text-xs max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
-                <Sliders className="h-4 w-4 text-sky-400" />
+                <Sliders className="h-4 w-4 text-emerald-400" />
                 <span className="font-bold text-white text-sm">System & Cloud Configuration</span>
               </div>
               <button onClick={() => setShowConfigModal(false)} className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
@@ -2411,10 +2399,10 @@ const ColdStorageSettings = () => {
               <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-slate-300 font-semibold flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5 text-sky-400" />
+                    <Clock className="h-3.5 w-3.5 text-emerald-400" />
                     <span>Cloud Telemetry Upload Frequency</span>
                   </label>
-                  <span className="px-2 py-0.5 rounded-md bg-sky-500/10 border border-sky-500/30 text-sky-400 font-mono text-[11px] font-bold">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-mono text-[11px] font-bold">
                     {formatUploadHmsDisplay(systemConfig.upload_hours, systemConfig.upload_mins, systemConfig.upload_secs, systemConfig.upload_frequency_min)}
                   </span>
                 </div>
@@ -2422,7 +2410,7 @@ const ColdStorageSettings = () => {
                 {/* Quick Preset Buttons */}
                 <div>
                   <span className="text-[10px] text-slate-400 block mb-1.5 uppercase font-medium tracking-wider">Quick Presets</span>
-                  <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-1.5">
                     {[
                       { label: '1s (Stream)', h: 0, m: 0, s: 0 },
                       { label: '30s', h: 0, m: 0, s: 30 },
@@ -2451,8 +2439,8 @@ const ColdStorageSettings = () => {
                           }}
                           className={`px-2 py-1.5 rounded-lg text-center font-medium transition-all text-[11px] ${
                             isSelected
-                              ? 'bg-sky-500 text-slate-950 font-bold shadow-sm shadow-sky-500/20'
-                              : 'bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750'
+                              ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm shadow-emerald-500/20'
+                              : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700/80'
                           }`}
                         >
                           {preset.label}
@@ -2477,7 +2465,7 @@ const ColdStorageSettings = () => {
                           const h = Math.max(0, Math.min(23, parseInt(e.target.value, 10) || 0));
                           setSystemConfig(prev => ({ ...prev, upload_hours: h }));
                         }}
-                        className="w-full bg-slate-900 border border-slate-700 focus:border-sky-500 rounded-xl px-3 py-2 text-white font-mono text-center text-sm font-bold outline-none"
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono text-center text-sm font-bold outline-none"
                       />
                     </div>
                     <div>
@@ -2491,7 +2479,7 @@ const ColdStorageSettings = () => {
                           const m = Math.max(0, Math.min(59, parseInt(e.target.value, 10) || 0));
                           setSystemConfig(prev => ({ ...prev, upload_mins: m }));
                         }}
-                        className="w-full bg-slate-900 border border-slate-700 focus:border-sky-500 rounded-xl px-3 py-2 text-white font-mono text-center text-sm font-bold outline-none"
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono text-center text-sm font-bold outline-none"
                       />
                     </div>
                     <div>
@@ -2505,7 +2493,7 @@ const ColdStorageSettings = () => {
                           const s = Math.max(0, Math.min(59, parseInt(e.target.value, 10) || 0));
                           setSystemConfig(prev => ({ ...prev, upload_secs: s }));
                         }}
-                        className="w-full bg-slate-900 border border-slate-700 focus:border-sky-500 rounded-xl px-3 py-2 text-white font-mono text-center text-sm font-bold outline-none"
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded-xl px-3 py-2 text-white font-mono text-center text-sm font-bold outline-none"
                       />
                     </div>
                   </div>
@@ -2563,7 +2551,7 @@ const ColdStorageSettings = () => {
                   setShowConfigModal(false);
                   handleSaveSystemConfig();
                 }}
-                className="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold transition-all shadow-sm shadow-sky-500/20"
+                className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-all shadow-sm shadow-emerald-500/20"
               >
                 Save Configuration
               </button>
@@ -2678,7 +2666,7 @@ const ColdStorageSettings = () => {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div>
                 <div className="flex items-center gap-2">
-                  <Bookmark className="h-4 w-4 text-sky-400" />
+                  <Bookmark className="h-4 w-4 text-emerald-400" />
                   <span className="font-bold text-white text-sm">Saved Device Programs</span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 font-mono">
                     {currentRoomPrograms.length}/20 Saved
@@ -2748,7 +2736,7 @@ const ColdStorageSettings = () => {
               )}
             </div>
 
-            <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+            <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-3 border-t border-slate-800">
               <button
                 onClick={() => {
                   setShowPresetModal(false);
@@ -2757,11 +2745,11 @@ const ColdStorageSettings = () => {
                     : `Program ${currentRoomPrograms.length + 1}`);
                   setShowSaveProgramModal(true);
                 }}
-                className="px-3 py-2 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-bold transition-all"
+                className="px-3.5 py-2 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-bold transition-all text-center"
               >
                 + Save Current Settings as Program
               </button>
-              <button onClick={() => setShowPresetModal(false)} className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300">
+              <button onClick={() => setShowPresetModal(false)} className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium text-center">
                 Close
               </button>
             </div>
