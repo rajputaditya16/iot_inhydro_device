@@ -328,24 +328,34 @@ def load_crop_programs():
     else:
         crop_programs = {}
 
-def get_all_crop_programs():
-    load_crop_programs()
-    all_progs = {}
-    if isinstance(crop_programs, dict):
-        # 1. Any flat keys that are valid program dictionaries (excluding room keys S1-S7)
-        for k, v in crop_programs.items():
-            if k not in SENSOR_MAP and isinstance(v, dict) and not k.startswith("Setting ") and not k.startswith("Stage "):
-                all_progs[k] = v
-        # 2. Any programs inside room keys S1-S7
-        for skey in SENSOR_MAP.keys():
-            if skey in crop_programs and isinstance(crop_programs[skey], dict):
-                for p_name, p_val in crop_programs[skey].items():
-                    if p_name and isinstance(p_val, dict) and p_name not in all_progs and not p_name.startswith("Setting ") and not p_name.startswith("Stage "):
-                        all_progs[p_name] = p_val
-    return all_progs
+    if not isinstance(crop_programs, dict):
+        crop_programs = {}
+
+    for skey in SENSOR_MAP.keys():
+        if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
+            crop_programs[skey] = {}
+
+    # Migrate any legacy top-level keys to S1
+    legacy_keys = [k for k in list(crop_programs.keys()) if k not in SENSOR_MAP and isinstance(crop_programs[k], dict) and not k.startswith("Setting ") and not k.startswith("Stage ")]
+    if legacy_keys:
+        for lk in legacy_keys:
+            if lk not in crop_programs["S1"]:
+                crop_programs["S1"][lk] = crop_programs[lk]
+            del crop_programs[lk]
+        try:
+            with open(CROP_PROGRAMS_FILE, 'w') as f:
+                json.dump(crop_programs, f, indent=4)
+        except Exception: pass
 
 def get_room_crop_programs(skey=None):
-    return get_all_crop_programs()
+    load_crop_programs()
+    if not skey:
+        skey = "S1"
+    return dict(crop_programs.get(skey, {}))
+
+def get_all_crop_programs():
+    load_crop_programs()
+    return crop_programs
 
 def save_crop_programs():
     global crop_programs
@@ -474,13 +484,11 @@ def load_setpoints():
             # Ensure that active saved program exists in crop_programs and settings are aligned
             prog_name = sensor_setpoints[skey].get("program_name")
             if prog_name and prog_name != "Default Program":
-                if isinstance(crop_programs, dict):
-                    if prog_name in crop_programs and not sensor_setpoints[skey].get("settings"):
-                        sensor_setpoints[skey]["settings"] = copy.deepcopy(crop_programs[prog_name])
+                if isinstance(crop_programs, dict) and skey in crop_programs and isinstance(crop_programs[skey], dict):
+                    if prog_name in crop_programs[skey] and not sensor_setpoints[skey].get("settings"):
+                        sensor_setpoints[skey]["settings"] = copy.deepcopy(crop_programs[skey][prog_name])
                     elif sensor_setpoints[skey].get("settings"):
-                        crop_programs[prog_name] = copy.deepcopy(sensor_setpoints[skey]["settings"])
-                        if skey in crop_programs and isinstance(crop_programs[skey], dict):
-                            crop_programs[skey][prog_name] = copy.deepcopy(sensor_setpoints[skey]["settings"])
+                        crop_programs[skey][prog_name] = copy.deepcopy(sensor_setpoints[skey]["settings"])
 
     # Ensure setpoints and crop programs are guaranteed on disk immediately upon startup
     try:
@@ -1579,7 +1587,6 @@ def on_control_message(client, userdata, msg):
                     else:
                         sp = get_setpoints(p_room)
                         prog_content = copy.deepcopy(sp.get("settings", {}))
-                    crop_programs[p_name] = prog_content
                     if p_room not in crop_programs or not isinstance(crop_programs[p_room], dict):
                         crop_programs[p_room] = {}
                     crop_programs[p_room][p_name] = prog_content
@@ -1605,17 +1612,20 @@ def on_control_message(client, userdata, msg):
                     return
 
             elif p_action in ["delete_program", "remove_program"]:
+                p_room = new_data.get("room") or new_data.get("port")
                 p_name = str(new_data.get("program_name") or new_data.get("name") or "").strip()
                 if p_name:
                     load_crop_programs()
-                    if p_name in crop_programs:
-                        del crop_programs[p_name]
-                    for rk in SENSOR_MAP.keys():
-                        if rk in crop_programs and isinstance(crop_programs[rk], dict) and p_name in crop_programs[rk]:
-                            del crop_programs[rk][p_name]
+                    if p_room and p_room in crop_programs and isinstance(crop_programs[p_room], dict):
+                        crop_programs[p_room].pop(p_name, None)
+                    else:
+                        for rk in SENSOR_MAP.keys():
+                            if rk in crop_programs and isinstance(crop_programs[rk], dict) and p_name in crop_programs[rk]:
+                                del crop_programs[rk][p_name]
                     save_crop_programs()
 
-                    for rk in SENSOR_MAP.keys():
+                    rooms_to_check = [p_room] if p_room in SENSOR_MAP else SENSOR_MAP.keys()
+                    for rk in rooms_to_check:
                         sp = get_setpoints(rk)
                         if sp.get("program_name") == p_name:
                             sp["program_name"] = "Default Program"
@@ -1638,16 +1648,16 @@ def on_control_message(client, userdata, msg):
                 p_room = new_data.get("room") or new_data.get("port") or "S1"
                 p_name = str(new_data.get("program_name") or new_data.get("name") or "").strip()
                 if p_room in SENSOR_MAP and p_name:
-                    all_progs = get_all_crop_programs()
+                    room_progs = get_room_crop_programs(p_room)
                     p_settings = new_data.get("settings")
                     if p_settings and isinstance(p_settings, dict):
                         sensor_setpoints[p_room]["settings"] = copy.deepcopy(p_settings)
-                        crop_programs[p_name] = copy.deepcopy(p_settings)
-                        if p_room in crop_programs and isinstance(crop_programs[p_room], dict):
-                            crop_programs[p_room][p_name] = copy.deepcopy(p_settings)
+                        if p_room not in crop_programs or not isinstance(crop_programs[p_room], dict):
+                            crop_programs[p_room] = {}
+                        crop_programs[p_room][p_name] = copy.deepcopy(p_settings)
                         save_crop_programs()
-                    elif p_name in all_progs:
-                        sensor_setpoints[p_room]["settings"] = copy.deepcopy(all_progs[p_name])
+                    elif p_name in room_progs:
+                        sensor_setpoints[p_room]["settings"] = copy.deepcopy(room_progs[p_name])
                     
                     sensor_setpoints[p_room]["program_name"] = p_name
                     save_setpoints()
@@ -3651,11 +3661,11 @@ tk.Label(sched_row2, text="Program:", font=("Helvetica", 12, "bold"), fg="#47556
 
 def update_preset_dropdown_text():
     skey = skey_combo.get()
-    all_presets = get_all_crop_programs()
-    count = len(all_presets)
+    room_presets = get_room_crop_programs(skey)
+    count = len(room_presets)
     sp = get_setpoints(skey)
     active_p = sp.get("program_name", "Default Program")
-    if active_p and (active_p in all_presets or active_p != "Default Program"):
+    if active_p and (active_p in room_presets or active_p != "Default Program"):
         preset_dropdown_btn.config(text=f"{active_p} ▼", bg="#0284c7", fg="white")
     else:
         preset_dropdown_btn.config(text=f"Programs ({count}/20 Saved) ▼", bg="#cbd5e1", fg="#1e293b")
@@ -3670,11 +3680,11 @@ def toggle_preset_dropdown():
         preset_dropdown_open = False
     else:
         skey = skey_combo.get()
-        all_presets = get_all_crop_programs()
+        room_presets = get_room_crop_programs(skey)
         for w in preset_menu_frame.winfo_children(): w.destroy()
-        p_items = list(all_presets.items())
+        p_items = list(room_presets.items())
         if not p_items:
-            tk.Label(preset_menu_frame, text="No Saved Programs", font=("Helvetica", 11, "bold"), fg="#64748b", bg="white", padx=12, pady=10).pack()
+            tk.Label(preset_menu_frame, text=f"No Saved Programs for {get_sensor_display_name(skey)}", font=("Helvetica", 11, "bold"), fg="#64748b", bg="white", padx=12, pady=10).pack()
         else:
             for idx, (p_name, p_data) in enumerate(p_items):
                 item_f = tk.Frame(preset_menu_frame, bg="white")
@@ -3683,9 +3693,9 @@ def toggle_preset_dropdown():
                 def _apply(name=p_name):
                     global preset_dropdown_open, sched_clean_snapshot, sched_dirty_flag
                     curr_skey = skey_combo.get()
-                    all_p = get_all_crop_programs()
-                    if name in all_p:
-                        sensor_setpoints[curr_skey]["settings"] = copy.deepcopy(all_p[name])
+                    r_progs = get_room_crop_programs(curr_skey)
+                    if name in r_progs:
+                        sensor_setpoints[curr_skey]["settings"] = copy.deepcopy(r_progs[name])
                         sensor_setpoints[curr_skey]["program_name"] = name
                         save_setpoints()
                         sched_clean_snapshot = copy.deepcopy(sensor_setpoints)
@@ -3701,23 +3711,19 @@ def toggle_preset_dropdown():
                 def _delete(name=p_name):
                     curr_skey = skey_combo.get()
                     load_crop_programs()
-                    if name in crop_programs:
-                        del crop_programs[name]
-                    for rk in SENSOR_MAP.keys():
-                        if rk in crop_programs and isinstance(crop_programs[rk], dict) and name in crop_programs[rk]:
-                            del crop_programs[rk][name]
+                    if curr_skey in crop_programs and isinstance(crop_programs[curr_skey], dict):
+                        crop_programs[curr_skey].pop(name, None)
                     save_crop_programs()
-                    for rk in SENSOR_MAP.keys():
-                        sp = get_setpoints(rk)
-                        if sp.get("program_name") == name:
-                            sp["program_name"] = "Default Program"
+                    sp = get_setpoints(curr_skey)
+                    if sp.get("program_name") == name:
+                        sp["program_name"] = "Default Program"
                     save_setpoints()
                     toggle_preset_dropdown()
                     update_preset_dropdown_text()
                     load_schedule_form()
                     update_ui()
                     broadcast_current_state()
-                    show_notification("Program Deleted", f"Deleted program '{name}'", "info")
+                    show_notification("Program Deleted", f"Deleted program '{name}' from {get_sensor_display_name(curr_skey)}", "info")
 
                 btn_apply = tk.Button(item_f, text=f"{p_name}", font=("Helvetica", 11, "bold"), bg="white", fg="#1e293b",
                                       activebackground="#0284c7", activeforeground="white", relief="flat", bd=0, anchor="w", padx=12, pady=10, cursor="hand2", command=_apply)
@@ -3740,11 +3746,11 @@ preset_dropdown_btn.pack(side="left", padx=(0, 12))
 
 def save_current_as_preset_inline():
     skey = skey_combo.get()
-    all_presets = get_all_crop_programs()
-    if len(all_presets) >= 20:
-        show_notification("Limit Reached", "Maximum 20 programs allowed. Delete a program first.", "warning")
+    room_presets = get_room_crop_programs(skey)
+    if len(room_presets) >= 20:
+        show_notification("Limit Reached", f"Maximum 20 programs allowed for {get_sensor_display_name(skey)}. Delete a program first.", "warning")
         return
-    default_name = f"Program {len(all_presets)+1}"
+    default_name = f"Program {len(room_presets)+1}"
     def on_confirm_name(name):
         if name and name.strip():
             sync_schedule_form_to_memory()
@@ -3754,9 +3760,12 @@ def save_current_as_preset_inline():
             st_content = copy.deepcopy(sp.get("settings", {}))
             
             load_crop_programs()
-            crop_programs[name] = st_content
             if curr_skey not in crop_programs or not isinstance(crop_programs[curr_skey], dict):
                 crop_programs[curr_skey] = {}
+            if len(crop_programs[curr_skey]) >= 20 and name not in crop_programs[curr_skey]:
+                show_notification("Limit Reached", f"Maximum 20 programs allowed for {get_sensor_display_name(curr_skey)}.", "warning")
+                return
+
             crop_programs[curr_skey][name] = st_content
             save_crop_programs()
             
@@ -4382,7 +4391,7 @@ def load_schedule_form():
 
     active_prog = sp.get("program_name", "Default Program")
     if 'lbl_sched_title' in globals() and lbl_sched_title.winfo_exists():
-        lbl_sched_title.config(text=f"ALMORA SCHEDULE — PROGRAM: {active_prog.upper()}")
+        lbl_sched_title.config(text=f"ALMORA SCHEDULE —  {active_prog.upper()}")
     temp_grid_frame.config(text=f"SCHEDULE TIME SLOTS — PROGRAM: {active_prog.upper()} [{profile_disp_name.upper()}]")
     humi_grid_frame.pack_forget()
 
@@ -4451,9 +4460,9 @@ def load_schedule_form():
 
         tk.Label(t_row, text="TEMP T : ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
         tk.Label(t_row, text=f"{t_set_v:.1f}°C", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(side="left")
-        tk.Label(t_row, text="   |   MIN: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
+        tk.Label(t_row, text=" | MIN: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
         tk.Label(t_row, text=f"{t_min_v:.1f}°C", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(side="left")
-        tk.Label(t_row, text="   |   MAX: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
+        tk.Label(t_row, text=" | MAX: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
         tk.Label(t_row, text=f"{t_max_v:.1f}°C", font=card_val_font, fg="#1565c0", bg="#f8fafc").pack(side="left")
 
         # Humi Line (Names in Black, Values in Sky Blue)
@@ -4462,9 +4471,9 @@ def load_schedule_form():
 
         tk.Label(h_row, text="HUMI T : ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
         tk.Label(h_row, text=f"{h_set_v:.1f}%", font=card_val_font, fg="#0284c7", bg="#f8fafc").pack(side="left")
-        tk.Label(h_row, text="   |   MIN: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
+        tk.Label(h_row, text=" | MIN: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
         tk.Label(h_row, text=f"{h_min_v:.1f}% ", font=card_val_font, fg="#0284c7", bg="#f8fafc").pack(side="left")
-        tk.Label(h_row, text="   |   MAX: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
+        tk.Label(h_row, text=" | MAX: ", font=card_val_font, fg="black", bg="#f8fafc").pack(side="left")
         tk.Label(h_row, text=f"{h_max_v:.1f}% ", font=card_val_font, fg="#0284c7", bg="#f8fafc").pack(side="left")
 
 def open_schedule_editor(skey="S1"):

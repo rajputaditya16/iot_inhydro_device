@@ -2,7 +2,7 @@
     "S1": {
         "mode": "SCHEDULED",
         "active_setting": "Setting A",
-        "program_name": "Blueberry Cold Storage",
+        "program_name": "Default Program",
         "T MIN": 10,
         "T MAX": 30,
         "H MIN": 30,

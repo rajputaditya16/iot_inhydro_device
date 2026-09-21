@@ -393,46 +393,29 @@ const ColdStorageSettings = () => {
   const currentRoomPrograms = useMemo(() => {
     if (!devicePrograms || typeof devicePrograms !== 'object') return [];
 
+    const roomProgs = devicePrograms[activeRoom] || (activeRoom === 'S1' && !devicePrograms.S1 ? devicePrograms : null);
+    if (!roomProgs || typeof roomProgs !== 'object') return [];
+
     const programsMap = {};
     const roomKeys = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'];
 
-    // 1. Collect all root-level programs (excluding room keys & raw settings)
-    Object.entries(devicePrograms).forEach(([key, val]) => {
+    Object.entries(roomProgs).forEach(([pName, pData]) => {
       if (
-        key &&
-        val &&
-        typeof val === 'object' &&
-        !roomKeys.includes(key.toUpperCase()) &&
-        !key.startsWith('Setting ') &&
-        !key.startsWith('Stage ')
+        pName &&
+        pData &&
+        typeof pData === 'object' &&
+        !roomKeys.includes(pName.toUpperCase()) &&
+        !pName.startsWith('Setting ') &&
+        !pName.startsWith('Stage ')
       ) {
-        programsMap[key] = val;
+        programsMap[pName] = pData;
       }
     });
 
-    // 2. Collect room-nested programs (if any are saved inside S1..S7)
-    roomKeys.forEach(rk => {
-      const rProgs = devicePrograms[rk];
-      if (rProgs && typeof rProgs === 'object') {
-        Object.entries(rProgs).forEach(([pName, pData]) => {
-          if (
-            pName &&
-            pData &&
-            typeof pData === 'object' &&
-            !programsMap[pName] &&
-            !pName.startsWith('Setting ') &&
-            !pName.startsWith('Stage ')
-          ) {
-            programsMap[pName] = pData;
-          }
-        });
-      }
-    });
-
-    return Object.entries(programsMap).map(([pName, pData]) => {
+    return Object.entries(programsMap).slice(0, 20).map(([pName, pData]) => {
       const settings = (pData && typeof pData === 'object' && pData.settings) ? pData.settings : (pData || {});
       const stageKeys = Object.keys(settings).filter(k => k.startsWith('Setting') || k.startsWith('Stage'));
-      const stageCount = stageKeys.length > 0 ? stageKeys.length : Object.keys(settings).length;
+      const stageCount = stageKeys.length > 0 ? Math.min(10, stageKeys.length) : Math.min(10, Object.keys(settings).length);
       return {
         name: pName,
         crop_name: pData?.crop_name || '',
@@ -512,7 +495,7 @@ const ColdStorageSettings = () => {
     fetchDevices();
   }, [token, API_BASE, paramMqtt, paramDev]);
 
-  // Directly fetch latest crop_programs.json and setpoints_<devId>.json from device disk
+  // Directly fetch latest crop programs and setpoints from backend MongoDB
   const fetchDiskStateDirectly = useCallback(async () => {
     const devTarget = targetDevId || selectedMqttId || selectedDevice?.mqttId || selectedDevice?._id || 'cold_room';
     if (!devTarget) return;
@@ -530,7 +513,7 @@ const ColdStorageSettings = () => {
         });
       }
 
-      // 2. Active Setpoints & System Config from device disk
+      // 2. Active Setpoints & System Config
       const sRes = await fetch(`${API_BASE}/api/devices/${encodeURIComponent(devTarget)}/setpoints-json`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -538,7 +521,20 @@ const ColdStorageSettings = () => {
       if (sJson.success && sJson.data && Object.keys(sJson.data).length > 0) {
         setAllSetpoints(prev => {
           if (JSON.stringify(prev) === JSON.stringify(sJson.data)) return prev;
-          return { ...prev, ...sJson.data };
+          const merged = { ...prev };
+          Object.keys(sJson.data).forEach(r => {
+            if (sJson.data[r] && typeof sJson.data[r] === 'object') {
+              merged[r] = {
+                ...(merged[r] || {}),
+                ...sJson.data[r],
+                settings: {
+                  ...(merged[r]?.settings || {}),
+                  ...(sJson.data[r].settings || {})
+                }
+              };
+            }
+          });
+          return merged;
         });
       }
       if (sJson.system_config && typeof sJson.system_config === 'object') {
@@ -560,7 +556,8 @@ const ColdStorageSettings = () => {
             temp_alarm_offset: Number(sJson.system_config.temp_alarm_offset ?? prev.temp_alarm_offset ?? 5.0),
             humi_alarm_offset: Number(sJson.system_config.humi_alarm_offset ?? prev.humi_alarm_offset ?? 5.0),
             sensor_names: {
-              ...(prev.sensor_names || DEFAULT_ROOM_NAMES),
+              ...DEFAULT_ROOM_NAMES,
+              ...(prev.sensor_names || {}),
               ...(sJson.system_config.sensor_names || {})
             }
           };
@@ -572,34 +569,35 @@ const ColdStorageSettings = () => {
   }, [targetDevId, selectedMqttId, selectedDevice?.mqttId, selectedDevice?._id, API_BASE, token]);
 
   // Initialize device programs, setpoints, and online status on device target change
+  const initialDevTargetRef = useRef(null);
   useEffect(() => {
+    if (!targetDevId) return;
+    if (initialDevTargetRef.current === targetDevId) return;
+    initialDevTargetRef.current = targetDevId;
+
     if (selectedDevice) {
       const devTs = selectedDevice.latestPacketTime || selectedDevice.lastUpdated;
-      const uploadSec = Number(systemConfig.upload_frequency_sec) || (Number(systemConfig.upload_frequency_min) * 60) || 1;
-      const allowedTimeoutMs = Math.max(120000, (uploadSec * 2.5 + 60) * 1000);
-      let isFresh = false;
       if (devTs) {
         const ts = new Date(typeof devTs === 'string' && devTs.includes(' ') && !devTs.includes('T') ? devTs.replace(' ', 'T') : devTs).getTime();
-        if (!isNaN(ts) && (Date.now() - ts < allowedTimeoutMs)) {
-          isFresh = true;
+        if (!isNaN(ts) && (Date.now() - ts < 120000)) {
           lastTelemetryTimeRef.current = ts;
         }
       }
-      if (selectedDevice.status === 'online' || isFresh) {
+      if (selectedDevice.status === 'online') {
         setIsMachineOnline(true);
         if (!lastTelemetryTimeRef.current) {
           lastTelemetryTimeRef.current = Date.now();
         }
       }
-    }
-    if (selectedDevice?.crop_programs) {
-      setDevicePrograms(selectedDevice.crop_programs);
-    }
-    if (selectedDevice?.sensor_setpoints) {
-      setAllSetpoints(prev => ({ ...prev, ...selectedDevice.sensor_setpoints }));
+      if (selectedDevice.crop_programs || selectedDevice.cropPrograms) {
+        setDevicePrograms(selectedDevice.crop_programs || selectedDevice.cropPrograms);
+      }
+      if (selectedDevice.sensor_setpoints || selectedDevice.settings) {
+        setAllSetpoints(prev => ({ ...prev, ...(selectedDevice.sensor_setpoints || selectedDevice.settings) }));
+      }
     }
     fetchDiskStateDirectly();
-  }, [targetDevId, selectedDevice, systemConfig.upload_frequency_sec, systemConfig.upload_frequency_min]);
+  }, [targetDevId, selectedDevice?._id, fetchDiskStateDirectly]);
 
   // Robust Telemetry Normalizer (Extracts S1..S7 from any packet structure)
   const processIncomingTelemetry = useCallback((payload) => {
@@ -618,27 +616,48 @@ const ColdStorageSettings = () => {
         });
       }
     }
-    if (payload.sensor_setpoints) {
+    if (payload.sensor_setpoints && typeof payload.sensor_setpoints === 'object') {
       setAllSetpoints(prev => {
         if (JSON.stringify(prev) === JSON.stringify(payload.sensor_setpoints)) return prev;
-        return { ...prev, ...payload.sensor_setpoints };
+        const merged = { ...prev };
+        Object.keys(payload.sensor_setpoints).forEach(r => {
+          if (payload.sensor_setpoints[r] && typeof payload.sensor_setpoints[r] === 'object') {
+            merged[r] = {
+              ...(merged[r] || {}),
+              ...payload.sensor_setpoints[r],
+              settings: {
+                ...(merged[r]?.settings || {}),
+                ...(payload.sensor_setpoints[r].settings || {})
+              }
+            };
+          }
+        });
+        return merged;
       });
     }
     if (payload.port && payload.settings) {
       setAllSetpoints(prev => {
         const curPort = prev[payload.port] || {};
-        const merged = { ...curPort, ...payload };
+        const merged = {
+          ...curPort,
+          ...payload,
+          settings: {
+            ...(curPort.settings || {}),
+            ...(payload.settings || {})
+          }
+        };
         if (JSON.stringify(curPort) === JSON.stringify(merged)) return prev;
         return { ...prev, [payload.port]: merged };
       });
     }
-    if (payload.system_config) {
+    if (payload.system_config && typeof payload.system_config === 'object') {
       setSystemConfig(prev => {
         const updated = {
           ...prev,
           ...payload.system_config,
           sensor_names: {
             ...DEFAULT_ROOM_NAMES,
+            ...(prev.sensor_names || {}),
             ...(payload.system_config.sensor_names || {})
           }
         };
@@ -1024,11 +1043,16 @@ const ColdStorageSettings = () => {
     const trimmed = (nameToSave || '').trim();
     if (!trimmed) return;
 
+    if (currentRoomPrograms.length >= 20 && !devicePrograms[activeRoom]?.[trimmed]) {
+      setStatusMsg(`Maximum 20 programs limit reached for ${systemConfig.sensor_names[activeRoom] || DEFAULT_ROOM_NAMES[activeRoom]}.`);
+      setTimeout(() => setStatusMsg(''), 3000);
+      return;
+    }
+
     const currentSettings = JSON.parse(JSON.stringify(currentRoomSetpoints.settings || {}));
 
     setDevicePrograms(prev => ({
       ...prev,
-      [trimmed]: currentSettings,
       [activeRoom]: {
         ...(prev[activeRoom] || {}),
         [trimmed]: currentSettings
@@ -1080,7 +1104,7 @@ const ColdStorageSettings = () => {
     }
 
     await fetchDiskStateDirectly();
-    setStatusMsg(`Saved and activated program "${trimmed}" on device for ${systemConfig.sensor_names[activeRoom] || DEFAULT_ROOM_NAMES[activeRoom]}!`);
+    setStatusMsg(`Saved and activated program "${trimmed}" for ${systemConfig.sensor_names[activeRoom] || DEFAULT_ROOM_NAMES[activeRoom]}!`);
     setTimeout(() => setStatusMsg(''), 3000);
   };
 
@@ -1090,14 +1114,11 @@ const ColdStorageSettings = () => {
 
     setDevicePrograms(prev => {
       const copy = { ...prev };
-      delete copy[nameToDelete];
-      Object.keys(copy).forEach(rk => {
-        if (copy[rk] && typeof copy[rk] === 'object') {
-          const rCopy = { ...copy[rk] };
-          delete rCopy[nameToDelete];
-          copy[rk] = rCopy;
-        }
-      });
+      if (copy[activeRoom] && typeof copy[activeRoom] === 'object') {
+        const rCopy = { ...copy[activeRoom] };
+        delete rCopy[nameToDelete];
+        copy[activeRoom] = rCopy;
+      }
       return copy;
     });
 
@@ -1123,7 +1144,7 @@ const ColdStorageSettings = () => {
     const targetId = selectedDevice?.mqttId || selectedDevice?._id || selectedMqttId;
     if (targetId) {
       try {
-        const res = await fetch(`${API_BASE}/api/devices/${targetId}/programs/${encodeURIComponent(nameToDelete)}`, {
+        const res = await fetch(`${API_BASE}/api/devices/${targetId}/programs/${encodeURIComponent(nameToDelete)}?room=${activeRoom}`, {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -1143,7 +1164,7 @@ const ColdStorageSettings = () => {
     }
 
     await fetchDiskStateDirectly();
-    setStatusMsg(`Deleted program "${nameToDelete}" from device.`);
+    setStatusMsg(`Deleted program "${nameToDelete}" from ${systemConfig.sensor_names[activeRoom] || DEFAULT_ROOM_NAMES[activeRoom]}.`);
     setTimeout(() => setStatusMsg(''), 3000);
   };
 

@@ -91,6 +91,8 @@ const getProbeName = (sensorId, deviceMeta, customNames = {}) => {
   const custom =
     customNames?.[upper] ||
     customNames?.[sensorId] ||
+    deviceMeta?.config?.sensor_names?.[upper] ||
+    deviceMeta?.system_config?.sensor_names?.[upper] ||
     deviceMeta?.sensor_names?.[sensorId] ||
     deviceMeta?.sensor_names?.[upper] ||
     deviceMeta?.sensorNames?.[sensorId] ||

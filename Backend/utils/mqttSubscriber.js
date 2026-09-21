@@ -100,141 +100,53 @@ const startMqttSubscriber = () => {
       const isFresh = !isRetain || Boolean(parsedTime && Math.abs(now.getTime() - parsedTime.getTime()) < 3 * 60 * 1000);
       const packetTimestamp = !isRetain ? now : (parsedTime || now);
 
-      // Keep local JSON files synced for immediate API response across all topics
-      try {
-        const fs = require('fs');
-        const path = require('path');
-        const rootDir = path.resolve(__dirname, '../..');
-
-        if (payloadData?.crop_programs && typeof payloadData.crop_programs === 'object') {
-          const cropFile = path.join(rootDir, 'crop_programs.json');
-          let curProgs = {};
-          if (fs.existsSync(cropFile)) {
-            try { curProgs = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
-          }
-          const updated = { ...curProgs, ...payloadData.crop_programs };
-          fs.writeFileSync(cropFile, JSON.stringify(updated, null, 4));
+      // Update MongoDB with incoming telemetry / settings / config / crop programs
+      const deviceId = await resolveDeviceId(mqttId, topic);
+      if (deviceId) {
+        const updateFields = {
+          lastUpdated: packetTimestamp || now
+        };
+        if (isFresh) {
+          updateFields.status = 'online';
         }
 
-        const targetIds = Array.from(new Set([mqttId, mqttId.toLowerCase()].filter(Boolean)));
+        const incomingCrop = payloadData?.crop_name || payloadData?.['Crop Name'] || payloadData?.cropName;
+        const incomingSetup = payloadData?.setup_name || payloadData?.['Setup Name'] || payloadData?.['Setup Details'] || payloadData?.setupName;
+        if (incomingCrop) updateFields.cropName = incomingCrop;
+        if (incomingSetup) updateFields.setupName = incomingSetup;
+
+        if (payloadData?.crop_programs && typeof payloadData.crop_programs === 'object') {
+          updateFields['cropPrograms'] = payloadData.crop_programs;
+        }
 
         if (payloadData?.sensor_setpoints && typeof payloadData.sensor_setpoints === 'object') {
-          for (const id of targetIds) {
-            const setpFile = path.join(rootDir, `setpoints_${id}.json`);
-            let curSetps = {};
-            if (fs.existsSync(setpFile)) {
-              try { curSetps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
-            }
-            const updated = { ...curSetps, ...payloadData.sensor_setpoints };
-            fs.writeFileSync(setpFile, JSON.stringify(updated, null, 4));
-          }
+          updateFields['settings'] = payloadData.sensor_setpoints;
         } else if (payloadData?.port && payloadData?.settings) {
-          for (const id of targetIds) {
-            const setpFile = path.join(rootDir, `setpoints_${id}.json`);
-            let curSetps = {};
-            if (fs.existsSync(setpFile)) {
-              try { curSetps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
-            }
-            if (!curSetps[payloadData.port]) curSetps[payloadData.port] = {};
-            curSetps[payloadData.port] = { ...curSetps[payloadData.port], ...payloadData };
-            fs.writeFileSync(setpFile, JSON.stringify(curSetps, null, 4));
-          }
+          updateFields[`settings.${payloadData.port}`] = payloadData.settings;
         }
 
         if (payloadData?.system_config && typeof payloadData.system_config === 'object') {
-          for (const id of targetIds) {
-            const cfgFile = path.join(rootDir, `config_${id}.json`);
-            let curCfg = {};
-            if (fs.existsSync(cfgFile)) {
-              try { curCfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch (e) { }
-            }
-            const updated = { ...curCfg, ...payloadData.system_config };
-            fs.writeFileSync(cfgFile, JSON.stringify(updated, null, 4));
-          }
-        } else if (payloadData?.upload_frequency_min !== undefined || payloadData?.upload_hours !== undefined || payloadData?.temp_alarm_offset !== undefined) {
-          for (const id of targetIds) {
-            const cfgFile = path.join(rootDir, `config_${id}.json`);
-            let curCfg = {};
-            if (fs.existsSync(cfgFile)) {
-              try { curCfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch (e) { }
-            }
-            const updated = {
-              ...curCfg,
-              ...(payloadData.upload_hours !== undefined ? { upload_hours: payloadData.upload_hours } : {}),
-              ...(payloadData.upload_mins !== undefined ? { upload_mins: payloadData.upload_mins } : {}),
-              ...(payloadData.upload_secs !== undefined ? { upload_secs: payloadData.upload_secs } : {}),
-              ...(payloadData.upload_frequency_min !== undefined ? { upload_frequency_min: payloadData.upload_frequency_min } : {}),
-              ...(payloadData.upload_frequency_sec !== undefined ? { upload_frequency_sec: payloadData.upload_frequency_sec } : {}),
-              ...(payloadData.temp_alarm_offset !== undefined ? { temp_alarm_offset: payloadData.temp_alarm_offset } : {}),
-              ...(payloadData.humi_alarm_offset !== undefined ? { humi_alarm_offset: payloadData.humi_alarm_offset } : {}),
-              ...(payloadData.sensor_names ? { sensor_names: payloadData.sensor_names } : {})
-            };
-            fs.writeFileSync(cfgFile, JSON.stringify(updated, null, 4));
-          }
-        }
-      } catch (fErr) { }
-
-      // Stream setpoint updates real-time via SSE to web dashboard
-      if (topic.includes('/setpoints/')) {
-        const deviceId = await resolveDeviceId(mqttId, topic);
-
-        if (deviceId) {
-          const updateFields = {};
-          if (isFresh) {
-            updateFields.status = 'online';
-            updateFields.lastUpdated = now;
-          }
-          const incomingCrop = payloadData?.crop_name || payloadData?.['Crop Name'] || payloadData?.cropName;
-          const incomingSetup = payloadData?.setup_name || payloadData?.['Setup Name'] || payloadData?.['Setup Details'] || payloadData?.setupName;
-          if (incomingCrop) updateFields.cropName = incomingCrop;
-          if (incomingSetup) updateFields.setupName = incomingSetup;
-
-          if (Object.keys(updateFields).length > 0) {
-            Device.findByIdAndUpdate(deviceId, updateFields).catch(() => { });
-          }
+          updateFields['config'] = payloadData.system_config;
+        } else if (
+          payloadData?.upload_frequency_min !== undefined ||
+          payloadData?.upload_hours !== undefined ||
+          payloadData?.temp_alarm_offset !== undefined ||
+          payloadData?.sensor_names !== undefined
+        ) {
+          const cfgUpdate = {};
+          if (payloadData.upload_hours !== undefined) cfgUpdate.upload_hours = payloadData.upload_hours;
+          if (payloadData.upload_mins !== undefined) cfgUpdate.upload_mins = payloadData.upload_mins;
+          if (payloadData.upload_secs !== undefined) cfgUpdate.upload_secs = payloadData.upload_secs;
+          if (payloadData.upload_frequency_min !== undefined) cfgUpdate.upload_frequency_min = payloadData.upload_frequency_min;
+          if (payloadData.upload_frequency_sec !== undefined) cfgUpdate.upload_frequency_sec = payloadData.upload_frequency_sec;
+          if (payloadData.temp_alarm_offset !== undefined) cfgUpdate.temp_alarm_offset = payloadData.temp_alarm_offset;
+          if (payloadData.humi_alarm_offset !== undefined) cfgUpdate.humi_alarm_offset = payloadData.humi_alarm_offset;
+          if (payloadData.sensor_names !== undefined) cfgUpdate.sensor_names = payloadData.sensor_names;
+          updateFields['config'] = cfgUpdate;
         }
 
-        telemetryEmitter.emit('telemetry', {
-          deviceId: deviceId ? String(deviceId) : null,
-          mqttId,
-          topic,
-          data: payloadData,
-          isRetain,
-          timestamp: packetTimestamp || now
-        });
-
-        // If packet contains sensor_data, queue telemetry document for history
-        if (payloadData && payloadData.sensor_data && typeof payloadData.sensor_data === 'object') {
-          const normData = {};
-          Object.entries(payloadData.sensor_data).forEach(([pKey, pVal]) => {
-            if (!pVal || typeof pVal !== 'object') return;
-            let sKey = null;
-            if (pVal.id !== undefined && pVal.id !== null) sKey = `s${pVal.id}`;
-            else if (pKey.toLowerCase().startsWith('s')) sKey = pKey.toLowerCase();
-            if (sKey) {
-              normData[sKey] = {
-                t: pVal.temp ?? pVal.t ?? null,
-                h: pVal.humi ?? pVal.h ?? null,
-                co2: pVal.co2 ?? null,
-                status: pVal.status || 'OK'
-              };
-            }
-          });
-          if (Object.keys(normData).length > 0) {
-            queueTelemetryDoc(mqttId, {
-              deviceId: deviceId || null,
-              mqttId,
-              topic: `inhydro/${mqttId}/telemetry/live`,
-              data: normData,
-              timestamp: packetTimestamp || now
-            });
-          }
-        }
-        return;
+        Device.findByIdAndUpdate(deviceId, { $set: updateFields }).catch(() => { });
       }
-
-      // Resolve device from DB/cache using mqttId and the topic
-      const deviceId = await resolveDeviceId(mqttId, topic);
 
       // Broadcast in-memory SSE telemetry event IMMEDIATELY for zero-latency streaming with resolved deviceId
       telemetryEmitter.emit('telemetry', {
@@ -262,18 +174,6 @@ const startMqttSubscriber = () => {
 
         if (cachedStatus.status === 'blocked') {
           return; // Device is blocked, ignore telemetry
-        }
-
-        // Update DB online status for fresh packets
-        if (isFresh && (nowMs - cachedStatus.lastUpdate > 10000 || cachedStatus.status !== 'online')) {
-          cachedStatus.lastUpdate = nowMs;
-          cachedStatus.status = 'online';
-          Device.findByIdAndUpdate(deviceId, {
-            status: 'online',
-            lastUpdated: now
-          }).catch(err => {
-            console.error(`[MQTT Subscriber] Failed to update device online status: ${err.message}`);
-          });
         }
       }
 

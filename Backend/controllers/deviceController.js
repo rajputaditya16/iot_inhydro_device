@@ -30,15 +30,6 @@ exports.getDevices = async (req, res) => {
     const devices = await Device.find(query).sort({ createdAt: -1 }).lean();
     const now = new Date();
 
-    const fs = require('fs');
-    const path = require('path');
-    const rootDir = path.resolve(__dirname, '../..');
-    const cropFile = path.join(rootDir, 'crop_programs.json');
-    let localCropPrograms = {};
-    if (fs.existsSync(cropFile)) {
-      try { localCropPrograms = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
-    }
-
     const updatedDevices = devices.map((device) => {
       const mqttId = (device.mqttId || '').trim();
       const lastSeenTime = device.lastUpdated || null;
@@ -50,19 +41,20 @@ exports.getDevices = async (req, res) => {
         status = isOnline ? 'online' : 'offline';
       }
 
-      const devId = (mqttId || (device?._id ? device._id.toString() : '')).toString();
-      const setpFile = devId ? path.join(rootDir, `setpoints_${devId}.json`) : null;
-      let localSetpoints = {};
-      if (setpFile && fs.existsSync(setpFile)) {
-        try { localSetpoints = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
-      }
+      const progs = (device.cropPrograms && typeof device.cropPrograms === 'object') ? device.cropPrograms : {};
+      const setps = (device.settings && typeof device.settings === 'object') ? device.settings : {};
+      const cfg = (device.config && typeof device.config === 'object') ? device.config : {};
 
       return {
         ...device,
         status,
-        crop_programs: localCropPrograms,
-        saved_programs: localCropPrograms,
-        sensor_setpoints: localSetpoints,
+        crop_programs: progs,
+        saved_programs: progs,
+        cropPrograms: progs,
+        sensor_setpoints: setps,
+        settings: setps,
+        system_config: cfg,
+        config: cfg,
         latestPacketTime: lastSeenTime
       };
     });
@@ -228,109 +220,46 @@ exports.pushDeviceConfig = async (req, res) => {
 
       // Synchronize changes to local files immediately so REST API returns updated counts & setpoints instantly
       try {
-        const fs = require('fs');
-        const path = require('path');
-        const rootDir = path.resolve(__dirname, '../..');
-        const cropFile = path.join(rootDir, 'crop_programs.json');
-        const devId = (deviceRoot || '').toString();
-        const setpFile = devId ? path.join(rootDir, `setpoints_${devId}.json`) : null;
-
-        if (payload.action === 'save_program' && payload.program_name) {
-          let progs = {};
-          if (fs.existsSync(cropFile)) {
-            try { progs = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
-          }
-          progs[payload.program_name] = payload.settings || {};
-          fs.writeFileSync(cropFile, JSON.stringify(progs, null, 4));
-
-          let setps = {};
-          if (fs.existsSync(setpFile)) {
-            try { setps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
-          }
-          const r = payload.room || payload.port || 'S1';
-          if (!setps[r]) setps[r] = {};
-          setps[r].program_name = payload.program_name;
-          if (payload.settings) setps[r].settings = payload.settings;
-          fs.writeFileSync(setpFile, JSON.stringify(setps, null, 4));
-        } else if (payload.action === 'delete_program' && payload.program_name) {
-          let progs = {};
-          if (fs.existsSync(cropFile)) {
-            try { progs = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
-          }
-          delete progs[payload.program_name];
-          Object.keys(progs).forEach(rk => {
-            if (progs[rk] && typeof progs[rk] === 'object' && progs[rk][payload.program_name]) {
-              delete progs[rk][payload.program_name];
+        if (device) {
+          const updateFields = {};
+          if (payload.action === 'save_program' && payload.program_name) {
+            const r = payload.room || payload.port || 'S1';
+            const curProgs = { ...(device.cropPrograms || {}) };
+            if (!curProgs[r] || typeof curProgs[r] !== 'object') curProgs[r] = {};
+            curProgs[r][payload.program_name] = payload.settings || {};
+            updateFields['cropPrograms'] = curProgs;
+            updateFields[`settings.${r}.program_name`] = payload.program_name;
+            if (payload.settings) updateFields[`settings.${r}.settings`] = payload.settings;
+          } else if (payload.action === 'delete_program' && payload.program_name) {
+            const r = payload.room || payload.port;
+            const curProgs = { ...(device.cropPrograms || {}) };
+            if (r && curProgs[r]) {
+              delete curProgs[r][payload.program_name];
+            } else {
+              ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'].forEach(k => {
+                if (curProgs[k]) delete curProgs[k][payload.program_name];
+              });
             }
-          });
-          fs.writeFileSync(cropFile, JSON.stringify(progs, null, 4));
+            updateFields['cropPrograms'] = curProgs;
+          } else if (payload.action === 'apply_program' && payload.program_name) {
+            const r = payload.room || payload.port || 'S1';
+            updateFields[`settings.${r}.program_name`] = payload.program_name;
+            if (payload.settings) updateFields[`settings.${r}.settings`] = payload.settings;
+          } else if (payload.port && payload.settings) {
+            updateFields[`settings.${payload.port}`] = payload.settings;
+          } else if (payload.sensor_setpoints) {
+            updateFields['settings'] = payload.sensor_setpoints;
+          }
 
-          let setps = {};
-          if (fs.existsSync(setpFile)) {
-            try { setps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
+          if (payload.system_config && typeof payload.system_config === 'object') {
+            updateFields['config'] = payload.system_config;
           }
-          Object.keys(setps).forEach(rk => {
-            if (setps[rk]?.program_name === payload.program_name) {
-              setps[rk].program_name = 'Default Program';
-            }
-          });
-          fs.writeFileSync(setpFile, JSON.stringify(setps, null, 4));
-        } else if (payload.action === 'apply_program' && payload.program_name) {
-          let setps = {};
-          if (fs.existsSync(setpFile)) {
-            try { setps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
-          }
-          const r = payload.room || payload.port || 'S1';
-          if (!setps[r]) setps[r] = {};
-          setps[r].program_name = payload.program_name;
-          if (payload.settings) setps[r].settings = payload.settings;
-          fs.writeFileSync(setpFile, JSON.stringify(setps, null, 4));
-        } else if (payload.port && payload.settings) {
-          let setps = {};
-          if (fs.existsSync(setpFile)) {
-            try { setps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
-          }
-          const r = payload.port;
-          setps[r] = { ...(setps[r] || {}), ...payload };
-          fs.writeFileSync(setpFile, JSON.stringify(setps, null, 4));
-
-          const progName = payload.program_name || setps[r]?.program_name;
-          if (progName && progName !== 'Default Program' && fs.existsSync(cropFile)) {
-            try {
-              let progs = JSON.parse(fs.readFileSync(cropFile, 'utf8'));
-              progs[progName] = payload.settings;
-              if (progs[r] && typeof progs[r] === 'object') {
-                progs[r][progName] = payload.settings;
-              }
-              fs.writeFileSync(cropFile, JSON.stringify(progs, null, 4));
-            } catch (e) { }
-          }
-        }
-
-        // Save system_config to config_<devId>.json on disk
-        const cfgFile = devId ? path.join(rootDir, `config_${devId}.json`) : null;
-        if (cfgFile) {
-          let curCfg = {};
-          if (fs.existsSync(cfgFile)) {
-            try { curCfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch (e) { }
-          }
-          const incomingSysConfig = { ...(payload.system_config || {}) };
-          if (payload.upload_frequency_min !== undefined) incomingSysConfig.upload_frequency_min = payload.upload_frequency_min;
-          if (payload.upload_hours !== undefined) incomingSysConfig.upload_hours = payload.upload_hours;
-          if (payload.upload_mins !== undefined) incomingSysConfig.upload_mins = payload.upload_mins;
-          if (payload.upload_secs !== undefined) incomingSysConfig.upload_secs = payload.upload_secs;
-          if (payload.upload_frequency_sec !== undefined) incomingSysConfig.upload_frequency_sec = payload.upload_frequency_sec;
-          if (payload.temp_alarm_offset !== undefined) incomingSysConfig.temp_alarm_offset = payload.temp_alarm_offset;
-          if (payload.humi_alarm_offset !== undefined) incomingSysConfig.humi_alarm_offset = payload.humi_alarm_offset;
-          if (payload.sensor_names !== undefined) incomingSysConfig.sensor_names = payload.sensor_names;
-
-          if (Object.keys(incomingSysConfig).length > 0) {
-            const mergedCfg = { ...curCfg, ...incomingSysConfig };
-            fs.writeFileSync(cfgFile, JSON.stringify(mergedCfg, null, 4));
+          if (Object.keys(updateFields).length > 0) {
+            await Device.findByIdAndUpdate(device._id, { $set: updateFields }).catch(() => { });
           }
         }
       } catch (fErr) {
-        console.error('File sync in pushDeviceConfig error:', fErr);
+        console.error('DB update in pushDeviceConfig error:', fErr);
       }
 
       if (device && (device.deviceType === 'office_control' || device.deviceType === 'system2')) {
@@ -994,36 +923,32 @@ exports.streamTelemetry = (req, res) => {
     }).catch(() => { });
   }
 
-  // Immediately send cached local setpoints & crop programs if available
+  // Immediately send cached DB setpoints & crop programs if available
   try {
-    const fs = require('fs');
-    const path = require('path');
-    const rootDir = path.resolve(__dirname, '../..');
-    const cropFile = path.join(rootDir, 'crop_programs.json');
-    let localCropPrograms = {};
-    if (fs.existsSync(cropFile)) {
-      try { localCropPrograms = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
-    }
-    const devId = (filterMqttId || filterDeviceId || '').toString();
-    const setpFile = devId ? path.join(rootDir, `setpoints_${devId}.json`) : null;
-    let localSetpoints = {};
-    if (setpFile && fs.existsSync(setpFile)) {
-      try { localSetpoints = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
-    }
-
-    if (Object.keys(localCropPrograms).length > 0 || Object.keys(localSetpoints).length > 0) {
-      const initPayload = {
-        deviceId: filterDeviceId || null,
-        mqttId: filterMqttId || null,
-        topic: filterMqttId ? `inhydro/${filterMqttId}/setpoints/current` : '',
-        data: {
-          crop_programs: localCropPrograms,
-          saved_programs: localCropPrograms,
-          sensor_setpoints: localSetpoints,
-          timestamp: new Date().toISOString()
+    const lookupKey = filterDeviceId || filterMqttId;
+    if (lookupKey) {
+      resolveDeviceByIdOrMqtt(lookupKey).then(dev => {
+        if (dev && !isClosed) {
+          const progs = dev.cropPrograms || {};
+          const setps = dev.settings || {};
+          const cfg = dev.config || {};
+          if (Object.keys(progs).length > 0 || Object.keys(setps).length > 0 || Object.keys(cfg).length > 0) {
+            const initPayload = {
+              deviceId: dev._id ? dev._id.toString() : null,
+              mqttId: dev.mqttId || null,
+              topic: dev.mqttId ? `inhydro/${dev.mqttId}/setpoints/current` : '',
+              data: {
+                crop_programs: progs,
+                saved_programs: progs,
+                sensor_setpoints: setps,
+                system_config: cfg,
+                timestamp: new Date().toISOString()
+              }
+            };
+            res.write(`data: ${JSON.stringify(initPayload)}\n\n`);
+          }
         }
-      };
-      res.write(`data: ${JSON.stringify(initPayload)}\n\n`);
+      }).catch(() => { });
     }
   } catch (e) { }
 
@@ -1088,17 +1013,22 @@ exports.streamTelemetry = (req, res) => {
 };
 
 // @route   GET /api/devices/:id/programs
-// @desc    Directly read saved crop programs from crop_programs.json on device filesystem
+// @desc    Read saved crop programs partitioned by room (S1..S7)
 exports.getCropPrograms = async (req, res) => {
   try {
     const fs = require('fs');
     const path = require('path');
     const cropFile = path.resolve(__dirname, '../../crop_programs.json');
-    let progs = {};
-    if (fs.existsSync(cropFile)) {
-      try { progs = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
+    let progs = { S1: {}, S2: {}, S3: {}, S4: {}, S5: {}, S6: {}, S7: {} };
+    
+    // Check DB first
+    const device = await resolveDeviceByIdOrMqtt(req.params.id);
+    if (device?.cropPrograms && typeof device.cropPrograms === 'object') {
+      progs = { ...progs, ...device.cropPrograms };
     }
-    const count = Object.keys(progs).filter(k => !['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'].includes(k)).length;
+
+    const room = (req.query.room || '').toUpperCase();
+    const count = room && progs[room] ? Object.keys(progs[room]).length : Object.values(progs).reduce((acc, r) => acc + (r && typeof r === 'object' ? Object.keys(r).length : 0), 0);
     res.status(200).json({ success: true, count, data: progs });
   } catch (err) {
     console.error('getCropPrograms error:', err);
@@ -1107,41 +1037,48 @@ exports.getCropPrograms = async (req, res) => {
 };
 
 // @route   POST /api/devices/:id/programs
-// @desc    Directly save a program to crop_programs.json and publish to MQTT
+// @desc    Save a room-specific program (max 20 programs per room, max 10 stages each) and publish to MQTT
 exports.saveCropProgram = async (req, res) => {
   try {
-    const fs = require('fs');
-    const path = require('path');
-    const cropFile = path.resolve(__dirname, '../../crop_programs.json');
     const { program_name, name, settings, room, port } = req.body;
     const pName = (program_name || name || '').trim();
     if (!pName) {
       return res.status(400).json({ success: false, message: 'Program name required' });
     }
-    let progs = {};
-    if (fs.existsSync(cropFile)) {
-      try { progs = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
-    }
-    const rKey = room || port || 'S1';
-    progs[pName] = settings || {};
-    if (!progs[rKey] || typeof progs[rKey] !== 'object') progs[rKey] = {};
-    progs[rKey][pName] = settings || {};
-    fs.writeFileSync(cropFile, JSON.stringify(progs, null, 4));
-
-    // Update setpoints file for the device
+    const rKey = (room || port || 'S1').toUpperCase();
+    
     const device = await resolveDeviceByIdOrMqtt(req.params.id);
     const devId = (device?.mqttId || (device?._id ? device._id.toString() : req.params.id)).toString();
-    const setpFile = devId ? path.resolve(__dirname, `../../setpoints_${devId}.json`) : null;
-    let setps = {};
-    if (setpFile && fs.existsSync(setpFile)) {
-      try { setps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
+    
+    let progs = { S1: {}, S2: {}, S3: {}, S4: {}, S5: {}, S6: {}, S7: {} };
+    if (device?.cropPrograms && typeof device.cropPrograms === 'object') {
+      progs = { ...progs, ...device.cropPrograms };
     }
-    if (!setps[rKey]) setps[rKey] = {};
-    setps[rKey].program_name = pName;
-    if (settings) setps[rKey].settings = settings;
-    if (setpFile) fs.writeFileSync(setpFile, JSON.stringify(setps, null, 4));
+    if (!progs[rKey] || typeof progs[rKey] !== 'object') progs[rKey] = {};
 
-    // Broadcast over MQTT
+    // Enforce max 20 programs per room
+    const currentRoomProgKeys = Object.keys(progs[rKey]);
+    if (currentRoomProgKeys.length >= 20 && !progs[rKey][pName]) {
+      return res.status(400).json({ success: false, message: `Maximum 20 programs limit reached for ${rKey}` });
+    }
+
+    progs[rKey][pName] = settings || {};
+
+    if (device) {
+      const curSetps = { ...(device.settings || {}) };
+      if (!curSetps[rKey]) curSetps[rKey] = {};
+      curSetps[rKey].program_name = pName;
+      if (settings) curSetps[rKey].settings = settings;
+
+      await Device.findByIdAndUpdate(device._id, {
+        $set: {
+          cropPrograms: progs,
+          settings: curSetps
+        }
+      }).catch(() => { });
+    }
+
+    // Broadcast over MQTT strictly with room/port specified
     const mqttPayload = { action: 'save_program', program_name: pName, room: rKey, port: rKey, settings };
     const targetMqttId = (device?.mqttId || req.params.id || devId).toString();
     await publishToDevice(`inhydro/${targetMqttId}/setpoints/update`, mqttPayload);
@@ -1149,8 +1086,8 @@ exports.saveCropProgram = async (req, res) => {
       await publishToDevice(`inhydro/${targetMqttId.toLowerCase()}/setpoints/update`, mqttPayload);
     }
 
-    const count = Object.keys(progs).filter(k => !['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'].includes(k)).length;
-    res.status(200).json({ success: true, count, data: progs, message: `Program "${pName}" saved successfully` });
+    const count = Object.keys(progs[rKey]).length;
+    res.status(200).json({ success: true, count, data: progs, message: `Program "${pName}" saved for ${rKey}` });
   } catch (err) {
     console.error('saveCropProgram error:', err);
     res.status(500).json({ success: false, message: err.message });
@@ -1158,53 +1095,57 @@ exports.saveCropProgram = async (req, res) => {
 };
 
 // @route   DELETE /api/devices/:id/programs/:programName
-// @desc    Directly delete a program from crop_programs.json and publish to MQTT
+// @desc    Delete a program from room-specific library and publish to MQTT
 exports.deleteCropProgram = async (req, res) => {
   try {
-    const fs = require('fs');
-    const path = require('path');
-    const cropFile = path.resolve(__dirname, '../../crop_programs.json');
     const pName = decodeURIComponent(req.params.programName || '').trim();
     if (!pName) {
       return res.status(400).json({ success: false, message: 'Program name required' });
     }
-    let progs = {};
-    if (fs.existsSync(cropFile)) {
-      try { progs = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
-    }
-    delete progs[pName];
-    ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'].forEach(rk => {
-      if (progs[rk] && typeof progs[rk] === 'object' && progs[rk][pName]) {
-        delete progs[rk][pName];
-      }
-    });
-    fs.writeFileSync(cropFile, JSON.stringify(progs, null, 4));
+    const rKey = (req.query.room || req.body?.room || req.query.port || req.body?.port || '').toUpperCase();
 
-    // Update setpoints file
     const device = await resolveDeviceByIdOrMqtt(req.params.id);
     const devId = (device?.mqttId || (device?._id ? device._id.toString() : req.params.id)).toString();
-    const setpFile = devId ? path.resolve(__dirname, `../../setpoints_${devId}.json`) : null;
-    let setps = {};
-    if (setpFile && fs.existsSync(setpFile)) {
-      try { setps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
-      ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'].forEach(rk => {
-        if (setps[rk]?.program_name === pName) {
-          setps[rk].program_name = 'Default Program';
+
+    let progs = { S1: {}, S2: {}, S3: {}, S4: {}, S5: {}, S6: {}, S7: {} };
+    if (device?.cropPrograms && typeof device.cropPrograms === 'object') {
+      progs = { ...progs, ...device.cropPrograms };
+    }
+
+    if (rKey && progs[rKey] && typeof progs[rKey] === 'object') {
+      delete progs[rKey][pName];
+    } else {
+      ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'].forEach(k => {
+        if (progs[k] && typeof progs[k] === 'object') delete progs[k][pName];
+      });
+      delete progs[pName];
+    }
+
+    if (device) {
+      const curSetps = { ...(device.settings || {}) };
+      const roomsToCheck = rKey ? [rKey] : ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'];
+      roomsToCheck.forEach(k => {
+        if (curSetps[k]?.program_name === pName) {
+          curSetps[k].program_name = 'Default Program';
         }
       });
-      fs.writeFileSync(setpFile, JSON.stringify(setps, null, 4));
+      await Device.findByIdAndUpdate(device._id, {
+        $set: {
+          cropPrograms: progs,
+          settings: curSetps
+        }
+      }).catch(() => { });
     }
 
     // Broadcast over MQTT
-    const mqttPayload = { action: 'delete_program', program_name: pName };
+    const mqttPayload = { action: 'delete_program', program_name: pName, room: rKey || undefined };
     const targetMqttId = (device?.mqttId || req.params.id || devId).toString();
     await publishToDevice(`inhydro/${targetMqttId}/setpoints/update`, mqttPayload);
     if (targetMqttId !== targetMqttId.toLowerCase()) {
       await publishToDevice(`inhydro/${targetMqttId.toLowerCase()}/setpoints/update`, mqttPayload);
     }
 
-    const count = Object.keys(progs).filter(k => !['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'].includes(k)).length;
-    res.status(200).json({ success: true, count, data: progs, message: `Program "${pName}" deleted successfully` });
+    res.status(200).json({ success: true, data: progs, message: `Program "${pName}" deleted successfully` });
   } catch (err) {
     console.error('deleteCropProgram error:', err);
     res.status(500).json({ success: false, message: err.message });
@@ -1212,36 +1153,36 @@ exports.deleteCropProgram = async (req, res) => {
 };
 
 // @route   POST /api/devices/:id/programs/:programName/apply
-// @desc    Apply a saved program to a room
+// @desc    Apply a saved program to a specific room
 exports.applyCropProgram = async (req, res) => {
   try {
-    const fs = require('fs');
-    const path = require('path');
-    const cropFile = path.resolve(__dirname, '../../crop_programs.json');
     const pName = decodeURIComponent(req.params.programName || '').trim();
     const { room, port } = req.body;
-    const rKey = room || port || 'S1';
+    const rKey = (room || port || 'S1').toUpperCase();
     
-    let progs = {};
-    if (fs.existsSync(cropFile)) {
-      try { progs = JSON.parse(fs.readFileSync(cropFile, 'utf8')); } catch (e) { }
-    }
-    const progSettings = progs[pName] || progs[rKey]?.[pName] || req.body.settings;
-    if (!progSettings) {
-      return res.status(404).json({ success: false, message: 'Program not found in device library' });
-    }
-
     const device = await resolveDeviceByIdOrMqtt(req.params.id);
     const devId = (device?.mqttId || (device?._id ? device._id.toString() : req.params.id)).toString();
-    const setpFile = devId ? path.resolve(__dirname, `../../setpoints_${devId}.json`) : null;
-    let setps = {};
-    if (setpFile && fs.existsSync(setpFile)) {
-      try { setps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
+
+    let progs = {};
+    if (device?.cropPrograms && typeof device.cropPrograms === 'object') {
+      progs = device.cropPrograms;
     }
-    if (!setps[rKey]) setps[rKey] = {};
-    setps[rKey].program_name = pName;
-    setps[rKey].settings = progSettings;
-    if (setpFile) fs.writeFileSync(setpFile, JSON.stringify(setps, null, 4));
+    const progSettings = progs[rKey]?.[pName] || progs[pName] || req.body.settings;
+    if (!progSettings) {
+      return res.status(404).json({ success: false, message: `Program "${pName}" not found for ${rKey}` });
+    }
+
+    let curSetps = {};
+    if (device) {
+      curSetps = { ...(device.settings || {}) };
+      if (!curSetps[rKey]) curSetps[rKey] = {};
+      curSetps[rKey].program_name = pName;
+      curSetps[rKey].settings = progSettings;
+
+      await Device.findByIdAndUpdate(device._id, {
+        $set: { settings: curSetps }
+      }).catch(() => { });
+    }
 
     // Broadcast over MQTT
     const mqttPayload = { action: 'apply_program', program_name: pName, room: rKey, port: rKey, settings: progSettings };
@@ -1251,7 +1192,7 @@ exports.applyCropProgram = async (req, res) => {
       await publishToDevice(`inhydro/${targetMqttId.toLowerCase()}/setpoints/update`, mqttPayload);
     }
 
-    res.status(200).json({ success: true, setpoints: setps, message: `Program "${pName}" applied to ${rKey}` });
+    res.status(200).json({ success: true, setpoints: curSetps, message: `Program "${pName}" applied to ${rKey}` });
   } catch (err) {
     console.error('applyCropProgram error:', err);
     res.status(500).json({ success: false, message: err.message });
@@ -1259,23 +1200,12 @@ exports.applyCropProgram = async (req, res) => {
 };
 
 // @route   GET /api/devices/:id/setpoints-json
-// @desc    Directly read setpoints and system_config from disk
+// @desc    Read setpoints and system_config strictly from MongoDB
 exports.getSetpointsJson = async (req, res) => {
   try {
-    const fs = require('fs');
-    const path = require('path');
     const device = await resolveDeviceByIdOrMqtt(req.params.id);
-    const devId = (device?.mqttId || (device?._id ? device._id.toString() : req.params.id)).toString();
-    const setpFile = devId ? path.resolve(__dirname, `../../setpoints_${devId}.json`) : null;
-    const cfgFile = devId ? path.resolve(__dirname, `../../config_${devId}.json`) : null;
-    let setps = {};
-    let cfg = {};
-    if (setpFile && fs.existsSync(setpFile)) {
-      try { setps = JSON.parse(fs.readFileSync(setpFile, 'utf8')); } catch (e) { }
-    }
-    if (cfgFile && fs.existsSync(cfgFile)) {
-      try { cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch (e) { }
-    }
+    let setps = device?.settings || {};
+    let cfg = device?.config || {};
     res.status(200).json({ success: true, data: setps, system_config: cfg });
   } catch (err) {
     console.error('getSetpointsJson error:', err);
