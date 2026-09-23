@@ -335,18 +335,6 @@ def load_crop_programs():
         if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
             crop_programs[skey] = {}
 
-    # Migrate any legacy top-level keys to S1
-    legacy_keys = [k for k in list(crop_programs.keys()) if k not in SENSOR_MAP and isinstance(crop_programs[k], dict) and not k.startswith("Setting ") and not k.startswith("Stage ")]
-    if legacy_keys:
-        for lk in legacy_keys:
-            if lk not in crop_programs["S1"]:
-                crop_programs["S1"][lk] = crop_programs[lk]
-            del crop_programs[lk]
-        try:
-            with open(CROP_PROGRAMS_FILE, 'w') as f:
-                json.dump(crop_programs, f, indent=4)
-        except Exception: pass
-
 def get_room_crop_programs(skey=None):
     load_crop_programs()
     if not skey:
@@ -547,41 +535,35 @@ def broadcast_current_state():
         sensor_data_dict = {}
         for skey, r_data in norm_rooms.items():
             sensor_data_dict[skey] = {
-                "t": r_data["temp"],
-                "h": r_data["humi"],
-                "co2": r_data["co2"],
                 "temp": r_data["temp"],
                 "humi": r_data["humi"],
+                "co2": r_data["co2"],
                 "status": r_data["status"]
             }
 
-        state_payload = {
+        live_telemetry = {
             "device_id": DEVICE_NAME,
             "timestamp": ts_str,
             "source": "device",
-            "rooms": norm_rooms,
             "sensor_data": sensor_data_dict,
             "relay_states": { str(k): bool(v) for k, v in relay_states.items() },
-            "relays": { str(k): bool(v) for k, v in relay_states.items() },
             "room_paused_states": { str(k): bool(v) for k, v in room_paused_states.items() },
-            "active_warnings": list(active_warnings) if 'active_warnings' in globals() else [],
-            "S1": sensor_data_dict.get("S1"),
-            "S2": sensor_data_dict.get("S2"),
-            "S3": sensor_data_dict.get("S3"),
-            "S4": sensor_data_dict.get("S4"),
-            "S5": sensor_data_dict.get("S5"),
-            "S6": sensor_data_dict.get("S6"),
-            "S7": sensor_data_dict.get("S7"),
+            "active_warnings": list(active_warnings) if 'active_warnings' in globals() else []
+        }
+
+        state_payload = {
+            **live_telemetry,
+            "rooms": norm_rooms,
+            "relays": { str(k): bool(v) for k, v in relay_states.items() },
             "sensor_setpoints": sensor_setpoints,
             "system_config": system_config,
             "crop_programs": crop_programs
         }
         try:
+            # Full configuration & program state (retained snapshot for web dashboard)
             control_client.publish(f"inhydro/{DEVICE_NAME}/state", json.dumps(state_payload), retain=True)
-            control_client.publish(f"inhydro/{DEVICE_NAME}/setpoints/current", json.dumps(state_payload), retain=True)
-            control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", json.dumps(state_payload), retain=False)
-            if DEVICE_NAME != DEVICE_NAME.lower():
-                control_client.publish(f"inhydro/{DEVICE_NAME.lower()}/telemetry/live", json.dumps(state_payload), retain=False)
+            # Ultra-lightweight < 1 KB live telemetry stream for time-series database logging
+            control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", json.dumps(live_telemetry), retain=False)
         except Exception as e:
             print(f"[BROADCAST ERROR] {e}")
 
@@ -1798,9 +1780,9 @@ def on_control_message(client, userdata, msg):
                 sp = get_setpoints(skey)
                 p_name = sp.get("program_name")
                 if p_name and p_name != "Default Program" and sp.get("settings"):
-                    crop_programs[p_name] = copy.deepcopy(sp["settings"])
-                    if skey in crop_programs and isinstance(crop_programs[skey], dict):
-                        crop_programs[skey][p_name] = copy.deepcopy(sp["settings"])
+                    if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
+                        crop_programs[skey] = {}
+                    crop_programs[skey][p_name] = copy.deepcopy(sp["settings"])
             save_crop_programs()
             save_setpoints()
             sched_clean_snapshot = copy.deepcopy(sensor_setpoints)
@@ -1834,7 +1816,7 @@ def on_control_connect(client, userdata, flags, rc=0, properties=None, *args, **
     global is_mqtt_connected
     if rc == 0:
         is_mqtt_connected = True
-        for dev_id in list(set([DEVICE_NAME, DEVICE_NAME.lower(), "cold_room"])):
+        for dev_id in list(set([DEVICE_NAME, DEVICE_NAME.lower()])):
             client.subscribe(f"inhydro/{dev_id}/setpoints/update")
             client.subscribe(f"inhydro/{dev_id}/config/update")
             client.subscribe(f"inhydro/{dev_id}/command")
@@ -1862,7 +1844,7 @@ try:
 except Exception as e: pass
 
 def mqtt_heartbeat_worker():
-    """Maintains 24/7 live MQTT connection and sends alive heartbeat every 10s so web can push setpoints anytime."""
+    """Maintains 24/7 live MQTT connection and sends alive heartbeat strictly for this device."""
     time.sleep(5)
     while running:
         try:
@@ -1878,11 +1860,6 @@ def mqtt_heartbeat_worker():
                     "time": now_dt.strftime("%Y-%m-%d %H:%M:%S")
                 })
                 control_client.publish(f"inhydro/{DEVICE_NAME}/heartbeat", hb_payload, retain=False)
-                if DEVICE_NAME != DEVICE_NAME.lower():
-                    control_client.publish(f"inhydro/{DEVICE_NAME.lower()}/heartbeat", hb_payload, retain=False)
-                for fallback_id in ["cold_room", "cold_storage", "control123"]:
-                    if DEVICE_NAME.lower() != fallback_id:
-                        control_client.publish(f"inhydro/{fallback_id}/heartbeat", hb_payload, retain=False)
             elif 'control_client' in globals() and control_client and not control_client.is_connected():
                 try:
                     control_client.reconnect()
@@ -2460,28 +2437,21 @@ def save_local_telemetry():
             if d and d.get('status') == 'OK':
                 norm_rooms[skey] = {
                     "id": idx + 1,
-                    "t": d.get('temp', 0.0),
-                    "h": d.get('humi', 0.0),
+                    "temp": d.get('temp', 0.0),
+                    "humi": d.get('humi', 0.0),
                     "co2": d.get('co2'),
                     "status": "OK"
                 }
             elif d and d.get('status') == 'ERROR':
-                norm_rooms[skey] = {"id": idx + 1, "t": 0.0, "h": 0.0, "co2": None, "status": "ERROR"}
+                norm_rooms[skey] = {"id": idx + 1, "temp": 0.0, "humi": 0.0, "co2": None, "status": "ERROR"}
             else:
-                norm_rooms[skey] = {"id": idx + 1, "t": 0.0, "h": 0.0, "co2": None, "status": "OFFLINE"}
+                norm_rooms[skey] = {"id": idx + 1, "temp": 0.0, "humi": 0.0, "co2": None, "status": "OFFLINE"}
 
         record = {
             "device": DEVICE_NAME,
             "device_id": DEVICE_NAME,
             "timestamp": ts_str,
             "sensor_data": norm_rooms,
-            "S1": norm_rooms.get("S1"),
-            "S2": norm_rooms.get("S2"),
-            "S3": norm_rooms.get("S3"),
-            "S4": norm_rooms.get("S4"),
-            "S5": norm_rooms.get("S5"),
-            "S6": norm_rooms.get("S6"),
-            "S7": norm_rooms.get("S7"),
             "relay_states": dict(relay_states)
         }
 
@@ -2569,8 +2539,6 @@ def sync_offline_data_worker():
                     try:
                         batch_json = json.dumps(batch)
                         control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", batch_json, qos=1)
-                        if DEVICE_NAME != DEVICE_NAME.lower():
-                            control_client.publish(f"inhydro/{DEVICE_NAME.lower()}/telemetry/live", batch_json, qos=1)
                         time.sleep(0.1)
                     except Exception as pe:
                         print(f"[OfflineSync] Batch publish error: {pe}")
@@ -3906,7 +3874,6 @@ def edit_stagename():
         if act_prog and act_prog != "Default Program":
             load_crop_programs()
             st_content = copy.deepcopy(sp.get("settings", {}))
-            crop_programs[act_prog] = st_content
             if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
                 crop_programs[skey] = {}
             crop_programs[skey][act_prog] = st_content
@@ -3935,7 +3902,6 @@ def on_sdate_changed(val):
     if act_prog and act_prog != "Default Program":
         load_crop_programs()
         st_content = copy.deepcopy(sp.get("settings", {}))
-        crop_programs[act_prog] = st_content
         if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
             crop_programs[skey] = {}
         crop_programs[skey][act_prog] = st_content
@@ -3972,7 +3938,6 @@ def on_edate_changed(val):
     if act_prog and act_prog != "Default Program":
         load_crop_programs()
         st_content = copy.deepcopy(sp.get("settings", {}))
-        crop_programs[act_prog] = st_content
         if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
             crop_programs[skey] = {}
         crop_programs[skey][act_prog] = st_content
@@ -4030,7 +3995,6 @@ def edit_pon():
         if act_prog and act_prog != "Default Program":
             load_crop_programs()
             st_content = copy.deepcopy(sp.get("settings", {}))
-            crop_programs[act_prog] = st_content
             if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
                 crop_programs[skey] = {}
             crop_programs[skey][act_prog] = st_content
@@ -4061,7 +4025,6 @@ def edit_poff():
         if act_prog and act_prog != "Default Program":
             load_crop_programs()
             st_content = copy.deepcopy(sp.get("settings", {}))
-            crop_programs[act_prog] = st_content
             if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
                 crop_programs[skey] = {}
             crop_programs[skey][act_prog] = st_content
@@ -4088,7 +4051,6 @@ def save_current_schedule_to_file(show_feedback=True):
         if act_prog and act_prog != "Default Program":
             load_crop_programs()
             st_content = copy.deepcopy(sp.get("settings", {}))
-            crop_programs[act_prog] = st_content
             if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
                 crop_programs[skey] = {}
             crop_programs[skey][act_prog] = st_content
@@ -4317,7 +4279,6 @@ def edit_slot_popup(idx):
                 if act_prog and act_prog != "Default Program":
                     load_crop_programs()
                     st_content = copy.deepcopy(sp.get("settings", {}))
-                    crop_programs[act_prog] = st_content
                     if skey not in crop_programs or not isinstance(crop_programs[skey], dict):
                         crop_programs[skey] = {}
                     crop_programs[skey][act_prog] = st_content

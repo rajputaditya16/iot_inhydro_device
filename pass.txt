@@ -1,1 +1,76 @@
 Inhydro@5598
+
+
+
+========================================================================================================================
+                                     INHYDRO CENTRALIZED CLOUD PLATFORM
+========================================================================================================================
+  [ React Admin Web UI ]
+       │
+       │ 1. Uploads 'coldroom.pyc' (v2.1.5)
+       │    Selects Type: [ cold_storage ] | Target: [ DEV_122 or ALL ]
+       ▼
+  [ Node.js Backend Engine ] ──────────────► [ MongoDB Database ]
+       │  • Calculates SHA-256 Hash               • Saves Release Metadata
+       │  • Saves file to /releases/              • Tracks Live Deployment Matrix
+       │
+       ├────────────────────────────────────────────────────────┐
+       │ (Step 2: MQTT Control Trigger)                         │ (Step 3: Payload URL)
+       ▼                                                        ▼
+  [ MQTT Broker (147.93.106.142) ]                       [ HTTPS Static / CDN Server ]
+  Topic: inhydro/control122/ota/update                   URL: https://api.inhydro.in/releases/coldroom_v2.1.5.pyc
+========================================================================================================================
+                                                  NETWORK TRANSPORT
+                                       (Local Farm Wi-Fi Router + 4G SIM)
+========================================================================================================================
+                                                        │
+                                                        ▼
+========================================================================================================================
+                                     RASPBERRY PI / EDGE DEVICE (Target: control122)
+========================================================================================================================
+
+    ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+    │ 1. IDENTITY GATEKEEPER (Zero-Trust Validation)                                               │
+    │    • Reads local /home/pi/.../device_id.txt                                                  │
+    │    • Compares: TargetType ("cold_storage") == LocalType ("cold_storage")?  ──► [ MATCH ]     │
+    │    • Compares: TargetID ("control122")    == LocalID ("control122")?    ──► [ MATCH ]        │
+    └──────────────────────────────────────────────┬───────────────────────────────────────────────┘
+                                                   │
+                                                   ▼
+    ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+    │ 2. SAFE DOWNLOAD & INTEGRITY VALIDATION                                                      │
+    │    • Downloads in chunks with HTTP Range to: /tmp/coldroom.pyc.tmp                           │
+    │    • Calculates local SHA-256 Hash vs Server Manifest Hash                                  │
+    │    • Validates Python 3.x bytecode magic header                                              │
+    └──────────────────────────────────────────────┬───────────────────────────────────────────────┘
+                                                   │
+                                                   ▼
+    ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+    │ 3. ATOMIC BLUE/GREEN INODE SWAP (Sub-Millisecond Linux Kernel Operation)                     │
+    │    • Step A: Backup current active file ──► /home/pi/app/coldroom.pyc.bak                    │
+    │    • Step B: os.replace('/tmp/...tmp', '/home/pi/app/coldroom.pyc')                          │
+    │      (Active file pointer replaced in < 1ms; ZERO risk of corrupt/half-written file)         │
+    └──────────────────────────────────────────────┬───────────────────────────────────────────────┘
+                                                   │
+                                                   ▼
+    ┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+    │ 4. SERVICE RELOAD & 60-SECOND HARDWARE WATCHDOG                                              │
+    │    • Executes: sudo systemctl restart hmi.service                                            │
+    │    • Watchdog monitors for 60 seconds:                                                       │
+    │      - Did GUI / Modbus RS485 ports initialize without error?                                │
+    │      - Did MQTT client connect and send telemetry?                                           │
+    └───────────────────────┬──────────────────────────────────────────────┬───────────────────────┘
+                            │                                              │
+                [ IF HEALTHY & RUNNING ]                       [ IF CRASH / BOOTLOOP ]
+                            │                                              │
+                            ▼                                              ▼
+    ┌──────────────────────────────────────────────┐ ┌─────────────────────────────────────────────┐
+    │ 5A. UPDATE CONFIRMED (SUCCESS)               │ │ 5B. AUTO-ROLLBACK (FAIL-SAFE)               │
+    │ • Deletes temporary /tmp files               │ │ • Immediately swaps .bak back to active     │
+    │ • Publishes to MQTT:                         │ │ • Restarts previous working version         │
+    │   {"status": "HEALTHY", "v": "2.1.5"}        │ │ • Publishes crash diagnostic to Cloud:      │
+    │ • Dashboard shows: 🟢 LIVE (v2.1.5)          │ │   {"status": "ROLLED_BACK", "err": "..."}   │
+    └──────────────────────────────────────────────┘ └─────────────────────────────────────────────┘
+========================================================================================================================
+
+

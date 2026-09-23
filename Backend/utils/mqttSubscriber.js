@@ -212,13 +212,30 @@ const startMqttSubscriber = () => {
         }
       }
 
-      // Outbound commands, heartbeats or non-telemetry packets don't need telemetry doc records
-      if (isOutboundTopic || topic.includes('/heartbeat') || topic.endsWith('/command/status') || !hasTelemetryData) {
+      // Only live telemetry streams and batch offline historical sync packets should create time-series records.
+      // Configuration & state snapshots (/state, /setpoints/current, /config) must NEVER create time-series telemetry records.
+      const isTelemetryStream = (topic.includes('/telemetry') || (!topic.includes('/state') && !topic.includes('/setpoints') && !topic.includes('/config'))) && !isRetain;
+
+      if (isOutboundTopic || topic.includes('/heartbeat') || topic.endsWith('/command/status') || !hasTelemetryData || !isTelemetryStream) {
         return;
       }
 
       // ── High-Throughput Bulk Write Queue (P3 Optimization) ──
       const saveTimestamp = packetTimestamp || new Date();
+
+      const sanitizeTelemetryItem = (item) => {
+        if (!item || typeof item !== 'object') return item;
+        // If packet contains heavy setpoints or crop programs, extract only clean sensor telemetry & states
+        if (item.sensor_data) {
+          return {
+            sensor_data: item.sensor_data,
+            relay_states: item.relay_states || {},
+            room_paused_states: item.room_paused_states || {},
+            active_warnings: item.active_warnings || []
+          };
+        }
+        return item;
+      };
 
       if (Array.isArray(payloadData)) {
         payloadData.forEach(item => {
@@ -229,7 +246,7 @@ const startMqttSubscriber = () => {
             deviceId: deviceId || null,
             mqttId,
             topic,
-            data: item,
+            data: sanitizeTelemetryItem(item),
             timestamp: itemTime
           });
         });
@@ -238,7 +255,7 @@ const startMqttSubscriber = () => {
           deviceId: deviceId || null,
           mqttId,
           topic,
-          data: payloadData,
+          data: sanitizeTelemetryItem(payloadData),
           timestamp: saveTimestamp
         });
       }

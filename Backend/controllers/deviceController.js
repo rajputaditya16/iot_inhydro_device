@@ -662,13 +662,13 @@ exports.getDeviceAnalytics = async (req, res) => {
           field13: getSensorHumi(s6),
           field14: getSensorHumi(s7),
           multi_sensor_data: {
-            S1: s1 ? { t: getSensorTemp(s1), h: getSensorHumi(s1), co2: s1.co2 ?? null, status: s1.status || 'OK' } : null,
-            S2: s2 ? { t: getSensorTemp(s2), h: getSensorHumi(s2), co2: s2.co2 ?? null, status: s2.status || 'OK' } : null,
-            S3: s3 ? { t: getSensorTemp(s3), h: getSensorHumi(s3), co2: s3.co2 ?? null, status: s3.status || 'OK' } : null,
-            S4: s4 ? { t: getSensorTemp(s4), h: getSensorHumi(s4), co2: s4.co2 ?? null, status: s4.status || 'OK' } : null,
-            S5: s5 ? { t: getSensorTemp(s5), h: getSensorHumi(s5), co2: s5.co2 ?? null, status: s5.status || 'OK' } : null,
-            S6: s6 ? { t: getSensorTemp(s6), h: getSensorHumi(s6), co2: s6.co2 ?? null, status: s6.status || 'OK' } : null,
-            S7: s7 ? { t: getSensorTemp(s7), h: getSensorHumi(s7), co2: s7.co2 ?? null, status: s7.status || 'OK' } : null,
+            S1: s1 ? { temp: getSensorTemp(s1), humi: getSensorHumi(s1), t: getSensorTemp(s1), h: getSensorHumi(s1), co2: s1.co2 ?? null, status: s1.status || 'OK' } : null,
+            S2: s2 ? { temp: getSensorTemp(s2), humi: getSensorHumi(s2), t: getSensorTemp(s2), h: getSensorHumi(s2), co2: s2.co2 ?? null, status: s2.status || 'OK' } : null,
+            S3: s3 ? { temp: getSensorTemp(s3), humi: getSensorHumi(s3), t: getSensorTemp(s3), h: getSensorHumi(s3), co2: s3.co2 ?? null, status: s3.status || 'OK' } : null,
+            S4: s4 ? { temp: getSensorTemp(s4), humi: getSensorHumi(s4), t: getSensorTemp(s4), h: getSensorHumi(s4), co2: s4.co2 ?? null, status: s4.status || 'OK' } : null,
+            S5: s5 ? { temp: getSensorTemp(s5), humi: getSensorHumi(s5), t: getSensorTemp(s5), h: getSensorHumi(s5), co2: s5.co2 ?? null, status: s5.status || 'OK' } : null,
+            S6: s6 ? { temp: getSensorTemp(s6), humi: getSensorHumi(s6), t: getSensorTemp(s6), h: getSensorHumi(s6), co2: s6.co2 ?? null, status: s6.status || 'OK' } : null,
+            S7: s7 ? { temp: getSensorTemp(s7), humi: getSensorHumi(s7), t: getSensorTemp(s7), h: getSensorHumi(s7), co2: s7.co2 ?? null, status: s7.status || 'OK' } : null,
           }
         });
       } else if (device.deviceType === 'controlling') {
