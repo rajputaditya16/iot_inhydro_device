@@ -33,7 +33,7 @@ exports.getDevices = async (req, res) => {
     const updatedDevices = devices.map((device) => {
       const lastSeenTime = device.lastUpdated || null;
       const diffMs = lastSeenTime ? (now.getTime() - new Date(lastSeenTime).getTime()) : Infinity;
-      const isOnline = Boolean(lastSeenTime && diffMs >= 0 && diffMs <= 45 * 1000);
+      const isOnline = Boolean(lastSeenTime && diffMs >= -60000 && diffMs <= 180 * 1000);
 
       let status = device.status;
       if (device.status !== 'blocked') {
@@ -268,7 +268,20 @@ exports.pushDeviceConfig = async (req, res) => {
             updateFields[`settings.${r}.program_name`] = payload.program_name;
             if (payload.settings) updateFields[`settings.${r}.settings`] = payload.settings;
           } else if (payload.port && payload.settings) {
-            updateFields[`settings.${payload.port}`] = payload.settings;
+            const curSettings = (device.settings && typeof device.settings === 'object') ? device.settings : {};
+            const existingRoom = curSettings[payload.port] || {};
+            updateFields[`settings.${payload.port}`] = {
+              ...existingRoom,
+              crop_name: payload.crop_name || payload.cropName || existingRoom.crop_name || '',
+              setup_name: payload.setup_name || payload.setupName || existingRoom.setup_name || '',
+              program_name: payload.program_name || existingRoom.program_name || 'Default Program',
+              mode: payload.mode || existingRoom.mode || 'SCHEDULED',
+              'T MIN': payload['T MIN'] ?? existingRoom['T MIN'] ?? 10.0,
+              'T MAX': payload['T MAX'] ?? existingRoom['T MAX'] ?? 30.0,
+              'H MIN': payload['H MIN'] ?? existingRoom['H MIN'] ?? 30.0,
+              'H MAX': payload['H MAX'] ?? existingRoom['H MAX'] ?? 80.0,
+              settings: payload.settings
+            };
           } else if (payload.sensor_setpoints) {
             updateFields['settings'] = payload.sensor_setpoints;
           }
@@ -391,56 +404,48 @@ exports.getDeviceAnalytics = async (req, res) => {
     }
     const room = req.query.room || 'room1'; // 'room1', 'room2', 'room3' or 'both'
 
-    // Map Mongoose documents to standard telemetry feeds format
-    let feeds = [];
-    const candidateMqttIds = [
-      device.mqttId,
-      device.deviceType === 'office_control' ? 'system2' : null,
-      device.name,
-      device._id.toString()
-    ].filter(Boolean);
-
-    // Check if this is a live monitoring fast-fetch
+    // Check if this is a live monitoring fast-fetch or an export request
     const isLive = req.query.live === 'true' || (req.query.limit && parseInt(req.query.limit) <= 50);
-    const queryLimit = isLive ? (parseInt(req.query.limit) || 30) : (parseInt(req.query.limit) || 1000);
+    const isExport = req.query.export === 'true' || req.query.raw === 'true' || req.query.limit === '0' || req.query.limit === 'all';
+    const isDownsample = req.query.downsample === 'true';
+    const queryLimit = isLive ? (parseInt(req.query.limit) || 30) : (isExport || isDownsample ? 100000 : (parseInt(req.query.limit) || 25000));
 
-    const query = isLive
-      ? {
-        $or: [
-          { deviceId: device._id },
-          { mqttId: device.mqttId || '' },
-          { mqttId: 'system2' },
-        ].filter(c => c.deviceId || c.mqttId)
-      }
-      : {
-        timestamp: { $gte: start, $lte: end },
-        $or: [
-          { deviceId: device._id },
-          { mqttId: device.mqttId || '' },
-          { mqttId: 'system2' },
-        ].filter(c => c.deviceId || c.mqttId)
-      };
-
-    // 1. Direct dynamic collection resolution (Parallel Zero-Latency Execution)
+    // 1. Target collection resolution
     const primaryMqttId = device.mqttId || (device.deviceType === 'office_control' ? 'system2' : null) || device.name;
     const targetModel = primaryMqttId ? getTelemetryModel(primaryMqttId) : null;
     const sortOrder = isLive ? { timestamp: -1 } : { timestamp: 1 };
-    const targetQuery = isLive ? {} : { timestamp: { $gte: start, $lte: end } };
+
+    // Build query with telemetry topic filtering to exclude command/setpoint update packets
+    const targetQuery = isLive
+      ? {
+        topic: { $not: /\/(command|setpoints\/update|setpoints\/request_sync)/i }
+      }
+      : {
+        timestamp: { $gte: start, $lte: end },
+        topic: { $not: /\/(command|setpoints\/update|setpoints\/request_sync)/i }
+      };
+
+    // For office_control, filter by room directly in MongoDB if a specific room is requested
+    if (device.deviceType === 'office_control' && room !== 'both') {
+      targetQuery.$or = [
+        { topic: new RegExp(room, 'i') },
+        { [`data.${room}`]: { $exists: true } }
+      ];
+    }
 
     let packets = [];
     let totalCollectionDocs = 0;
 
     if (targetModel) {
       try {
-        // Execute find and count in parallel in a SINGLE network roundtrip
         const [docs, count] = await Promise.all([
           targetModel.find(targetQuery)
             .sort(sortOrder)
             .limit(queryLimit)
             .select('timestamp data topic room deviceId mqttId')
-            .maxTimeMS(2500)
+            .maxTimeMS(4000)
             .lean(),
-          targetModel.estimatedDocumentCount().maxTimeMS(1000).catch(() => 0)
+          targetModel.estimatedDocumentCount().maxTimeMS(1500).catch(() => 0)
         ]);
 
         packets = docs || [];
@@ -454,11 +459,20 @@ exports.getDeviceAnalytics = async (req, res) => {
     // Fallback to main TelemetryLog only if dynamic collection returned 0 packets
     if (packets.length === 0) {
       try {
-        const fallbackDocs = await TelemetryLog.find(query)
+        const fallbackQuery = {
+          ...targetQuery,
+          $or: [
+            { deviceId: device._id },
+            { mqttId: device.mqttId || '' },
+            { mqttId: 'system2' },
+          ].filter(c => c.deviceId || c.mqttId)
+        };
+
+        const fallbackDocs = await TelemetryLog.find(fallbackQuery)
           .sort(sortOrder)
           .limit(queryLimit)
           .select('timestamp data topic room deviceId mqttId')
-          .maxTimeMS(2500)
+          .maxTimeMS(4000)
           .lean();
         packets = fallbackDocs || [];
         totalCollectionDocs = totalCollectionDocs || packets.length;
@@ -472,10 +486,14 @@ exports.getDeviceAnalytics = async (req, res) => {
       packets.reverse();
     }
 
-    const totalDbCount = packets.length;
+    // Custom sensor names if configured on device
+    const customSensorNames = device.config?.sensor_names || {};
+
     const mappedFeeds = [];
     packets.forEach((p) => {
       const d = p.data || {};
+      const packetTime = p.timestamp ? (typeof p.timestamp === 'string' ? p.timestamp : p.timestamp.toISOString()) : new Date().toISOString();
+
       if (device.deviceType === 'office_control') {
         const isMerged = (d.room1 !== undefined || d.room2 !== undefined || d.room3 !== undefined);
 
@@ -485,7 +503,7 @@ exports.getDeviceAnalytics = async (req, res) => {
               const roomData = d[rName] || {};
               if (rName === 'room3') {
                 mappedFeeds.push({
-                  created_at: p.timestamp.toISOString(),
+                  created_at: packetTime,
                   entry_id: mappedFeeds.length + 1,
                   room: rName,
                   field1: roomData.md02_1?.room_temp !== undefined && roomData.md02_1?.room_temp !== null ? String(roomData.md02_1.room_temp) : null,
@@ -499,15 +517,15 @@ exports.getDeviceAnalytics = async (req, res) => {
                 });
               } else {
                 mappedFeeds.push({
-                  created_at: p.timestamp.toISOString(),
+                  created_at: packetTime,
                   entry_id: mappedFeeds.length + 1,
                   room: rName,
-                  field1: roomData.soil?.soil_temp !== undefined && roomData.soil?.soil_temp !== null ? String(roomData.soil.soil_temp) : null,
-                  field2: roomData.soil?.moisture !== undefined && roomData.soil?.moisture !== null ? String(roomData.soil.moisture) : null,
-                  field3: roomData.soil?.ec !== undefined && roomData.soil?.ec !== null ? String(roomData.soil.ec) : null,
-                  field4: roomData.soil?.ph !== undefined && roomData.soil?.ph !== null ? String(roomData.soil.ph) : null,
-                  field5: roomData.room?.room_temp !== undefined && roomData.room?.room_temp !== null ? String(roomData.room.room_temp) : null,
-                  field6: roomData.room?.room_humi !== undefined && roomData.room?.room_humi !== null ? String(roomData.room.room_humi) : null,
+                  field1: roomData.soil?.soil_temp !== undefined && roomData.soil?.soil_temp !== null ? String(roomData.soil.soil_temp) : (roomData.water_temp !== undefined && roomData.water_temp !== null ? String(roomData.water_temp) : null),
+                  field2: roomData.soil?.moisture !== undefined && roomData.soil?.moisture !== null ? String(roomData.soil.moisture) : (roomData.moisture !== undefined && roomData.moisture !== null ? String(roomData.moisture) : null),
+                  field3: roomData.soil?.ec !== undefined && roomData.soil?.ec !== null ? String(roomData.soil.ec) : (roomData.ec !== undefined && roomData.ec !== null ? String(roomData.ec) : null),
+                  field4: roomData.soil?.ph !== undefined && roomData.soil?.ph !== null ? String(roomData.soil.ph) : (roomData.ph !== undefined && roomData.ph !== null ? String(roomData.ph) : null),
+                  field5: roomData.room?.room_temp !== undefined && roomData.room?.room_temp !== null ? String(roomData.room.room_temp) : (roomData.room_temp !== undefined && roomData.room_temp !== null ? String(roomData.room_temp) : null),
+                  field6: roomData.room?.room_humi !== undefined && roomData.room?.room_humi !== null ? String(roomData.room.room_humi) : (roomData.room_humi !== undefined && roomData.room_humi !== null ? String(roomData.room_humi) : null),
                   field7: roomData.orp !== undefined && roomData.orp !== null ? String(roomData.orp) : null,
                   field8: roomData.co2 !== undefined && roomData.co2 !== null ? String(roomData.co2) : null,
                 });
@@ -517,7 +535,7 @@ exports.getDeviceAnalytics = async (req, res) => {
             const roomData = d[room] || {};
             if (room === 'room3') {
               mappedFeeds.push({
-                created_at: p.timestamp.toISOString(),
+                created_at: packetTime,
                 entry_id: mappedFeeds.length + 1,
                 room: room,
                 field1: roomData.md02_1?.room_temp !== undefined && roomData.md02_1?.room_temp !== null ? String(roomData.md02_1.room_temp) : null,
@@ -531,26 +549,26 @@ exports.getDeviceAnalytics = async (req, res) => {
               });
             } else {
               mappedFeeds.push({
-                created_at: p.timestamp.toISOString(),
+                created_at: packetTime,
                 entry_id: mappedFeeds.length + 1,
                 room: room,
-                field1: roomData.soil?.soil_temp !== undefined && roomData.soil?.soil_temp !== null ? String(roomData.soil.soil_temp) : null,
-                field2: roomData.soil?.moisture !== undefined && roomData.soil?.moisture !== null ? String(roomData.soil.moisture) : null,
-                field3: roomData.soil?.ec !== undefined && roomData.soil?.ec !== null ? String(roomData.soil.ec) : null,
-                field4: roomData.soil?.ph !== undefined && roomData.soil?.ph !== null ? String(roomData.soil.ph) : null,
-                field5: roomData.room?.room_temp !== undefined && roomData.room?.room_temp !== null ? String(roomData.room.room_temp) : null,
-                field6: roomData.room?.room_humi !== undefined && roomData.room?.room_humi !== null ? String(roomData.room.room_humi) : null,
+                field1: roomData.soil?.soil_temp !== undefined && roomData.soil?.soil_temp !== null ? String(roomData.soil.soil_temp) : (roomData.water_temp !== undefined && roomData.water_temp !== null ? String(roomData.water_temp) : null),
+                field2: roomData.soil?.moisture !== undefined && roomData.soil?.moisture !== null ? String(roomData.soil.moisture) : (roomData.moisture !== undefined && roomData.moisture !== null ? String(roomData.moisture) : null),
+                field3: roomData.soil?.ec !== undefined && roomData.soil?.ec !== null ? String(roomData.soil.ec) : (roomData.ec !== undefined && roomData.ec !== null ? String(roomData.ec) : null),
+                field4: roomData.soil?.ph !== undefined && roomData.soil?.ph !== null ? String(roomData.soil.ph) : (roomData.ph !== undefined && roomData.ph !== null ? String(roomData.ph) : null),
+                field5: roomData.room?.room_temp !== undefined && roomData.room?.room_temp !== null ? String(roomData.room.room_temp) : (roomData.room_temp !== undefined && roomData.room_temp !== null ? String(roomData.room_temp) : null),
+                field6: roomData.room?.room_humi !== undefined && roomData.room?.room_humi !== null ? String(roomData.room.room_humi) : (roomData.room_humi !== undefined && roomData.room_humi !== null ? String(roomData.room_humi) : null),
                 field7: roomData.orp !== undefined && roomData.orp !== null ? String(roomData.orp) : null,
                 field8: roomData.co2 !== undefined && roomData.co2 !== null ? String(roomData.co2) : null,
               });
             }
           }
         } else {
-          const packetRoom = p.topic && p.topic.toLowerCase().includes('room3') ? 'room3' : p.topic && p.topic.toLowerCase().includes('room2') ? 'room2' : 'room1';
+          const packetRoom = p.topic && p.topic.toLowerCase().includes('room3') ? 'room3' : (p.topic && p.topic.toLowerCase().includes('room2') ? 'room2' : 'room1');
           if (room === 'both' || packetRoom === room) {
             if (packetRoom === 'room3') {
               mappedFeeds.push({
-                created_at: p.timestamp.toISOString(),
+                created_at: packetTime,
                 entry_id: mappedFeeds.length + 1,
                 room: packetRoom,
                 field1: d.md02_1?.room_temp !== undefined && d.md02_1?.room_temp !== null ? String(d.md02_1.room_temp) : null,
@@ -564,15 +582,15 @@ exports.getDeviceAnalytics = async (req, res) => {
               });
             } else {
               mappedFeeds.push({
-                created_at: p.timestamp.toISOString(),
+                created_at: packetTime,
                 entry_id: mappedFeeds.length + 1,
                 room: packetRoom,
-                field1: d.soil?.soil_temp !== undefined && d.soil?.soil_temp !== null ? String(d.soil.soil_temp) : null,
-                field2: d.soil?.moisture !== undefined && d.soil?.moisture !== null ? String(d.soil.moisture) : null,
-                field3: d.soil?.ec !== undefined && d.soil?.ec !== null ? String(d.soil.ec) : null,
-                field4: d.soil?.ph !== undefined && d.soil?.ph !== null ? String(d.soil.ph) : null,
-                field5: d.room?.room_temp !== undefined && d.room?.room_temp !== null ? String(d.room.room_temp) : null,
-                field6: d.room?.room_humi !== undefined && d.room?.room_humi !== null ? String(d.room.room_humi) : null,
+                field1: d.soil?.soil_temp !== undefined && d.soil?.soil_temp !== null ? String(d.soil.soil_temp) : (d.water_temp !== undefined && d.water_temp !== null ? String(d.water_temp) : null),
+                field2: d.soil?.moisture !== undefined && d.soil?.moisture !== null ? String(d.soil.moisture) : (d.moisture !== undefined && d.moisture !== null ? String(d.moisture) : null),
+                field3: d.soil?.ec !== undefined && d.soil?.ec !== null ? String(d.soil.ec) : (d.ec !== undefined && d.ec !== null ? String(d.ec) : null),
+                field4: d.soil?.ph !== undefined && d.soil?.ph !== null ? String(d.soil.ph) : (d.ph !== undefined && d.ph !== null ? String(d.ph) : null),
+                field5: d.room?.room_temp !== undefined && d.room?.room_temp !== null ? String(d.room.room_temp) : (d.room_temp !== undefined && d.room_temp !== null ? String(d.room_temp) : null),
+                field6: d.room?.room_humi !== undefined && d.room?.room_humi !== null ? String(d.room.room_humi) : (d.room_humi !== undefined && d.room_humi !== null ? String(d.room_humi) : null),
                 field7: d.orp !== undefined && d.orp !== null ? String(d.orp) : null,
                 field8: d.co2 !== undefined && d.co2 !== null ? String(d.co2) : null,
               });
@@ -580,12 +598,16 @@ exports.getDeviceAnalytics = async (req, res) => {
           }
         }
       } else if (device.deviceType === 'multi_sensor' || device.deviceType === 'almora' || device.deviceType === 'almora2' || device.deviceType === 'cold_storage' || (device.name && (device.name.toLowerCase().includes('almora') || device.name.toLowerCase().includes('cold')))) {
-        // Multi-sensor / Almora 7 Cold Storage rooms mapping
+        // Multi-sensor / Almora / Cold Storage mapping (supporting rooms, sensor_data, and S1-S7 structures)
         const getSensor = (sNum) => {
           const sLower = `s${sNum}`;
           const sUpper = `S${sNum}`;
           if (d[sLower]) return d[sLower];
           if (d[sUpper]) return d[sUpper];
+          if (d.rooms && typeof d.rooms === 'object') {
+            if (d.rooms[sUpper]) return d.rooms[sUpper];
+            if (d.rooms[sLower]) return d.rooms[sLower];
+          }
           if (d.sensor_data && typeof d.sensor_data === 'object') {
             if (d.sensor_data[sLower]) return d.sensor_data[sLower];
             if (d.sensor_data[sUpper]) return d.sensor_data[sUpper];
@@ -595,7 +617,23 @@ exports.getDeviceAnalytics = async (req, res) => {
               }
             }
           }
+          if (d.sensors && typeof d.sensors === 'object') {
+            if (d.sensors[sUpper]) return d.sensors[sUpper];
+            if (d.sensors[sLower]) return d.sensors[sLower];
+          }
           return null;
+        };
+
+        const getSensorTemp = (s) => {
+          if (!s) return null;
+          const val = s.t ?? s.temp ?? s.temperature ?? s.room_temp;
+          return val !== undefined && val !== null && val !== '' ? String(val) : null;
+        };
+
+        const getSensorHumi = (s) => {
+          if (!s) return null;
+          const val = s.h ?? s.humi ?? s.humidity ?? s.hum ?? s.room_humi;
+          return val !== undefined && val !== null && val !== '' ? String(val) : null;
         };
 
         const s1 = getSensor(1);
@@ -607,52 +645,58 @@ exports.getDeviceAnalytics = async (req, res) => {
         const s7 = getSensor(7);
 
         mappedFeeds.push({
-          created_at: p.timestamp.toISOString(),
+          created_at: packetTime,
           entry_id: mappedFeeds.length + 1,
-          field1: s1 ? (s1.t ?? s1.temp ?? null) : null,
-          field2: s2 ? (s2.t ?? s2.temp ?? null) : null,
-          field3: s3 ? (s3.t ?? s3.temp ?? null) : null,
-          field4: s4 ? (s4.t ?? s4.temp ?? null) : null,
-          field5: s5 ? (s5.t ?? s5.temp ?? null) : null,
-          field6: s6 ? (s6.t ?? s6.temp ?? null) : null,
-          field7: s7 ? (s7.t ?? s7.temp ?? null) : null,
-          field8: null,
+          field1: getSensorTemp(s1),
+          field2: getSensorTemp(s2),
+          field3: getSensorTemp(s3),
+          field4: getSensorTemp(s4),
+          field5: getSensorTemp(s5),
+          field6: getSensorTemp(s6),
+          field7: getSensorTemp(s7),
+          field8: getSensorHumi(s1),
+          field9: getSensorHumi(s2),
+          field10: getSensorHumi(s3),
+          field11: getSensorHumi(s4),
+          field12: getSensorHumi(s5),
+          field13: getSensorHumi(s6),
+          field14: getSensorHumi(s7),
           multi_sensor_data: {
-            S1: s1 ? { t: s1.t ?? s1.temp ?? null, h: s1.h ?? s1.humi ?? s1.hum ?? null, co2: s1.co2 ?? null, status: s1.status || 'OK' } : null,
-            S2: s2 ? { t: s2.t ?? s2.temp ?? null, h: s2.h ?? s2.humi ?? s2.hum ?? null, co2: s2.co2 ?? null, status: s2.status || 'OK' } : null,
-            S3: s3 ? { t: s3.t ?? s3.temp ?? null, h: s3.h ?? s3.humi ?? s3.hum ?? null, co2: s3.co2 ?? null, status: s3.status || 'OK' } : null,
-            S4: s4 ? { t: s4.t ?? s4.temp ?? null, h: s4.h ?? s4.humi ?? s4.hum ?? null, co2: s4.co2 ?? null, status: s4.status || 'OK' } : null,
-            S5: s5 ? { t: s5.t ?? s5.temp ?? null, h: s5.h ?? s5.humi ?? s5.hum ?? null, co2: s5.co2 ?? null, status: s5.status || 'OK' } : null,
-            S6: s6 ? { t: s6.t ?? s6.temp ?? null, h: s6.h ?? s6.humi ?? s6.hum ?? null, co2: s6.co2 ?? null, status: s6.status || 'OK' } : null,
-            S7: s7 ? { t: s7.t ?? s7.temp ?? null, h: s7.h ?? s7.humi ?? s7.hum ?? null, co2: s7.co2 ?? null, status: s7.status || 'OK' } : null,
+            S1: s1 ? { t: getSensorTemp(s1), h: getSensorHumi(s1), co2: s1.co2 ?? null, status: s1.status || 'OK' } : null,
+            S2: s2 ? { t: getSensorTemp(s2), h: getSensorHumi(s2), co2: s2.co2 ?? null, status: s2.status || 'OK' } : null,
+            S3: s3 ? { t: getSensorTemp(s3), h: getSensorHumi(s3), co2: s3.co2 ?? null, status: s3.status || 'OK' } : null,
+            S4: s4 ? { t: getSensorTemp(s4), h: getSensorHumi(s4), co2: s4.co2 ?? null, status: s4.status || 'OK' } : null,
+            S5: s5 ? { t: getSensorTemp(s5), h: getSensorHumi(s5), co2: s5.co2 ?? null, status: s5.status || 'OK' } : null,
+            S6: s6 ? { t: getSensorTemp(s6), h: getSensorHumi(s6), co2: s6.co2 ?? null, status: s6.status || 'OK' } : null,
+            S7: s7 ? { t: getSensorTemp(s7), h: getSensorHumi(s7), co2: s7.co2 ?? null, status: s7.status || 'OK' } : null,
           }
         });
       } else if (device.deviceType === 'controlling') {
-        const tel = d.telemetry || d || {};
+        const tel = d.telemetry || d.sensors || d || {};
         mappedFeeds.push({
-          created_at: p.timestamp.toISOString(),
+          created_at: packetTime,
           entry_id: mappedFeeds.length + 1,
-          field1: tel.water_temp !== undefined && tel.water_temp !== null ? String(tel.water_temp) : null,
-          field2: tel.moisture !== undefined && tel.moisture !== null ? String(tel.moisture) : null,
-          field3: tel.ec !== undefined && tel.ec !== null ? String(tel.ec) : null,
-          field4: tel.ph !== undefined && tel.ph !== null ? String(tel.ph) : null,
-          field5: tel.room_temp !== undefined && tel.room_temp !== null ? String(tel.room_temp) : null,
-          field6: tel.room_humi !== undefined && tel.room_humi !== null ? String(tel.room_humi) : null,
-          field7: tel.orp !== undefined && tel.orp !== null ? String(tel.orp) : null,
-          field8: tel.co2 !== undefined && tel.co2 !== null ? String(tel.co2) : null,
-          field9: tel.vpd !== undefined && tel.vpd !== null ? String(tel.vpd) : null,
-          field10: tel.dli !== undefined && tel.dli !== null ? String(tel.dli) : null,
-          field11: tel.wind_speed !== undefined && tel.wind_speed !== null ? String(tel.wind_speed) : null,
-          field12: tel.wind_dir !== undefined && tel.wind_dir !== null ? String(tel.wind_dir) : null,
-          field13: tel.do !== undefined && tel.do !== null ? String(tel.do) : null,
-          field14: tel.ppfd !== undefined && tel.ppfd !== null ? String(tel.ppfd) : null,
-          field15: tel.n !== undefined && tel.n !== null ? String(tel.n) : null,
-          field16: tel.p !== undefined && tel.p !== null ? String(tel.p) : null,
-          field17: tel.k !== undefined && tel.k !== null ? String(tel.k) : null,
+          field1: tel.water_temp != null ? String(tel.water_temp) : (tel.temp != null ? String(tel.temp) : null),
+          field2: tel.moisture != null ? String(tel.moisture) : (tel.moist != null ? String(tel.moist) : null),
+          field3: tel.ec != null ? String(tel.ec) : null,
+          field4: tel.ph != null ? String(tel.ph) : null,
+          field5: tel.room_temp != null ? String(tel.room_temp) : (tel.temp_room != null ? String(tel.temp_room) : null),
+          field6: tel.room_humi != null ? String(tel.room_humi) : (tel.humidity_room != null ? String(tel.humidity_room) : null),
+          field7: tel.orp != null ? String(tel.orp) : null,
+          field8: tel.co2 != null ? String(tel.co2) : null,
+          field9: tel.vpd != null ? String(tel.vpd) : null,
+          field10: tel.dli != null ? String(tel.dli) : null,
+          field11: tel.wind_speed != null ? String(tel.wind_speed) : null,
+          field12: tel.wind_dir != null ? String(tel.wind_dir) : (tel.wind_direction != null ? String(tel.wind_direction) : null),
+          field13: tel.do != null ? String(tel.do) : (tel.dissolved_oxygen != null ? String(tel.dissolved_oxygen) : null),
+          field14: tel.ppfd != null ? String(tel.ppfd) : null,
+          field15: tel.n != null ? String(tel.n) : (tel.nitrogen != null ? String(tel.nitrogen) : null),
+          field16: tel.p != null ? String(tel.p) : (tel.phosphorus != null ? String(tel.phosphorus) : null),
+          field17: tel.k != null ? String(tel.k) : (tel.potassium != null ? String(tel.potassium) : null),
         });
       } else if (device.deviceType === 'monit' || device.deviceType === 'monnet' || device.deviceType === 'dosing') {
         mappedFeeds.push({
-          created_at: p.timestamp.toISOString(),
+          created_at: packetTime,
           entry_id: mappedFeeds.length + 1,
           field1: d.temp != null ? String(d.temp) : (d.water_temp != null ? String(d.water_temp) : (d.soil_temp != null ? String(d.soil_temp) : null)),
           field2: d.moist != null ? String(d.moist) : (d.moisture != null ? String(d.moisture) : (d.soil_moisture != null ? String(d.soil_moisture) : null)),
@@ -664,28 +708,29 @@ exports.getDeviceAnalytics = async (req, res) => {
           field8: d.co2 != null ? String(d.co2) : null,
         });
       } else {
-        // Standard / system2 / almora mapping
+        // Standard / system2 mapping
         const tel = d.telemetry || d || {};
         mappedFeeds.push({
-          created_at: p.timestamp.toISOString(),
+          created_at: packetTime,
           entry_id: mappedFeeds.length + 1,
-          field1: tel.water_temp !== undefined && tel.water_temp !== null ? String(tel.water_temp) : (tel.temp !== undefined && tel.temp !== null ? String(tel.temp) : null),
-          field2: tel.moisture !== undefined && tel.moisture !== null ? String(tel.moisture) : (tel.moist !== undefined && tel.moist !== null ? String(tel.moist) : null),
-          field3: tel.ec !== undefined && tel.ec !== null ? String(tel.ec) : null,
-          field4: tel.ph !== undefined && tel.ph !== null ? String(tel.ph) : null,
-          field5: tel.room_temp !== undefined && tel.room_temp !== null ? String(tel.room_temp) : null,
-          field6: tel.room_humi !== undefined && tel.room_humi !== null ? String(tel.room_humi) : null,
-          field7: tel.orp !== undefined && tel.orp !== null ? String(tel.orp) : null,
-          field8: tel.co2 !== undefined && tel.co2 !== null ? String(tel.co2) : null,
+          field1: tel.water_temp != null ? String(tel.water_temp) : (tel.temp != null ? String(tel.temp) : null),
+          field2: tel.moisture != null ? String(tel.moisture) : (tel.moist != null ? String(tel.moist) : null),
+          field3: tel.ec != null ? String(tel.ec) : null,
+          field4: tel.ph != null ? String(tel.ph) : null,
+          field5: tel.room_temp != null ? String(tel.room_temp) : null,
+          field6: tel.room_humi != null ? String(tel.room_humi) : null,
+          field7: tel.orp != null ? String(tel.orp) : null,
+          field8: tel.co2 != null ? String(tel.co2) : null,
         });
       }
     });
 
-    // ── Downsampling / Stride Sampling for large datasets (Post-mapping per room) ──
-    const isExport = req.query.export === 'true' || req.query.raw === 'true' || req.query.limit === '0' || req.query.limit === 'all';
-    const MAX_ANALYTICS_POINTS = parseInt(req.query.limit) || 3500;
-    if (!isExport && mappedFeeds.length > MAX_ANALYTICS_POINTS) {
-      const stride = Math.ceil(mappedFeeds.length / MAX_ANALYTICS_POINTS);
+    // ── Downsampling / Stride Sampling across full date range ──
+    const isRaw = req.query.raw === 'true' || req.query.downsample === 'false' || isExport;
+    let feeds;
+    const maxSamplePoints = parseInt(req.query.sampleLimit || req.query.limit) || 1500;
+    if (!isRaw && req.query.downsample === 'true' && mappedFeeds.length > maxSamplePoints) {
+      const stride = Math.ceil(mappedFeeds.length / maxSamplePoints);
       const sampled = [];
       for (let i = 0; i < mappedFeeds.length; i += stride) {
         sampled.push(mappedFeeds[i]);
@@ -712,7 +757,7 @@ exports.getDeviceAnalytics = async (req, res) => {
       field8: 'CO2',
     };
 
-    // Apply default deviceType-based labels
+    // Apply deviceType-based and custom labels
     if (device.deviceType === 'controlling') {
       channelData.field1 = 'Water Temp';
       channelData.field2 = 'Water Moisture';
@@ -751,23 +796,23 @@ exports.getDeviceAnalytics = async (req, res) => {
         channelData.field7 = 'ORP Level';
         channelData.field8 = 'CO2 Level';
       }
-    } else if (device.deviceType === 'multi_sensor') {
-      channelData.field1 = 'Cold Room 1 Temp';
-      channelData.field2 = 'Cold Room 2 Temp';
-      channelData.field3 = 'Cold Room 3 Temp';
-      channelData.field4 = 'Cold Room 4 Temp';
-      channelData.field5 = 'Cold Room 5 Temp';
-      channelData.field6 = 'Cold Room 6 Temp';
-      channelData.field7 = 'Cold Room 7 Temp';
-      channelData.field8 = 'Field 8';
+    } else if (device.deviceType === 'multi_sensor' || device.deviceType === 'almora' || device.deviceType === 'cold_storage') {
+      const sName = (sKey, def) => customSensorNames[sKey] || def;
+      channelData.field1 = `${sName('S1', 'Room 1')} Temp`;
+      channelData.field2 = `${sName('S2', 'Room 2')} Temp`;
+      channelData.field3 = `${sName('S3', 'Room 3')} Temp`;
+      channelData.field4 = `${sName('S4', 'Room 4')} Temp`;
+      channelData.field5 = `${sName('S5', 'Room 5')} Temp`;
+      channelData.field6 = `${sName('S6', 'Room 6')} Temp`;
+      channelData.field7 = `${sName('S7', 'Room 7')} Temp`;
+      channelData.field8 = `${sName('S1', 'Room 1')} Humi`;
+      channelData.field9 = `${sName('S2', 'Room 2')} Humi`;
+      channelData.field10 = `${sName('S3', 'Room 3')} Humi`;
+      channelData.field11 = `${sName('S4', 'Room 4')} Humi`;
+      channelData.field12 = `${sName('S5', 'Room 5')} Humi`;
+      channelData.field13 = `${sName('S6', 'Room 6')} Humi`;
+      channelData.field14 = `${sName('S7', 'Room 7')} Humi`;
     } else if (device.deviceType === 'monit' || device.deviceType === 'monnet') {
-      channelData.field1 = 'Water Temp';
-      channelData.field2 = 'Water Moisture';
-      channelData.field3 = 'Water EC';
-      channelData.field4 = 'Water pH';
-      channelData.field5 = 'Room Temp';
-      channelData.field6 = 'Room Humidity';
-    } else {
       channelData.field1 = 'Water Temp';
       channelData.field2 = 'Water Moisture';
       channelData.field3 = 'Water EC';
@@ -815,7 +860,7 @@ exports.getDeviceAnalytics = async (req, res) => {
         const seconds = pad(d.getSeconds());
         const ampm = hours >= 12 ? 'PM' : 'AM';
         const hours12 = pad(hours % 12 || 12);
-        return `${year}-${month}-${day} ${hours12}:${minutes}:${seconds} ${ampm}`;
+        return `${year}-${month}-${day} ${hours12}:${minutes}:${second} ${ampm}`;
       }
     };
 
@@ -829,7 +874,7 @@ exports.getDeviceAnalytics = async (req, res) => {
       for (let i = 1; i <= 17; i++) {
         const key = `field${i}`;
         const rawName = (channelData[key] || `Field ${i}`).replace(/\bSoil\b/gi, 'Water');
-        const hasData = mappedFeeds.some(f => f[key] != null && f[key] !== '' && f[key] !== 'null');
+        const hasData = mappedFeeds.some(f => f[key] != null && f[key] !== '' && f[key] !== 'null' && f[key] !== 'undefined');
         if (hasData) {
           let unit = '';
           const lower = rawName.toLowerCase();
@@ -837,6 +882,7 @@ exports.getDeviceAnalytics = async (req, res) => {
           else if (lower.includes('moist') || lower.includes('hum')) unit = ' (%)';
           else if (lower.includes('ec')) unit = ' (mS/cm)';
           else if (lower.includes('ph')) unit = ' (pH)';
+          else if (lower.includes('orp')) unit = ' (mV)';
           else if (lower.includes('co2')) unit = ' (PPM)';
           else if (lower.includes('vpd')) unit = ' (kPa)';
           else if (lower.includes('dli')) unit = ' (mol/m²/d)';
@@ -858,7 +904,7 @@ exports.getDeviceAnalytics = async (req, res) => {
         const rowCells = [`"${readableTime}"`];
         if (isBoth) rowCells.push(`"${f.room || 'room1'}"`);
         activeFields.forEach(af => {
-          const val = f[af.key] !== undefined && f[af.key] !== null ? f[af.key] : '';
+          const val = f[af.key] !== undefined && f[af.key] !== null && f[af.key] !== 'null' ? f[af.key] : '';
           rowCells.push(val !== '' ? val : '');
         });
         return rowCells.join(',');
@@ -878,7 +924,7 @@ exports.getDeviceAnalytics = async (req, res) => {
       for (let i = 1; i <= 17; i++) {
         const key = `field${i}`;
         const rawName = (channelData[key] || `Field ${i}`).replace(/\bSoil\b/gi, 'Water');
-        const hasData = mappedFeeds.some(f => f[key] != null && f[key] !== '' && f[key] !== 'null');
+        const hasData = mappedFeeds.some(f => f[key] != null && f[key] !== '' && f[key] !== 'null' && f[key] !== 'undefined');
         if (hasData) {
           activeFields.push({ key, name: rawName });
         }
@@ -888,7 +934,7 @@ exports.getDeviceAnalytics = async (req, res) => {
         const obj = { timestamp: readableTime, rawTimestamp: f.created_at };
         if (isBoth) obj.room = f.room || 'room1';
         activeFields.forEach(af => {
-          obj[af.name] = f[af.key] !== undefined && f[af.key] !== null && f[af.key] !== '' ? parseFloat(f[af.key]) || f[af.key] : null;
+          obj[af.name] = f[af.key] !== undefined && f[af.key] !== null && f[af.key] !== '' && f[af.key] !== 'null' ? parseFloat(f[af.key]) || f[af.key] : null;
         });
         return obj;
       });
@@ -902,7 +948,7 @@ exports.getDeviceAnalytics = async (req, res) => {
       success: true,
       channel: channelData,
       feeds: feeds,
-      totalDbPoints: totalDbCount,
+      totalDbPoints: mappedFeeds.length,
       totalCollectionDocs: totalCollectionDocs,
       totalFeeds: mappedFeeds.length,
     });

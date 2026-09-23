@@ -107,21 +107,10 @@ const parseRobustFloat = (val) => {
   return isNaN(parsed) ? 0 : parsed;
 };
 
-// Downsample feeds to a maximum number of points to prevent DOM/SVG rendering lag
-const downsampleFeeds = (feeds, maxPoints = 1000) => {
-  if (!feeds || feeds.length <= maxPoints) return feeds;
-  const step = Math.ceil(feeds.length / maxPoints);
-  const result = [];
-  for (let i = 0; i < feeds.length; i += step) {
-    result.push(feeds[i]);
-  }
-  return result;
-};
-
 // Format feeds into chart-ready data dynamically based on available channel fields
 const mapFeedsToCharts = (feeds, filter, channelFields, isBothRooms = false, durationUnit = 'hours') => {
-  const rawFeedsArray = Array.isArray(feeds) ? feeds : [];
-  const validFeeds = downsampleFeeds(rawFeedsArray, 1000);
+  const validFeeds = Array.isArray(feeds) ? feeds : [];
+  if (validFeeds.length === 0) return {};
 
   let isMultiDay = ['week', 'month', 'three_months'].includes(filter);
   if (!isMultiDay && filter === 'custom' && validFeeds.length > 1) {
@@ -140,25 +129,38 @@ const mapFeedsToCharts = (feeds, filter, channelFields, isBothRooms = false, dur
       ? { hour: '2-digit', minute: '2-digit', second: '2-digit' }
       : { hour: '2-digit', minute: '2-digit' };
 
+  const dtf = new Intl.DateTimeFormat('en-US', timeFormat);
+
   if (!isBothRooms) {
+    // Single pass date formatting to avoid repeated heavy Intl formatting
+    const formattedTimes = new Array(validFeeds.length);
+    for (let i = 0; i < validFeeds.length; i++) {
+      formattedTimes[i] = dtf.format(new Date(validFeeds[i].created_at));
+    }
+
     const mappedData = {};
     channelFields.forEach(field => {
-      mappedData[field.key] = validFeeds.map((f) => ({
-        time: new Date(f.created_at).toLocaleString('en-US', timeFormat),
-        value: parseRobustFloat(f[field.key]),
-      }));
+      const arr = new Array(validFeeds.length);
+      for (let i = 0; i < validFeeds.length; i++) {
+        arr[i] = {
+          time: formattedTimes[i],
+          value: parseRobustFloat(validFeeds[i][field.key]),
+        };
+      }
+      mappedData[field.key] = arr;
     });
     return mappedData;
   } else {
     // Both rooms: group by rounded timestamp
     const timeGroupsMap = new Map();
-    validFeeds.forEach(f => {
+    for (let i = 0; i < validFeeds.length; i++) {
+      const f = validFeeds[i];
       const timeObj = new Date(f.created_at);
       const roundedMs = Math.round(timeObj.getTime() / 15000) * 15000;
 
       if (!timeGroupsMap.has(roundedMs)) {
         timeGroupsMap.set(roundedMs, {
-          time: new Date(roundedMs).toLocaleString('en-US', timeFormat),
+          time: dtf.format(new Date(roundedMs)),
           rawTimestamp: roundedMs
         });
       }
@@ -169,7 +171,7 @@ const mapFeedsToCharts = (feeds, filter, channelFields, isBothRooms = false, dur
       channelFields.forEach(field => {
         group[`${field.key}${suffix}`] = parseRobustFloat(f[field.key]);
       });
-    });
+    }
 
     const sortedGroups = Array.from(timeGroupsMap.values()).sort((a, b) => a.rawTimestamp - b.rawTimestamp);
 
@@ -345,7 +347,7 @@ const AnalyticsPage = () => {
     try {
       const { start, end } = getDateRange(filter, customStartDate, customEndDate, durationVal, durationUnit);
       const roomParam = selectedDevice?.deviceType === 'office_control' ? `&room=${selectedRoom}` : '';
-      const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics?start=${start.toISOString()}&end=${end.toISOString()}${roomParam}`;
+      const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics?start=${start.toISOString()}&end=${end.toISOString()}&downsample=true&sampleLimit=1500${roomParam}`;
 
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await fetch(url, { headers });
@@ -738,8 +740,8 @@ const AnalyticsPage = () => {
                     key={preset.label}
                     onClick={() => { setDurationVal(preset.val); setDurationUnit(preset.unit); }}
                     className={`rounded px-2.5 py-1 text-[11px] font-medium transition-all ${durationVal === preset.val && durationUnit === preset.unit
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-sm'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-700/40'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-semibold shadow-sm'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-700/40'
                       }`}
                   >
                     {preset.label}

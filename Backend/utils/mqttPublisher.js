@@ -17,8 +17,8 @@ const getPublisherClient = () => {
   if (!publisherClient) {
     const options = {
       clientId: `backend_publisher_pool_${process.pid}_${Date.now().toString(36)}`,
-      username: process.env.MQTT_USERNAME || 'Inhydro@5598',
-      password: process.env.MQTT_PASSWORD || 'MGPL@5598',
+      username: process.env.MQTT_USERNAME,
+      password: process.env.MQTT_PASSWORD,
       connectTimeout: 5000,
       reconnectPeriod: 3000,
       rejectUnauthorized: false,

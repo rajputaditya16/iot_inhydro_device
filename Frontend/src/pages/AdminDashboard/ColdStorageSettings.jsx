@@ -631,8 +631,18 @@ const ColdStorageSettings = () => {
         });
       }
     }
+    const isExplicitConfigPacket = Boolean(
+      payload.is_sync ||
+      payload.is_setpoints_sync ||
+      payload.action === 'setpoints_sync' ||
+      payload.action === 'apply_program' ||
+      payload.action === 'save_program' ||
+      payload.action === 'stage_toggle'
+    );
+
     if (payload.sensor_setpoints && typeof payload.sensor_setpoints === 'object') {
       setAllSetpoints(prev => {
+        if (Object.keys(prev).length > 0 && !isExplicitConfigPacket) return prev;
         if (JSON.stringify(prev) === JSON.stringify(payload.sensor_setpoints)) return prev;
         const merged = { ...prev };
         Object.keys(payload.sensor_setpoints).forEach(r => {
@@ -650,7 +660,7 @@ const ColdStorageSettings = () => {
         return merged;
       });
     }
-    if (payload.port && payload.settings) {
+    if (payload.port && payload.settings && isExplicitConfigPacket) {
       setAllSetpoints(prev => {
         const curPort = prev[payload.port] || {};
         const merged = {
@@ -1880,7 +1890,8 @@ const ColdStorageSettings = () => {
                     type="text"
                     value={currentStage.name || ''}
                     onChange={(e) => {
-                      updateActiveStage('name', e.target.value);
+                      const val = e.target.value;
+                      updateActiveStage('name', val);
                     }}
                     placeholder={`e.g. Vegetative Stage / Flowering Stage / Crop Stage ${ALL_SETTING_KEYS.indexOf(activeStageKey) + 1}`}
                     className="bg-transparent text-white font-bold text-sm outline-none w-full placeholder:text-slate-600"
@@ -1899,10 +1910,17 @@ const ColdStorageSettings = () => {
                   </span>
                   <input
                     type="text"
-                    value={currentStage.setup_name || currentRoomSetpoints.setup_name || ''}
+                    value={currentStage.setup_name ?? currentRoomSetpoints.setup_name ?? ''}
                     onChange={(e) => {
-                      updateActiveStage('setup_name', e.target.value);
-                      updateRoomState(r => ({ ...r, setup_name: e.target.value }));
+                      const val = e.target.value;
+                      updateRoomState(room => {
+                        const fallback = generateDefaultAlmoraSchedule(activeRoom);
+                        if (!room.settings) room.settings = fallback.settings;
+                        if (!room.settings[activeStageKey]) room.settings[activeStageKey] = fallback.settings[activeStageKey] || {};
+                        room.settings[activeStageKey].setup_name = val;
+                        room.setup_name = val;
+                        return room;
+                      });
                     }}
                     placeholder={`${systemConfig.sensor_names[activeRoom] || DEFAULT_ROOM_NAMES[activeRoom]} Setup`}
                     className="bg-transparent text-white font-bold text-sm outline-none w-full placeholder:text-slate-600"

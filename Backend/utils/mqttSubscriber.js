@@ -52,8 +52,8 @@ const startMqttSubscriber = () => {
 
   const options = {
     clientId: `backend_subscriber_daemon_${Date.now()}`,
-    username: process.env.MQTT_USERNAME || 'Inhydro@5598',
-    password: process.env.MQTT_PASSWORD || 'MGPL@5598',
+    username: process.env.MQTT_USERNAME,
+    password: process.env.MQTT_PASSWORD,
     clean: true,
     reconnectPeriod: 5000, // Reconnect every 5 seconds if connection is lost
     rejectUnauthorized: false, // Bypass self-signed certificate validation on raw IP
@@ -106,7 +106,7 @@ const startMqttSubscriber = () => {
         topic.includes('/command/') ||
         topic.endsWith('/command/status');
 
-      // Check if this payload contains actual sensor/device telemetry data from hardware
+      // Check if this payload contains actual sensor/device telemetry data or heartbeat from hardware
       const hasTelemetryData = Boolean(
         payloadData && typeof payloadData === 'object' && (
           payloadData.sensor_data ||
@@ -116,25 +116,28 @@ const startMqttSubscriber = () => {
           payloadData.humi !== undefined || payloadData.h !== undefined || payloadData.humidity !== undefined ||
           payloadData.co2 !== undefined || payloadData.ec !== undefined || payloadData.ph !== undefined ||
           payloadData.relays || payloadData.relay_states ||
-          payloadData.sensors || Array.isArray(payloadData.data) || Array.isArray(payloadData.readings)
+          payloadData.sensors || Array.isArray(payloadData.data) || Array.isArray(payloadData.readings) ||
+          payloadData.status === 'online' || payloadData.heartbeat !== undefined || payloadData.ping !== undefined ||
+          topic.includes('/heartbeat') || topic.includes('/telemetry') || topic.includes('/status')
         )
       );
 
-      // Genuine fresh incoming telemetry check
+      // Genuine fresh incoming telemetry check (use 3-minute window and prioritize live reception)
       const isFresh = !isOutboundTopic && hasTelemetryData && (
         !isRetain
-          ? (parsedTime ? Math.abs(now.getTime() - parsedTime.getTime()) < 45 * 1000 : true)
-          : Boolean(parsedTime && Math.abs(now.getTime() - parsedTime.getTime()) < 45 * 1000)
+          ? true
+          : Boolean(parsedTime && Math.abs(now.getTime() - parsedTime.getTime()) < 180 * 1000)
       );
 
-      const packetTimestamp = parsedTime || (!isOutboundTopic && !isRetain && hasTelemetryData ? now : null);
+      // For live packets, use server reception time 'now' to prevent device clock skew issues
+      const packetTimestamp = !isRetain ? now : (parsedTime || now);
 
       // Update MongoDB with incoming telemetry / settings / config / crop programs
       const deviceId = await resolveDeviceId(mqttId, topic);
       if (deviceId) {
         const updateFields = {};
 
-        // Only update lastUpdated and status if this is genuine fresh telemetry with sensor readings
+        // Update lastUpdated and status for fresh incoming telemetry or heartbeat
         if (isFresh && packetTimestamp) {
           updateFields.lastUpdated = packetTimestamp;
           updateFields.status = 'online';

@@ -14,14 +14,14 @@ const parseDateSafe = (ts) => {
   return isNaN(d.getTime()) || d.getTime() === 0 ? null : d;
 };
 
-// Check if telemetry is fresh (arrived within last 45 seconds)
-const FRESH_TELEMETRY_WINDOW_MS = 45 * 1000;
+// Check if telemetry is fresh (arrived within last 180 seconds / 3 minutes)
+const FRESH_TELEMETRY_WINDOW_MS = 180 * 1000;
 
 const isTelemetryFresh = (lastUpdatedTime) => {
   const d = parseDateSafe(lastUpdatedTime);
   if (!d) return false;
   const diffMs = Date.now() - d.getTime();
-  return diffMs >= 0 && diffMs <= FRESH_TELEMETRY_WINDOW_MS;
+  return diffMs >= -60000 && diffMs <= FRESH_TELEMETRY_WINDOW_MS;
 };
 
 const UserDashboard = () => {

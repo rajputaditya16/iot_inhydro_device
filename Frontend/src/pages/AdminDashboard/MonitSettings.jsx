@@ -200,14 +200,14 @@ const MonitSettings = () => {
   const [commandLoading, setCommandLoading] = useState(false);
   const [commandCooldown, setCommandCooldown] = useState(0);
 
-  // Heartbeat watchdog: checks every 3s if fresh packet was received in the last 45s
+  // Heartbeat watchdog: checks every 1s if fresh packet was received in the last 45s
   useEffect(() => {
     const ticker = setInterval(() => {
       const isFresh = Boolean(
         lastTelemetryTimeRef.current && (Date.now() - lastTelemetryTimeRef.current < 45000)
       );
       setIsMachineOnline((prev) => (prev !== isFresh ? isFresh : prev));
-    }, 3000);
+    }, 1000);
     return () => clearInterval(ticker);
   }, []);
 
@@ -263,10 +263,51 @@ const MonitSettings = () => {
 
   const selectedDevice = monitDevices.find(d => (d.mqttId || d._id) === deviceRoot);
 
+  // Sync initial online status & telemetry immediately on device switch
   useEffect(() => {
-    setTempName(selectedDevice?.name || 'Monnet Device');
+    if (!selectedDevice) return;
+    setTempName(selectedDevice.name || 'Monnet Device');
     setIsEditingName(false);
-  }, [deviceRoot, selectedDevice]);
+
+    const lastTime = selectedDevice.lastUpdated || selectedDevice.latestPacketTime || selectedDevice.updatedAt;
+    const lastTimestamp = lastTime ? new Date(lastTime).getTime() : null;
+    lastTelemetryTimeRef.current = lastTimestamp;
+
+    const isInitialOnline = selectedDevice.status === 'online' || Boolean(lastTimestamp && (Date.now() - lastTimestamp < 45000));
+    setIsMachineOnline(isInitialOnline);
+    setLiveData(selectedDevice.telemetry || selectedDevice.data || null);
+
+    // Fetch immediate latest live packet from API so status and readings update in <50ms
+    const fetchLatest = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/devices/${selectedDevice._id}/analytics?limit=1&live=true`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.feeds && json.feeds.length > 0) {
+            const latestFeed = json.feeds[json.feeds.length - 1];
+            const feedTime = latestFeed.created_at ? new Date(latestFeed.created_at).getTime() : Date.now();
+            lastTelemetryTimeRef.current = feedTime;
+            const isFresh = Date.now() - feedTime < 45000;
+            setIsMachineOnline(isFresh);
+            setLiveData(prev => ({
+              ...prev,
+              temp: latestFeed.field1,
+              moist: latestFeed.field2,
+              ec: latestFeed.field3,
+              ph: latestFeed.field4,
+              room_temp: latestFeed.field5,
+              room_humi: latestFeed.field6,
+              orp: latestFeed.field7,
+              co2: latestFeed.field8
+            }));
+          }
+        }
+      } catch (e) { }
+    };
+    fetchLatest();
+  }, [deviceRoot, selectedDevice, API_BASE, token]);
 
   const handleNameSave = async () => {
     if (!tempName.trim() || !selectedDevice) return;
@@ -352,7 +393,7 @@ const MonitSettings = () => {
     setClient(mqttClient);
 
     // Real-time SSE Stream Fallback (100% reliable over HTTPS cloud deployment)
-    const sseUrl = `${API_BASE}/api/devices/stream`;
+    const sseUrl = `${API_BASE}/api/devices/stream?deviceId=${encodeURIComponent(deviceRoot)}`;
     const eventSource = new EventSource(sseUrl);
 
     eventSource.onopen = () => {
