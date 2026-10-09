@@ -15,14 +15,14 @@ R1_PORT_MD02 = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-
 R1_PORT_ORP  = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.3:1.0-port0"
 R1_PORT_CO2  = "/dev/serial/by-path/"
 
-R2_PORT_SOIL = "/dev/serial/by-path/pci-0000:0000:14.0-usb-0:3:1.0-port0"
-R2_PORT_MD02 = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
+R2_PORT_SOIL = "/dev/serial/by-path/"
+R2_PORT_MD02 = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0\\\\\\"
 R2_PORT_ORP  = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.4:1.0-port0"
 R2_PORT_CO2  = "/dev/serial/by-path/p"
 
 # Room 3 sensor ports
-R3_PORT_MD02_1 = "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2.8:1.0-port0"
-R3_PORT_MD02_2 = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0"
+R3_PORT_MD02_1 = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0"
+R3_PORT_MD02_2 = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0   "
 R3_PORT_CO2    = "/dev/serial/by-path/"
 
 # MODBUS SETTINGS

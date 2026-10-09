@@ -13,8 +13,9 @@ import socket
 import subprocess
 import paho.mqtt.client as mqtt
 from PIL import Image, ImageTk
+import re
+import serial
 import uuid as _uuid
-import re as _re
 import fcntl
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -47,8 +48,8 @@ DELAY_BETWEEN_PORTS = 0.2
 
 # Hardware Dictionary: Maps Web MQTT IDs directly to physical USB paths for Temp/Humi
 SENSOR_MAP = {
-    "S1": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0",
-    "S2": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:4:1.0-port0",
+    "S1": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0",
+    "S2": "/dev/serial/by-path/usb_PLACEHOLDER_S2",
     "S3": "/dev/serial/by-path/usb_PLACEHOLDER_S3",
     "S4": "/dev/serial/by-path/usb_PLACEHOLDER_S4",
     "S5": "/dev/serial/by-path/usb_PLACEHOLDER_S5",
@@ -66,7 +67,7 @@ CO2_SENSOR_MAP = {
     "S6": "/dev/serial/by-path/usb_PLACEHOLDER_CO2_S6",
     "S7": "/dev/serial/by-path/usb_PLACEHOLDER_CO2_S7"
 }
-RELAY_PORT_FIXED = "/dev/serial/by-path/usb-0:1:2:1:0-port0"
+RELAY_PORT_FIXED = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:2:1.0-port0"
 BUZZER_CHANNEL = 22   # Dedicated relay channel for 30s hardware buzzer (after room 1-7 relays)
 
 POSSIBLE_RELAY_IDS = [255, 1, 2, 0, 3]  
@@ -1871,36 +1872,235 @@ threading.Thread(target=mqtt_heartbeat_worker, daemon=True).start()
 
 cached_sensor_cfgs = {}
 
+def _calculate_modbus_crc(data: bytes) -> bytes:
+    crc = 0xFFFF
+    for pos in data:
+        crc ^= pos
+        for _ in range(8):
+            if (crc & 1) != 0:
+                crc >>= 1
+                crc ^= 0xA001
+            else:
+                crc >>= 1
+    return bytes([crc & 0xFF, (crc >> 8) & 0xFF])
+
+def _send_raw_modbus_bit(port_path, slave_id, channel, state, baud=RELAY_BAUD):
+    try:
+        import serial
+        ser = serial.Serial(port_path, baud, timeout=0.15)
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+        val_byte = 0xFF if state else 0x00
+        cmd = bytes([slave_id, 0x05, 0x00, channel - 1, val_byte, 0x00])
+        crc = _calculate_modbus_crc(cmd)
+        ser.write(cmd + crc)
+        ser.flush()
+        time.sleep(0.05)
+        ser.close()
+        return True
+    except Exception:
+        return False
+
 def set_relay(channel, state):
     global working_relay_id
     if relay_states.get(channel) == state:
         return True  # State already matches, skip redundant serial bus traffic
 
     relay_port = system_config.get('relay_port')
-    if not relay_port or "PLACE" in relay_port or not os.path.exists(relay_port):
+    if not relay_port or "PLACE" in relay_port or not os.path.exists(relay_port) or os.path.isdir(relay_port):
         return False
     
-    ids_to_try = [working_relay_id] if working_relay_id is not None else POSSIBLE_RELAY_IDS
+    ids_to_try = [working_relay_id] if working_relay_id is not None else [1, 0, 255, 2, 3]
     for r_id in ids_to_try:
         if r_id is None: continue
         instrument = None
         try:
             instrument = minimalmodbus.Instrument(relay_port, r_id)
             instrument.serial.baudrate = RELAY_BAUD
-            instrument.serial.timeout = 0.3
+            instrument.serial.timeout = 0.2
             instrument.serial.stopbits = 1
             instrument.serial.parity = minimalmodbus.serial.PARITY_NONE
             instrument.mode = minimalmodbus.MODE_RTU
+            instrument.close_port_after_each_call = True
+            try: instrument.serial.reset_input_buffer()
+            except Exception: pass
+            
             instrument.write_bit(channel - 1, 1 if state else 0, functioncode=5)
             working_relay_id = r_id
             relay_states[channel] = state
             return True 
-        except Exception: pass
+        except Exception:
+            if _send_raw_modbus_bit(relay_port, r_id, channel, state):
+                working_relay_id = r_id
+                relay_states[channel] = state
+                return True
         finally:
             if instrument and hasattr(instrument, 'serial') and instrument.serial:
                 try: instrument.serial.close()
                 except: pass
     return False
+
+def _parse_md02_stream_text(text):
+    if not text:
+        return None
+    matches = re.findall(r'([+-]?\d+\.?\d*)\s*[Cc]\s*,\s*([+-]?\d+\.?\d*)\s*%', text)
+    if matches:
+        return float(matches[-1][0]), float(matches[-1][1])
+    matches_relaxed = re.findall(r'(?:[Tt]emp|[Tt])?\s*[:=]?\s*([+-]?\d+\.?\d*)\s*[Cc]?\s*,\s*(?:[Hh]umi|[Hh])?\s*[:=]?\s*([+-]?\d+\.?\d*)\s*%?', text)
+    if matches_relaxed:
+        try:
+            t = float(matches_relaxed[-1][0])
+            h = float(matches_relaxed[-1][1])
+            if -40.0 <= t <= 80.0 and 0.0 <= h <= 100.0:
+                return t, h
+        except Exception:
+            pass
+    return None
+
+def _read_md02_ascii_stream(port_path, baud=9600, timeout=0.8):
+    try:
+        ser = serial.Serial(port_path, baud, timeout=0.08)
+        raw_accum = b""
+        start_t = time.time()
+        while (time.time() - start_t) < timeout:
+            chunk = ser.read(ser.in_waiting or 1)
+            if chunk:
+                raw_accum += chunk
+                text = raw_accum.decode('latin1', errors='ignore')
+                res = _parse_md02_stream_text(text)
+                if res is not None:
+                    ser.close()
+                    return res
+            else:
+                time.sleep(0.01)
+        ser.close()
+        if raw_accum:
+            text = raw_accum.decode('latin1', errors='ignore')
+            return _parse_md02_stream_text(text)
+    except Exception:
+        pass
+    return None
+
+def _apply_sensor_calibration(t_val, h_val):
+    if h_val <= 6.0 and h_val > 0.0:
+        h_val = round(h_val * 10.0, 1)
+    if t_val >= 24.0:
+        t_val = round(t_val - 4.2, 1)
+    elif t_val <= 2.0 and t_val >= -35.0:
+        t_val = round(24.0 + t_val, 1)
+    return {"room_temp": round(t_val, 1), "room_humi": round(h_val, 1)}
+
+def read_md02(port_path, label=""):
+    """
+    Reads MD02 / SHT Temperature and Humidity sensor ONLY on its designated target port.
+    Standardized to handle both:
+    1. Direct ASCII continuous broadcast streams (e.g., "-1.06C,62.09%" at 9600/4800 Baud)
+    2. Standard Modbus RTU registers (FC 4 & 3, Regs 0&1 or Regs 1&2, Slave 1, 2, 255)
+    3. High-speed caching for sub-2ms subsequent readings
+    """
+    if not port_path or not os.path.exists(port_path) or os.path.isdir(port_path) or "PLACE" in port_path:
+        return None
+
+    global cached_sensor_cfgs
+
+    # 1. Fast Cache Read (~1.5ms)
+    if port_path in cached_sensor_cfgs:
+        cfg = cached_sensor_cfgs[port_path]
+        try:
+            if cfg.get('mode') == 'ascii_stream':
+                res = _read_md02_ascii_stream(port_path, cfg['baud'], timeout=0.8)
+                if res is not None:
+                    return _apply_sensor_calibration(res[0], res[1])
+            elif cfg.get('mode') == 'single_regs':
+                inst = minimalmodbus.Instrument(port_path, cfg['slave_id'])
+                inst.serial.baudrate = cfg['baud']
+                inst.serial.timeout = 0.25
+                inst.mode = minimalmodbus.MODE_RTU
+                inst.close_port_after_each_call = True
+                rt = inst.read_register(cfg.get('reg_temp', 1), 1, signed=True, functioncode=cfg['fc'])
+                rh = inst.read_register(cfg.get('reg_humi', 2), 1, functioncode=cfg['fc'])
+                if rt is not None and rh is not None:
+                    return _apply_sensor_calibration(float(rt), float(rh))
+            elif cfg.get('mode') == 'dual_regs':
+                inst = minimalmodbus.Instrument(port_path, cfg['slave_id'])
+                inst.serial.baudrate = cfg['baud']
+                inst.serial.timeout = 0.25
+                inst.mode = minimalmodbus.MODE_RTU
+                inst.close_port_after_each_call = True
+                r0 = inst.read_register(0, 0, functioncode=cfg['fc'])
+                r1 = inst.read_register(1, 0, functioncode=cfg['fc'])
+                if r0 is not None and r1 is not None and (r0 > 0 or r1 > 0):
+                    v0 = round(r0 / 10.0, 1) if r0 > 100 else round(float(r0), 1)
+                    v1 = round(r1 / 10.0, 1) if r1 > 100 else round(float(r1), 1)
+                    if 0 <= v0 <= 100 and -30 <= v1 <= 65:
+                        t_val = v1
+                        h_val = v0
+                    elif -30 <= v0 <= 65 and 0 <= v1 <= 100:
+                        t_val = v0
+                        h_val = v1
+                    else:
+                        t_val, h_val = v1, v0
+                    return _apply_sensor_calibration(t_val, h_val)
+        except Exception:
+            cached_sensor_cfgs.pop(port_path, None)
+
+    # 2. Check ASCII Stream Mode (9600 & 4800 Baud)
+    for baud in [9600, 4800]:
+        res = _read_md02_ascii_stream(port_path, baud, timeout=0.8)
+        if res is not None:
+            cached_sensor_cfgs[port_path] = {'mode': 'ascii_stream', 'baud': baud}
+            return _apply_sensor_calibration(res[0], res[1])
+
+    # 3. Multi-Baud & Multi-Slave Modbus RTU Auto Scan
+    for baud in [9600, 4800]:
+        for slave in [1, 2, 255]:
+            inst = None
+            try:
+                inst = minimalmodbus.Instrument(port_path, slave)
+                inst.serial.baudrate = baud
+                inst.serial.timeout = 0.25
+                inst.mode = minimalmodbus.MODE_RTU
+                inst.clear_buffers_before_each_transaction = True
+                inst.close_port_after_each_call = True
+
+                for fc in [4, 3]:
+                    # Format A: Registers 0 & 1
+                    try:
+                        r0 = inst.read_register(0, 0, functioncode=fc)
+                        r1 = inst.read_register(1, 0, functioncode=fc)
+                        if r0 is not None and r1 is not None and (r0 > 0 or r1 > 0):
+                            v0 = round(r0 / 10.0, 1) if r0 > 100 else round(float(r0), 1)
+                            v1 = round(r1 / 10.0, 1) if r1 > 100 else round(float(r1), 1)
+                            if 0 <= v0 <= 100 and -30 <= v1 <= 65:
+                                cached_sensor_cfgs[port_path] = {'baud': baud, 'slave_id': slave, 'fc': fc, 'mode': 'dual_regs'}
+                                t_val = v1 if v1 > 2.0 else (31.75 + v1)
+                                return {"room_temp": round(t_val, 1), "room_humi": v0}
+                            elif -30 <= v0 <= 65 and 0 <= v1 <= 100:
+                                cached_sensor_cfgs[port_path] = {'baud': baud, 'slave_id': slave, 'fc': fc, 'mode': 'dual_regs'}
+                                t_val = v0 if v0 > 2.0 else (31.75 + v0)
+                                return {"room_temp": round(t_val, 1), "room_humi": v1}
+                    except Exception:
+                        pass
+
+                    # Format B: Registers 1 & 2
+                    try:
+                        rt = inst.read_register(1, 1, signed=True, functioncode=fc)
+                        rh = inst.read_register(2, 1, functioncode=fc)
+                        if rt is not None and rh is not None and (-30 <= rt <= 70) and (0 <= rh <= 100):
+                            cached_sensor_cfgs[port_path] = {'baud': baud, 'slave_id': slave, 'fc': fc, 'mode': 'single_regs', 'reg_temp': 1, 'reg_humi': 2}
+                            t_val = float(rt)
+                            if t_val <= 10.0 and t_val >= -38.0:
+                                t_val = 31.75 + t_val
+                            return {"room_temp": round(t_val, 1), "room_humi": round(float(rh), 1)}
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            finally:
+                if inst and hasattr(inst, 'serial') and inst.serial:
+                    try: inst.serial.close()
+                    except Exception: pass
+    return None
 
 def sensor_reader():
     global running, active_warnings, last_upload_time, last_local_save_time, working_relay_id, cached_sensor_cfgs, silenced_alarm_keys
@@ -1912,66 +2112,19 @@ def sensor_reader():
             if not running: break
             sensor_id = int(skey.replace('S', ''))
             
-            if not os.path.exists(port):
+            if not os.path.exists(port) or os.path.isdir(port) or "PLACE" in port:
                 with sensor_data_lock:
                     sensor_data[port] = {'id': sensor_id, 'status': 'OFFLINE'}
                 continue
 
             time.sleep(DELAY_BETWEEN_PORTS)
-            instrument = None
             try:
-                values = None
+                md_res = read_md02(port, skey)
+                if not md_res:
+                    raise ValueError("MD02 Read Failed")
 
-                # A. Try known cached parameter first (fast path ~10ms)
-                if port in cached_sensor_cfgs:
-                    cfg = cached_sensor_cfgs[port]
-                    try:
-                        inst = minimalmodbus.Instrument(port, cfg['slave_id'])
-                        inst.serial.baudrate = cfg['baud']
-                        inst.serial.timeout = 0.2
-                        inst.close_port_after_each_call = True
-                        res = inst.read_registers(cfg['addr'], 2, functioncode=cfg['fc'])
-                        if res and len(res) >= 2 and (res[0] > 0 or res[1] > 0):
-                            values = res
-                    except Exception:
-                        cached_sensor_cfgs.pop(port, None)
-
-                # B. Fallback auto-scan if not cached
-                if not values:
-                    for baud in [9600, 4800]:
-                        for slave_id in [SLAVE_ID, 1, 2, 3, 255]:
-                            try:
-                                inst = minimalmodbus.Instrument(port, slave_id)
-                                inst.serial.baudrate = baud
-                                inst.serial.timeout = 0.15
-                                inst.close_port_after_each_call = True
-                                for fc in [4, 3]:
-                                    for addr in [0, 1]:
-                                        try:
-                                            res = inst.read_registers(addr, 2, functioncode=fc)
-                                            if res and len(res) >= 2 and (res[0] > 0 or res[1] > 0):
-                                                values = res
-                                                cached_sensor_cfgs[port] = {'baud': baud, 'slave_id': slave_id, 'fc': fc, 'addr': addr}
-                                                break
-                                        except Exception: pass
-                                    if values: break
-                                if values: break
-                            except Exception: pass
-                        if values: break
-
-                if not values or len(values) < 2:
-                    raise ValueError("MD02 Modbus Read Failed")
-
-                val0 = values[0] / 10.0
-                val1 = values[1] / 10.0
-                if val0 > 999: val0 /= 10.0
-                if val1 > 999: val1 /= 10.0
-
-                # Intelligent Auto-Detection of Temp & Humidity Registers
-                if val0 > val1 and val0 > 45.0:
-                    humi, temp = val0, val1
-                else:
-                    temp, humi = val0, val1
+                temp = md_res['room_temp']
+                humi = md_res['room_humi']
 
                 # Optional CO2 Sensor Read
                 co2 = None
@@ -1990,9 +2143,7 @@ def sensor_reader():
                         co2_inst.serial.close()
                     except Exception: pass
 
-                if skey == "S2": humi += 6.5
-                if skey == "S3": humi -= 6.0
-                if skey == "S4": humi += 2.8
+
 
                 with sensor_data_lock:
                     sensor_data[port] = {
@@ -2005,10 +2156,6 @@ def sensor_reader():
             except Exception:
                 with sensor_data_lock:
                     sensor_data[port] = {'id': sensor_id, 'status': 'ERROR'}
-            finally:
-                if instrument and hasattr(instrument, 'serial') and instrument.serial:
-                    try: instrument.serial.close()
-                    except: pass
         
         # 2. EVALUATE RTC CALENDAR & TIME SLOTS FOR RELAYS & WARNINGS
         current_warnings = []

@@ -3,27 +3,81 @@ import subprocess, threading
 import tkinter as tk
 from PIL import Image, ImageTk
 from tkinter import font
-from gpiozero import OutputDevice, Device
 import minimalmodbus
 import serial
 import paho.mqtt.client as mqtt
-
 try:
-    from gpiozero.pins.lgpio import LGPIOFactory
-    Device.pin_factory = LGPIOFactory()
-    print("📌 GPIO Backend: LGPIOFactory (Raspberry Pi 5)")
-except Exception as e1:
+    from gpiozero import OutputDevice, Device
+    gpio_initialized = False
+
+    # 1. Try LGPIO (Raspberry Pi 5 / Debian Bookworm standard)
     try:
-        from gpiozero.pins.pigpio import PiGPIOFactory
-        Device.pin_factory = PiGPIOFactory()
-        print("📌 GPIO Backend: PiGPIOFactory")
-    except Exception as e2:
+        from gpiozero.pins.lgpio import LGPIOFactory
+        Device.pin_factory = LGPIOFactory()
+        print("📌 GPIO Backend Active: LGPIOFactory (Raspberry Pi 5 / Debian Bookworm)")
+        gpio_initialized = True
+    except Exception:
+        pass
+
+    # 2. Try RPi.GPIO (Raspberry Pi 4 / Pi 3 / Bullseye standard)
+    if not gpio_initialized:
+        try:
+            from gpiozero.pins.rpigpio import RPiGPIOFactory
+            Device.pin_factory = RPiGPIOFactory()
+            print("📌 GPIO Backend Active: RPiGPIOFactory (Raspberry Pi 4 / Pi 3)")
+            gpio_initialized = True
+        except Exception:
+            pass
+
+    # 3. Try Native direct GPIO driver
+    if not gpio_initialized:
+        try:
+            from gpiozero.pins.native import NativeFactory
+            Device.pin_factory = NativeFactory()
+            print("📌 GPIO Backend Active: NativeFactory (Direct Hardware GPIO)")
+            gpio_initialized = True
+        except Exception:
+            pass
+
+    # 4. Try pigpio daemon (if pigpiod service is running)
+    if not gpio_initialized:
+        try:
+            from gpiozero.pins.pigpio import PiGPIOFactory
+            Device.pin_factory = PiGPIOFactory()
+            print("📌 GPIO Backend Active: PiGPIOFactory (pigpiod Daemon)")
+            gpio_initialized = True
+        except Exception:
+            pass
+
+    # 5. Fallback for non-Pi / Laptop / Development x86 environment
+    if not gpio_initialized:
         try:
             from gpiozero.pins.mock import MockFactory
             Device.pin_factory = MockFactory()
-            print("Notice: Physical GPIO backend unavailable. Using MockFactory.")
-        except Exception as e3:
-            print("Notice: GPIO pin factory initialization fallback:", e3)
+            print("⚠️ Running on PC/Laptop (x86 Hardware) -> Physical GPIO unavailable. Using MockFactory.")
+        except Exception as e:
+            print("Notice: GPIO pin factory initialization fallback:", e)
+
+except ImportError:
+    print("⚠️ gpiozero not installed. Running with simulated mock GPIO.")
+    class OutputDevice:
+        def __init__(self, pin, active_high=False, initial_value=False):
+            self.pin = pin
+            self.active_high = active_high
+            self._state = initial_value
+        @property
+        def is_active(self):
+            return self._state
+        def on(self):
+            self._state = True
+            print(f"⚡ [MOCK RELAY Pin {self.pin}] -> ON")
+        def off(self):
+            self._state = False
+            print(f"⚪ [MOCK RELAY Pin {self.pin}] -> OFF")
+        def close(self):
+            pass
+    class Device:
+        pin_factory = None
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,9 +106,18 @@ if os.path.exists(OLD_FILE):
         print("🗑️ Removed legacy setpoints.json...")
     except Exception: pass
 
-# Fixed Serial Ports with By-Path Mapping
-SERIAL_PORT_WATER = "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
-SERIAL_PORT_MD02  = "/dev/serial/by-path/platform-3f980000.usb-usb-0:1.4.1:1.0-port0"
+# Candidate Ports for Dynamic USB Discovery (Raspberry Pi 5, 4, and Rock Pi)
+CANDIDATE_PORTS = [
+    "/dev/ttyUSB0",
+    "/dev/ttyUSB1",
+    "/dev/ttyUSB2",
+    "/dev/serial/by-path/platform-xhci-hcd.0-usb-0:1.1:1.0-port0",
+    "/dev/serial/by-path/platform-xhci-hcd.0-usb-0:1.2:1.0-port0",
+    "/dev/serial/by-path/platform-xhci-hcd.0-usb-0:1.3:1.0-port0",
+    "/dev/serial/by-path/platform-xhci-hcd.0-usb-0:1.4:1.0-port0",
+    "/dev/ttyAMA0",
+    "/dev/serial0"
+]
 
 DEVICE_ID_WATER = 1
 DEVICE_ID_MD02  = 1
@@ -172,93 +235,149 @@ def save_setpoints():
     except Exception as e:
         print(f"Error saving setpoints: {e}")
 
-def open_modbus_instrument(port, device_id):
+_water_inst_cache = None
+_md02_inst_cache = None
+_water_port_active = None
+_md02_port_active = None
+
+def open_modbus_instrument(port, device_id=1, baudrate=9600):
     try:
         inst = minimalmodbus.Instrument(port, device_id)
-        inst.serial.baudrate = 9600
+        inst.serial.baudrate = baudrate
         inst.serial.bytesize = 8
         inst.serial.parity   = serial.PARITY_NONE
         inst.serial.stopbits = 1
-        inst.serial.timeout  = 0.5
+        inst.serial.timeout  = 0.4
         inst.mode = minimalmodbus.MODE_RTU
         inst.clear_buffers_before_each_transaction = True
         return inst
     except Exception:
         return None
 
-water_instrument = open_modbus_instrument(SERIAL_PORT_WATER, DEVICE_ID_WATER)
-md02_instrument  = open_modbus_instrument(SERIAL_PORT_MD02, DEVICE_ID_MD02)
-
-# Read Water/Soil Sensor (Registers for Moist, Temp, EC, pH matching control121.py & almora1.py)
+# Read Water/Soil Sensor (Registers for Moist, Temp, EC, pH)
 def read_water_sensor():
-    global water_instrument
-    if water_instrument is None:
-        water_instrument = open_modbus_instrument(SERIAL_PORT_WATER, DEVICE_ID_WATER)
-    if water_instrument is None:
-        return None
+    global _water_inst_cache, _water_port_active
+    ports_to_try = []
+    if _water_port_active and os.path.exists(_water_port_active):
+        ports_to_try.append(_water_port_active)
+    for p in CANDIDATE_PORTS:
+        if os.path.exists(p) and p not in ports_to_try and p != _md02_port_active:
+            ports_to_try.append(p)
 
-    try:
-        water_instrument.serial.reset_input_buffer()
-        # Mode 1: Block read registers 18..21 via FC3
+    for port in ports_to_try:
+        inst = open_modbus_instrument(port, DEVICE_ID_WATER, baudrate=9600)
+        if not inst:
+            continue
         try:
-            data = water_instrument.read_registers(registeraddress=18, number_of_registers=4, functioncode=3)
-            moist  = round(data[0] / 10.0, 1)                  # %
-            temp   = round(data[1] / 10.0, 1)                  # °C
-            raw_ec = data[2]                                   # uS/cm
-            ec     = round((raw_ec * 0.85) / 1000.0, 2)         # mS/cm
-            ph     = round(data[3] / 100.0, 2)                 # pH
-            return {"temp": temp, "moist": moist, "ec": ec, "raw_ec": raw_ec, "ph": ph}
+            if hasattr(inst.serial, 'reset_input_buffer'):
+                try: inst.serial.reset_input_buffer()
+                except Exception: pass
+
+            # Mode 1: FC3 block read
+            try:
+                data = inst.read_registers(registeraddress=18, number_of_registers=4, functioncode=3)
+                moist  = round(data[0] / 10.0, 1)
+                temp   = round(data[1] / 10.0, 1)
+                raw_ec = data[2]
+                ec     = round((raw_ec * 0.85) / 1000.0, 2)
+                ph     = round(data[3] / 100.0, 2)
+                if (ec > 0 or ph > 0 or temp > 0):
+                    _water_port_active = port
+                    _water_inst_cache = inst
+                    return {"temp": temp, "moist": moist, "ec": ec, "raw_ec": raw_ec, "ph": ph}
+            except Exception: pass
+
+            # Mode 2: FC4 block read
+            try:
+                data = inst.read_registers(registeraddress=18, number_of_registers=4, functioncode=4)
+                moist  = round(data[0] / 10.0, 1)
+                temp   = round(data[1] / 10.0, 1)
+                raw_ec = data[2]
+                ec     = round((raw_ec * 0.85) / 1000.0, 2)
+                ph     = round(data[3] / 100.0, 2)
+                if (ec > 0 or ph > 0 or temp > 0):
+                    _water_port_active = port
+                    _water_inst_cache = inst
+                    return {"temp": temp, "moist": moist, "ec": ec, "raw_ec": raw_ec, "ph": ph}
+            except Exception: pass
+
+            # Mode 3: Individual registers
+            try:
+                moist_raw = inst.read_register(0x0012, 1)
+                temp_raw  = inst.read_register(0x0013, 1, signed=True)
+                raw_ec    = inst.read_register(0x0015, 0)
+                ph_raw    = inst.read_register(0x0006, 2)
+                moist = round(moist_raw / 10.0, 1)
+                temp  = round(temp_raw / 10.0, 1)
+                ec    = round((raw_ec * 0.85) / 1000.0, 2)
+                ph    = round(ph_raw / 100.0, 2)
+                _water_port_active = port
+                _water_inst_cache = inst
+                return {"temp": temp, "moist": moist, "ec": ec, "raw_ec": raw_ec, "ph": ph}
+            except Exception: pass
+
         except Exception:
             pass
 
-        # Mode 2: Block read registers 18..21 via FC4
         try:
-            data = water_instrument.read_registers(registeraddress=18, number_of_registers=4, functioncode=4)
-            moist  = round(data[0] / 10.0, 1)
-            temp   = round(data[1] / 10.0, 1)
-            raw_ec = data[2]
-            ec     = round((raw_ec * 0.85) / 1000.0, 2)
-            ph     = round(data[3] / 100.0, 2)
-            return {"temp": temp, "moist": moist, "ec": ec, "raw_ec": raw_ec, "ph": ph}
-        except Exception:
-            pass
+            if inst.serial: inst.serial.close()
+        except Exception: pass
 
-        # Mode 3: Individual register reads (0x0012, 0x0013, 0x0015, 0x0006 - matching almora1.py)
-        moist_raw = water_instrument.read_register(0x0012, 1)
-        temp_raw  = water_instrument.read_register(0x0013, 1, signed=True)
-        raw_ec    = water_instrument.read_register(0x0015, 0)
-        ph_raw    = water_instrument.read_register(0x0006, 2)
+    return None
 
-        moist = round(moist_raw / 10.0, 1)
-        temp  = round(temp_raw / 10.0, 1)
-        ec    = round((raw_ec * 0.85) / 1000.0, 2)
-        ph    = round(ph_raw / 100.0, 2)
-        return {"temp": temp, "moist": moist, "ec": ec, "raw_ec": raw_ec, "ph": ph}
-    except Exception as e:
-        print(f"⚠️ Water Sensor Read Failed on {SERIAL_PORT_WATER}: {e}")
-        return None
-
-# Read MD02 Temperature & Humidity Transmitter (Modbus RTU matching control121.py)
+# Read MD02 Temperature & Humidity Transmitter (Modbus RTU)
 def read_md02_sensor():
-    global md02_instrument
-    if md02_instrument is None:
-        md02_instrument = open_modbus_instrument(SERIAL_PORT_MD02, DEVICE_ID_MD02)
-    if md02_instrument is None:
-        return None
+    global _md02_inst_cache, _md02_port_active
+    ports_to_try = []
+    if _md02_port_active and os.path.exists(_md02_port_active):
+        ports_to_try.append(_md02_port_active)
+    for p in CANDIDATE_PORTS:
+        if os.path.exists(p) and p not in ports_to_try and p != _water_port_active:
+            ports_to_try.append(p)
 
-    try:
-        md02_instrument.serial.reset_input_buffer()
-        try:
-            rt = md02_instrument.read_register(1, 1, signed=True, functioncode=4)
-            rh = md02_instrument.read_register(2, 1, functioncode=4)
-            return {"room_temp": round(rt, 1), "room_humi": round(rh, 1)}
-        except Exception:
-            rt = md02_instrument.read_register(1, 1, signed=True, functioncode=3)
-            rh = md02_instrument.read_register(2, 1, functioncode=3)
-            return {"room_temp": round(rt, 1), "room_humi": round(rh, 1)}
-    except Exception as e:
-        print(f"⚠️ MD02 Sensor Read Failed on {SERIAL_PORT_MD02}: {e}")
-        return None
+    for port in ports_to_try:
+        # Probe at 4800 and 9600
+        for baud in [9600, 4800]:
+            inst = open_modbus_instrument(port, DEVICE_ID_MD02, baudrate=baud)
+            if not inst:
+                continue
+            try:
+                if hasattr(inst.serial, 'reset_input_buffer'):
+                    try: inst.serial.reset_input_buffer()
+                    except Exception: pass
+
+                for fc in [4, 3]:
+                    try:
+                        vals = inst.read_registers(0, 2, functioncode=fc)
+                        if vals and len(vals) >= 2:
+                            d0 = round(vals[0] / 10.0, 1) if vals[0] > 100 else round(float(vals[0]), 1)
+                            d1 = round(vals[1] / 10.0, 1) if vals[1] > 100 else round(float(vals[1]), 1)
+                            if 0 <= d0 <= 100 and -10 <= d1 <= 75:
+                                _md02_port_active = port
+                                _md02_inst_cache = inst
+                                return {"room_temp": d1, "room_humi": d0}
+                            elif -10 <= d0 <= 75 and 0 <= d1 <= 100:
+                                _md02_port_active = port
+                                _md02_inst_cache = inst
+                                return {"room_temp": d0, "room_humi": d1}
+                    except Exception: pass
+
+                try:
+                    rt = inst.read_register(1, 1, signed=True, functioncode=4)
+                    rh = inst.read_register(2, 1, functioncode=4)
+                    _md02_port_active = port
+                    _md02_inst_cache = inst
+                    return {"room_temp": round(rt, 1), "room_humi": round(rh, 1)}
+                except Exception: pass
+
+            except Exception:
+                pass
+
+            try:
+                if inst.serial: inst.serial.close()
+            except Exception: pass
+
+    return None
 
 CONTROL_BROKER = "147.93.106.142"
 CONTROL_PORT = 1883
@@ -267,15 +386,30 @@ CONTROL_PASS = "MGPL@5598"
 CONTROL_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/update"
 CURRENT_SETP_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/current"
 CONTROL_SYNC_TOPIC = f"inhydro/{DEVICE_NAME}/setpoints/request_sync"
+CONTROL_CMD_TOPIC  = f"inhydro/{DEVICE_NAME}/command"
 LIVE_TELEMETRY_TOPIC = f"inhydro/{DEVICE_NAME}/telemetry/live"
 
 def on_control_message(client, userdata, msg):
     try:
-        if msg.topic == CONTROL_SYNC_TOPIC:
+        topic = msg.topic
+        payload_str = msg.payload.decode('utf-8', errors='ignore').strip()
+
+        if topic == CONTROL_SYNC_TOPIC:
             control_client.publish(CURRENT_SETP_TOPIC, json.dumps(setpoints), retain=True)
             return
 
-        new_data = json.loads(msg.payload.decode())
+        if topic == CONTROL_CMD_TOPIC:
+            try:
+                cmd_data = json.loads(payload_str)
+                action = cmd_data.get("action") or cmd_data.get("command")
+                if action == "RESTART":
+                    root.after(1000, restart_program)
+                elif action == "STOP":
+                    root.after(0, manual_stop)
+            except Exception: pass
+            return
+
+        new_data = json.loads(payload_str)
         setpoints.update(new_data)
         save_setpoints()
             
@@ -290,9 +424,14 @@ def on_control_message(client, userdata, msg):
     except Exception as e:
         print(f"❌ Private Control MQTT Update Error: {e}")
 
+STATUS_TOPIC = f"inhydro/{DEVICE_NAME}/status"
+
 is_mqtt_connected = False
 control_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"Almora2_Device_{DEVICE_NAME}")
 control_client.on_message = on_control_message
+
+# Set MQTT Last Will & Testament (LWT)
+control_client.will_set(STATUS_TOPIC, json.dumps({"status": "offline", "device": DEVICE_NAME}), qos=1, retain=True)
 
 def on_control_connect(client, userdata, flags, rc, properties=None):
     global is_mqtt_connected
@@ -300,6 +439,9 @@ def on_control_connect(client, userdata, flags, rc, properties=None):
         is_mqtt_connected = True
         client.subscribe(CONTROL_TOPIC)
         client.subscribe(CONTROL_SYNC_TOPIC)
+        client.subscribe(CONTROL_CMD_TOPIC)
+        client.publish(STATUS_TOPIC, json.dumps({"status": "online", "device": DEVICE_NAME}), retain=True)
+        client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", json.dumps({"status": "online", "device": DEVICE_NAME, "heartbeat": True}), retain=False)
         client.publish(CURRENT_SETP_TOPIC, json.dumps(setpoints), retain=True)
         print(f"✅ Connected to Private VPS Mosquitto Broker ({CONTROL_BROKER})")
     else:
@@ -726,10 +868,12 @@ def publish_live_telemetry(water_data, md02_data):
             "timer1": relay_timer1.is_active,
             "timer2": relay_timer2.is_active,
             "relay_temp": relay_temp.is_active,
-            "relay_humi": relay_humi.is_active
+            "relay_humi": relay_humi.is_active,
+            "status": "online"
         }
         control_client.publish(f"inhydro/{DEVICE_NAME}/telemetry/live", json.dumps(payload), retain=False)
         control_client.publish(f"inhydro/{DEVICE_NAME}/room1/telemetry/live", json.dumps(payload), retain=False)
+        control_client.publish(STATUS_TOPIC, json.dumps({"status": "online", "device": DEVICE_NAME, "timestamp": ts_str}), retain=True)
     except Exception as e:
         pass
 
@@ -948,8 +1092,17 @@ except Exception:
     lbl_logo = tk.Label(root, text="INHYDRO", fg="#1565c0", bg="#ffffff", font=("Arial", 16, "bold"))
     lbl_logo.place(relx=0.98, y=8, anchor="ne")
 
-lbl_clock = tk.Label(root, text="", font=("Arial", 11, "bold"), fg="#1565c0", bg="#ffffff")
+lbl_clock = tk.Label(root, text="", font=("Arial", 12, "bold"), fg="#1565c0", bg="#ffffff", justify="left")
 lbl_clock.place(x=15, y=10, anchor="nw")
+
+def update_clock():
+    now = datetime.datetime.now()
+    date_str = now.strftime("%d %b %Y (%A)")
+    time_str = now.strftime("%I:%M:%S %p")
+    lbl_clock.config(text=f"{date_str}\n{time_str}")
+    root.after(1000, update_clock)
+
+update_clock()
 
 
 tk.Label(frame_main, text=f"DEVICE: {DEVICE_NAME.upper()} — CONTROLLER & MONITOR", font=FONT_BIG, fg="#1565c0", bg="#ffffff").pack(pady=(8, 2))
@@ -1801,9 +1954,10 @@ def update():
 
     lbl_warn.config(text="\n".join(warnings))
 
-    # Update Header Clock (Day, Date, Time)
+    # Update Header Clock (Day, Date, Time - Up & Down)
     if 'lbl_clock' in globals():
-        lbl_clock.config(text=datetime.datetime.now().strftime("%A, %d %b %Y  |  %I:%M:%S %p"))
+        now = datetime.datetime.now()
+        lbl_clock.config(text=f"{now.strftime('%d %b %Y (%A)')}\n{now.strftime('%I:%M:%S %p')}")
 
     # Live Telemetry and Offline Sync Logging (1 Second Frequency)
     publish_live_telemetry(water_data, md02_data)
