@@ -194,7 +194,30 @@ const extractFeatures = (packet, deviceMeta = {}) => {
       chamber7_humidity: cleanNumber(s7?.h ?? s7?.humi ?? s7?.hum),
     });
   }
-  // ── 4. Monit / Monnet / Generic Devices ──────────────────────────────────────
+  // ── 4. ITC Polyhouse Controller (PH-01 to PH-06) ──────────────────────────────
+  else if (deviceType === 'itc_polyhouse') {
+    const sData = rawData.sensor_data || {};
+    const dliData = rawData.dli_data?.accumulators || {};
+    const phKeys = ['PH-01', 'PH-02', 'PH-03', 'PH-04', 'PH-05', 'PH-06'];
+
+    for (const ph of phKeys) {
+      const probe = sData[ph];
+      if (probe && typeof probe === 'object') {
+        const dliObj = dliData[ph] || {};
+        rows.push({
+          ...baseMeta,
+          room: ph,
+          room_temp: cleanNumber(probe.temp),
+          room_humidity: cleanNumber(probe.humi),
+          co2: cleanNumber(probe.co2),
+          ppfd: cleanNumber(probe.par),
+          dli: cleanNumber(dliObj.dli ?? probe.dli),
+          status: probe.status || 'OK'
+        });
+      }
+    }
+  }
+  // ── 5. Monit / Monnet / Generic Devices ──────────────────────────────────────
   else {
     const d = rawData.telemetry || rawData || {};
     rows.push({

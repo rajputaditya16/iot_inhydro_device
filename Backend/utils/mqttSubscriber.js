@@ -229,7 +229,10 @@ const startMqttSubscriber = () => {
         if (item.sensor_data) {
           return {
             sensor_data: item.sensor_data,
+            dli_data: item.dli_data || {},
             relay_states: item.relay_states || {},
+            common_pump_active: item.common_pump_active ?? false,
+            active_water_zone: item.active_water_zone || null,
             room_paused_states: item.room_paused_states || {},
             active_warnings: item.active_warnings || []
           };

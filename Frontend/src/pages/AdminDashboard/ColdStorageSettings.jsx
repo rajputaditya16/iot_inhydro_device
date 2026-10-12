@@ -3,7 +3,7 @@ import {
   Save, RefreshCw, ChevronDown, Server, Thermometer, Droplets, Activity,
   Wind, Sun, Clock, Calendar, Plus, Trash2, Edit3, Sliders, Power, Zap,
   CheckCircle2, X, Bell, Bookmark, AlertTriangle, ChevronRight,
-  ChevronLeft, Sparkles, Check, Sprout, Layers, RotateCw, PowerOff
+  ChevronLeft, Sparkles, Check, Sprout, Layers, RotateCw, PowerOff, BarChart3
 } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
 
@@ -1582,6 +1582,16 @@ const ColdStorageSettings = () => {
             <Sliders className="h-3.5 w-3.5 text-emerald-400" />
             <span>Config</span>
           </button>
+
+          {/* Analytics Quick Link */}
+          <a
+            href={`/analytics?deviceId=${selectedDevice?._id || ''}&room=${activeRoom}`}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-sky-500/40 bg-sky-500/10 hover:bg-sky-500/20 text-xs font-semibold text-sky-300 hover:text-white transition-all shadow-sm"
+            title={`Visit analytics for ${systemConfig.sensor_names[activeRoom] || DEFAULT_ROOM_NAMES[activeRoom] || activeRoom}`}
+          >
+            <BarChart3 className="h-3.5 w-3.5 text-sky-400" />
+            <span>Analytics</span>
+          </a>
 
           {/* Remote Hardware Controls: Restart & Exit */}
           <button

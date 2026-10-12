@@ -125,11 +125,12 @@ const UserDashboard = () => {
                 if (dev.status === 'blocked') return dev;
                 if (isExplicitOffline) return { ...dev, status: 'offline' };
 
-                const data = payload.data || {};
-                const temp = data.temp ?? data.temperature ?? data.room_temp ?? data.soil_temp ?? dev.temp;
-                const moisture = data.moisture ?? data.humidity ?? data.soil_moisture ?? dev.moisture;
+                const data = payload.data || payload.telemetry || payload;
+                const polySensors = data.sensor_data?.['PH-01'] || data.sensor_data?.[Object.keys(data.sensor_data || {})[0]] || {};
+                const temp = data.temp ?? data.temperature ?? data.room_temp ?? data.soil_temp ?? polySensors.temp ?? dev.temp;
+                const moisture = data.moisture ?? data.humidity ?? data.soil_moisture ?? polySensors.humidity ?? dev.moisture;
                 const ph = data.ph ?? dev.ph;
-                const ec = data.ec ?? dev.ec;
+                const ec = data.ec ?? polySensors.par ?? dev.ec;
 
                 return {
                   ...dev,
