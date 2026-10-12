@@ -5793,3 +5793,13 @@
 {"timestamp": "2026-09-16T13:14:49.676923+05:30", "skey": "PH-03", "sensor_name": "POLYHOUSE 03", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 03 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
 {"timestamp": "2026-09-16T13:14:49.677353+05:30", "skey": "PH-04", "sensor_name": "POLYHOUSE 04", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 04 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
 {"timestamp": "2026-09-16T13:14:49.677672+05:30", "skey": "PH-05", "sensor_name": "POLYHOUSE 05", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 05 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-10-09T12:30:00.617075+05:30", "skey": "PH-01", "sensor_name": "POLYHOUSE", "message": "Scheduled SPRINKLER Slot 2 Started (120s)", "actual": "RUNNING", "target": "SCHEDULE"}
+{"timestamp": "2026-10-09T13:05:39.205505+05:30", "skey": "SYSTEM", "sensor_name": "POLYHOUSE SYSTEM", "message": "Setpoints updated from LOCAL_HMI", "actual": "-", "target": "-"}
+{"timestamp": "2026-10-09T13:10:42.173408+05:30", "skey": "PH-01", "sensor_name": "POLYHOUSE", "message": "\u26a0 SENSOR FAULT: POLYHOUSE Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-10-09T13:32:29.441655+05:30", "skey": "PH-01", "sensor_name": "POLYHOUSE", "message": "\u26a0 SENSOR FAULT: POLYHOUSE Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-10-09T14:40:49.239022+05:30", "skey": "PH-01", "sensor_name": "POLYHOUSE", "message": "\u26a0 SENSOR FAULT: POLYHOUSE Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-10-10T13:50:25.810375+05:30", "skey": "PH-01", "sensor_name": "POLYHOUSE", "message": "\u26a0 SENSOR FAULT: POLYHOUSE Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-10-10T13:50:25.811555+05:30", "skey": "PH-02", "sensor_name": "POLYHOUSE 02", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 02 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-10-10T13:50:25.812231+05:30", "skey": "PH-03", "sensor_name": "POLYHOUSE 03", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 03 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-10-10T13:50:25.812682+05:30", "skey": "PH-04", "sensor_name": "POLYHOUSE 04", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 04 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
+{"timestamp": "2026-10-10T13:50:25.813075+05:30", "skey": "PH-05", "sensor_name": "POLYHOUSE 05", "message": "\u26a0 SENSOR FAULT: POLYHOUSE 05 Comm Error", "actual": "OFFLINE", "target": "ONLINE"}
