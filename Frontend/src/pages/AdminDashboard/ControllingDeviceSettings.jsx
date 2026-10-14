@@ -227,8 +227,8 @@ const ControllingDeviceSettings = () => {
 
     setClient(mqttClient);
 
-    // Real-time SSE Stream Fallback (100% reliable over HTTPS)
-    const sseUrl = `${API_BASE}/api/devices/stream`;
+    // Real-time SSE Stream Fallback (100% reliable over HTTPS with selective device filtering)
+    const sseUrl = `${API_BASE}/api/devices/stream?deviceId=${selectedDevice?._id || ''}&mqttId=${deviceRoot}`;
     const eventSource = new EventSource(sseUrl);
 
     eventSource.onopen = () => {

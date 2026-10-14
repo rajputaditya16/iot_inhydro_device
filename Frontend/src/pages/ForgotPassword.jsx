@@ -179,16 +179,17 @@ const ForgotPassword = () => {
               marginBottom: '0.5rem', letterSpacing: '-0.03em', lineHeight: 1.15,
             }}
           >
-            Smart Soil
+            Smart 
             <span style={{
               display: 'block', background: 'linear-gradient(135deg, #60bf71 0%, #3ecf8e 50%, #38d9a9 100%)',
               WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginTop: '0.15rem',
             }}>
-              Monitoring System
+            Hydroponics System
+
             </span>
           </motion.h1>
 
-          <motion.p
+          {/* <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.7 }}
@@ -198,7 +199,7 @@ const ForgotPassword = () => {
             }}
           >
             Precision agriculture through real-time IoT sensing and intelligent data analytics.
-          </motion.p>
+          </motion.p> */}
 
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -288,7 +289,7 @@ const ForgotPassword = () => {
               marginBottom: '0.5rem', letterSpacing: '-0.025em',
               lineHeight: 1.2,
             }}>
-              Smart Soil
+              Smart 
               <span style={{
                 display: 'block',
                 background: 'linear-gradient(135deg, #60bf71 0%, #3ecf8e 50%, #38d9a9 100%)',
@@ -296,15 +297,16 @@ const ForgotPassword = () => {
                 WebkitTextFillColor: 'transparent',
                 marginTop: '0.15rem',
               }}>
-                Monitoring System
+                Hydroponics System
+
               </span>
             </h1>
-            <p className="mobile-subtitle" style={{
+            {/* <p className="mobile-subtitle" style={{
               color: 'rgba(148,175,204,0.7)', fontSize: '0.85rem',
               lineHeight: 1.5, maxWidth: '280px', margin: '0 auto 1.5rem auto',
             }}>
               Precision agriculture through real-time IoT sensing and intelligent analytics.
-            </p>
+            </p> */}
           </div>
 
           <div style={{ marginBottom: '2rem' }} className="welcome-heading">

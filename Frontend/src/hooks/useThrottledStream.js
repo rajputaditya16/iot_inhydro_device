@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { telemetryWs } from '../utils/websocketClient';
 
 /**
- * 
+ * Enterprise Throttled Stream Hook for InHydro IoT
+ * Automatically uses low-latency selective WebSocket gateway with fallback to SSE.
+ * Buffers incoming telemetry packets in memory and flushes in batches at throttleMs rate.
+ *
  * @param {string} apiBase - The base API URL
- * @param {Object} filter - Device filtering params { deviceId, mqttId }
+ * @param {Object} filter - Device filtering params { deviceId, mqttId, devices }
  * @param {number} throttleMs - Throttle flush interval in milliseconds (default: 500ms)
  * @param {Function} onBatchedPackets - Optional callback invoked with batched packets
  * @returns {Object} { isConnected, latestPacket, lastUpdated, error }
@@ -41,56 +45,101 @@ export function useThrottledStream(apiBase, { deviceId, mqttId, devices } = {}, 
     timerRef.current = null;
   }, []);
 
+  const queuePacket = useCallback((payload) => {
+    if (!payload) return;
+    bufferRef.current.push(payload);
+    if (!timerRef.current) {
+      timerRef.current = setTimeout(flushBuffer, throttleMs);
+    }
+  }, [flushBuffer, throttleMs]);
+
   useEffect(() => {
     if (!deviceId && !mqttId && !devices) {
       return;
     }
 
-    // Build targeted SSE URL with query parameters
-    const params = new URLSearchParams();
-    if (deviceId) params.set('deviceId', deviceId);
-    if (mqttId) params.set('mqttId', mqttId);
-    if (devices) params.set('devices', devices);
+    const cleanDeviceId = deviceId ? String(deviceId).toLowerCase() : null;
+    const cleanMqttId = mqttId ? String(mqttId).toLowerCase() : null;
+    const listDevices = devices ? devices.split(',').map(s => s.trim().toLowerCase()) : [];
 
-    const sseUrl = `${apiBase || ''}/api/devices/stream?${params.toString()}`;
-    const eventSource = new EventSource(sseUrl);
+    const targetRooms = [cleanDeviceId, cleanMqttId, ...listDevices].filter(Boolean);
 
-    eventSource.onopen = () => {
-      setIsConnected(true);
-      setError(null);
-    };
+    // 1. Subscribe specific rooms on WebSocket Gateway
+    if (targetRooms.length > 0) {
+      telemetryWs.subscribe(targetRooms);
+    }
 
-    eventSource.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-        if (!payload) return;
+    // 2. Track connection status
+    const unbindConn = telemetryWs.onConnectionChange((connected) => {
+      setIsConnected(connected);
+      if (connected) setError(null);
+    });
 
-        // Push packet to high-speed in-memory buffer
-        bufferRef.current.push(payload);
+    // 3. WebSocket message listener with selective room matching
+    const unbindWs = telemetryWs.onMessage((payload) => {
+      if (!payload) return;
+      const incomingDevId = payload.deviceId ? String(payload.deviceId).toLowerCase() : null;
+      const incomingMqttId = payload.mqttId ? String(payload.mqttId).toLowerCase() : null;
 
-        // Schedule throttled flush if not already active
-        if (!timerRef.current) {
-          timerRef.current = setTimeout(flushBuffer, throttleMs);
-        }
-      } catch (e) {
-        // Ignore heartbeat ping messages
+      const isMatch =
+        (cleanDeviceId && incomingDevId === cleanDeviceId) ||
+        (cleanMqttId && incomingMqttId === cleanMqttId) ||
+        (listDevices.length > 0 && (listDevices.includes(incomingDevId) || listDevices.includes(incomingMqttId))) ||
+        (!cleanDeviceId && !cleanMqttId && listDevices.length === 0);
+
+      if (isMatch) {
+        queuePacket(payload);
       }
-    };
+    });
 
-    eventSource.onerror = (err) => {
-      setIsConnected(false);
-      setError(err);
-    };
+    // 4. SSE Fallback (Active if WebSocket is disconnected or in restrictive proxies)
+    let sseSource = null;
+    const fallbackTimer = setTimeout(() => {
+      if (!telemetryWs.isConnected) {
+        const params = new URLSearchParams();
+        if (deviceId) params.set('deviceId', deviceId);
+        if (mqttId) params.set('mqttId', mqttId);
+        if (devices) params.set('devices', devices);
+
+        const sseUrl = `${apiBase || ''}/api/devices/stream?${params.toString()}`;
+        try {
+          sseSource = new EventSource(sseUrl);
+          sseSource.onopen = () => {
+            setIsConnected(true);
+            setError(null);
+          };
+          sseSource.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              queuePacket(data);
+            } catch {}
+          };
+          sseSource.onerror = (err) => {
+            setError(err);
+          };
+        } catch (e) {
+          setError(e);
+        }
+      }
+    }, 2500);
 
     return () => {
-      eventSource.close();
+      clearTimeout(fallbackTimer);
+      if (targetRooms.length > 0) {
+        telemetryWs.unsubscribe(targetRooms);
+      }
+      unbindConn();
+      unbindWs();
+      if (sseSource) {
+        sseSource.close();
+      }
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
       bufferRef.current = [];
     };
-  }, [apiBase, deviceId, mqttId, throttleMs, flushBuffer]);
+  }, [apiBase, deviceId, mqttId, devices, queuePacket]);
 
   return { isConnected, latestPacket, lastUpdated, error };
 }

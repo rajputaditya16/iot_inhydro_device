@@ -6,6 +6,7 @@ import {
   ChevronLeft, Sparkles, Check, Sprout, Layers, RotateCw, PowerOff, BarChart3
 } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
+import { telemetryWs } from '../../utils/websocketClient';
 
 // --- NUMBER & TIME FORMATTING HELPERS ---
 const safeNum = (val, fallback = 0) => {
@@ -847,6 +848,20 @@ const ColdStorageSettings = () => {
 
     setClient(mqttClient);
 
+    const targetRooms = [targetDevId, selectedMqttId].filter(Boolean).map((s) => String(s).toLowerCase());
+    telemetryWs.subscribe(targetRooms);
+
+    const unbindWs = telemetryWs.onMessage((packet) => {
+      if (!packet) return;
+      const devId = packet.deviceId ? String(packet.deviceId).toLowerCase() : '';
+      const mId = packet.mqttId ? String(packet.mqttId).toLowerCase() : '';
+      if (targetRooms.includes(devId) || targetRooms.includes(mId)) {
+        setStatus('connected');
+        const pData = packet.data || packet.telemetry || packet;
+        processTelemetryRef.current(pData);
+      }
+    });
+
     const sseUrl = `${API_BASE}/api/devices/stream?deviceId=${targetDevId}&mqttId=${selectedMqttId || ''}`;
     let eventSource = null;
     try {
@@ -869,6 +884,8 @@ const ColdStorageSettings = () => {
     } catch (e) { }
 
     return () => {
+      telemetryWs.unsubscribe(targetRooms);
+      unbindWs();
       if (mqttClient) mqttClient.end();
       if (eventSource) eventSource.close();
     };

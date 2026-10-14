@@ -1934,9 +1934,9 @@ const AnalyticsPage = () => {
               )}
               <span className="hidden sm:inline">&bull;</span>
               <span className="text-slate-300 font-medium">{chartSubtitle}</span>
-              {totalCollectionDocs > 0 && totalCollectionDocs !== totalDbPoints && (
+              {/* {totalCollectionDocs > 0 && totalCollectionDocs !== totalDbPoints && (
                 <span className="text-slate-500 font-normal text-[11px]"> (DB: {totalCollectionDocs.toLocaleString()})</span>
-              )}
+              )} */}
             </div>
           </div>
 
@@ -2452,7 +2452,7 @@ const AnalyticsPage = () => {
                       </div>
                       <div>
                         <span className="text-slate-400 text-[10px] block">Readings</span>
-                        <span className="text-slate-200 font-bold">{activeSingleRoomStats.temp.count}</span>
+                        <span className="text-slate-200 font-bold">{(totalDbPoints > 0 ? totalDbPoints : activeSingleRoomStats.temp.count).toLocaleString()}</span>
                       </div>
                     </div>
                   </div>
@@ -2492,7 +2492,7 @@ const AnalyticsPage = () => {
                       </div>
                       <div>
                         <span className="text-slate-400 text-[10px] block">Readings</span>
-                        <span className="text-slate-200 font-bold">{activeSingleRoomStats.humi.count}</span>
+                        <span className="text-slate-200 font-bold">{(totalDbPoints > 0 ? totalDbPoints : activeSingleRoomStats.humi.count).toLocaleString()}</span>
                       </div>
                     </div>
                   </div>
@@ -3317,7 +3317,7 @@ const AnalyticsPage = () => {
               <Activity className="h-4 w-4 text-green-400" /> Statistical Telemetry Summary
             </h3>
             <span className="rounded-full bg-slate-700/60 border border-slate-600/50 px-3 py-1 text-xs font-semibold text-slate-300">
-              {rawFeeds.length} Total Readings
+              {(totalDbPoints > 0 ? totalDbPoints : rawFeeds.length).toLocaleString()} Total Readings
             </span>
           </div>
           <table className="w-full text-sm min-w-[540px]">

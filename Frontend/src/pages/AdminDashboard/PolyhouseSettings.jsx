@@ -7,6 +7,7 @@ import {
   ChevronDown, Settings, Plus, Trash2, ArrowLeft, Info, Bell, BellOff, Volume2
 } from 'lucide-react';
 import { createMqttClient } from '../../utils/mqtt';
+import { telemetryWs } from '../../utils/websocketClient';
 
 const ALL_POLYHOUSES = ['PH-01', 'PH-02', 'PH-03', 'PH-04', 'PH-05', 'PH-06'];
 const ACTIVE_POLYHOUSES = ['PH-01', 'PH-02', 'PH-03', 'PH-04', 'PH-05'];
@@ -214,6 +215,18 @@ export default function PolyhouseSettings() {
       } catch (e) {}
     });
 
+    const targetRooms = [selectedDevice?._id, selectedDeviceRoot].filter(Boolean).map((s) => String(s).toLowerCase());
+    telemetryWs.subscribe(targetRooms);
+
+    const unbindWs = telemetryWs.onMessage((packet) => {
+      if (!packet) return;
+      const mId = packet.mqttId ? String(packet.mqttId).toLowerCase() : '';
+      const top = packet.topic ? String(packet.topic).toLowerCase() : '';
+      if (targetRooms.includes(mId) || targetRooms.some((r) => top.includes(r))) {
+        handlePacket(packet.topic, packet.data);
+      }
+    });
+
     // Real-time SSE fallback
     const sseUrl = `${API_BASE}/api/devices/stream?deviceId=${selectedDevice?._id || ''}&mqttId=${selectedDeviceRoot}`;
     const eventSource = new EventSource(sseUrl);
@@ -227,6 +240,8 @@ export default function PolyhouseSettings() {
     };
 
     return () => {
+      telemetryWs.unsubscribe(targetRooms);
+      unbindWs();
       if (mqttClient) mqttClient.end();
       eventSource.close();
     };

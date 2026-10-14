@@ -3,67 +3,190 @@ const mongoose = require('mongoose');
 const Device = require('../models/Device');
 const { getTelemetryModel } = require('../models/TelemetryLog');
 const EventEmitter = require('events');
+
+// Enterprise EventEmitter with high listener ceiling for 10,000+ real-time subscribers
 const telemetryEmitter = new EventEmitter();
-telemetryEmitter.setMaxListeners(100);
+telemetryEmitter.setMaxListeners(50000);
 
 const BROKER_URL = process.env.MQTT_BROKER_URL || 'mqtt://147.93.106.142:1883';
-const deviceCache = new Map(); // Caches mqttId -> deviceId to prevent redundant DB queries
-const deviceStatusCache = new Map(); // Caches deviceId -> { status, lastCheck, lastUpdate }
+
+// ── In-Memory Hot State Caches (P2 Zero-DB Ingestion Optimization) ───────────
+// Caches mqttId / name / id -> { id: ObjectId, status: string }
+const deviceCache = new Map();
+const deviceStatusCache = new Map(); // deviceId (string) -> status ('active' | 'blocked' | 'offline' | 'online')
 
 /**
- * Resolves the device ID for a given MQTT ID, using memory cache or DB query.
- * @param {string} mqttId - The MQTT client ID from the topic
- * @param {string} topic - The MQTT topic to check device type criteria
- * @returns {Promise<mongoose.Types.ObjectId|null>}
+ * Preloads all registered devices into memory cache on startup.
+ * Ensures zero MongoDB lookups during high-frequency telemetry ingestion.
  */
-const resolveDeviceId = async (mqttId, topic) => {
-  const cacheKey = `${mqttId}_${topic}`;
-  if (deviceCache.has(cacheKey)) {
-    return deviceCache.get(cacheKey);
+const preloadDeviceCache = async () => {
+  try {
+    const devices = await Device.find({}).select('_id mqttId name deviceName status');
+    devices.forEach((dev) => {
+      const info = { id: dev._id, status: dev.status || 'active' };
+      const idStr = String(dev._id);
+      if (dev.mqttId) deviceCache.set(String(dev.mqttId).toLowerCase(), info);
+      if (dev.name) deviceCache.set(String(dev.name).toLowerCase(), info);
+      if (dev.deviceName) deviceCache.set(String(dev.deviceName).toLowerCase(), info);
+      deviceCache.set(idStr, info);
+      deviceStatusCache.set(idStr, dev.status || 'active');
+    });
+    console.log(`✅ [MQTT Subscriber] Preloaded ${devices.length} devices into zero-latency memory cache.`);
+  } catch (err) {
+    console.error('[MQTT Subscriber] Failed to preload device cache:', err.message);
+  }
+};
+
+/**
+ * Resolves device info from fast memory cache, falling back to MongoDB once if newly registered.
+ * @param {string} mqttId 
+ * @returns {Promise<{ id: mongoose.Types.ObjectId, status: string } | null>}
+ */
+const resolveDeviceInfo = async (mqttId) => {
+  if (!mqttId) return null;
+  const cleanKey = String(mqttId).toLowerCase();
+
+  if (deviceCache.has(cleanKey)) {
+    return deviceCache.get(cleanKey);
   }
 
-  // Look up device in database strictly using exact MQTT ID, name, deviceName, or ObjectId
-  let device = null;
+  // Fallback DB query if newly added device hasn't been cached yet
   try {
-    const cleanId = mqttId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    device = await Device.findOne({
+    const cleanRegex = cleanKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const device = await Device.findOne({
       $or: [
-        { mqttId: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
-        { name: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
-        { deviceName: { $regex: new RegExp(`^${cleanId}$`, 'i') } },
+        { mqttId: { $regex: new RegExp(`^${cleanRegex}$`, 'i') } },
+        { name: { $regex: new RegExp(`^${cleanRegex}$`, 'i') } },
+        { deviceName: { $regex: new RegExp(`^${cleanRegex}$`, 'i') } },
         { _id: mongoose.Types.ObjectId.isValid(mqttId) ? mqttId : null }
       ].filter(Boolean)
-    });
-  } catch (e) { }
+    }).select('_id mqttId name deviceName status');
 
-  if (device) {
-    deviceCache.set(cacheKey, device._id);
-    return device._id;
-  }
+    if (device) {
+      const info = { id: device._id, status: device.status || 'active' };
+      const idStr = String(device._id);
+      deviceCache.set(cleanKey, info);
+      if (device.mqttId) deviceCache.set(String(device.mqttId).toLowerCase(), info);
+      deviceCache.set(idStr, info);
+      deviceStatusCache.set(idStr, device.status || 'active');
+      return info;
+    }
+  } catch (e) { }
 
   return null;
 };
 
 /**
- * Initializes and starts the MQTT Subscriber listener.
+ * Update memory cache when device status changes (e.g. blocked, unblocked, deleted).
  */
+const updateDeviceCacheStatus = (deviceId, newStatus) => {
+  const idStr = String(deviceId);
+  deviceStatusCache.set(idStr, newStatus);
+  for (const [key, val] of deviceCache.entries()) {
+    if (val && String(val.id) === idStr) {
+      val.status = newStatus;
+    }
+  }
+};
+
+// ── In-Memory Device State Batching Buffer (P2 MongoDB Write Reducer) ─────────
+// Buffers metadata updates (lastUpdated, cropName, settings, config) and flushes via bulkWrite
+const deviceUpdateBuffer = new Map(); // id (string) -> fields
+
+const queueDeviceStateUpdate = (deviceId, fields) => {
+  if (!deviceId || !fields || Object.keys(fields).length === 0) return;
+  const idStr = String(deviceId);
+  const existing = deviceUpdateBuffer.get(idStr) || {};
+  deviceUpdateBuffer.set(idStr, { ...existing, ...fields });
+};
+
+const flushDeviceStateUpdates = async () => {
+  if (deviceUpdateBuffer.size === 0) return;
+
+  const entries = Array.from(deviceUpdateBuffer.entries());
+  deviceUpdateBuffer.clear(); // Drain immediately
+
+  const bulkOps = entries.map(([id, fields]) => ({
+    updateOne: {
+      filter: { _id: id },
+      update: { $set: fields }
+    }
+  }));
+
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < bulkOps.length; i += CHUNK_SIZE) {
+    const chunk = bulkOps.slice(i, i + CHUNK_SIZE);
+    try {
+      await Device.bulkWrite(chunk, { ordered: false });
+    } catch (err) {
+      console.error('[MQTT Device BulkWrite] Error updating device statuses:', err.message);
+    }
+  }
+};
+
+// ── In-Memory Telemetry Write Queue & Parallel Batch Flush Engine ─────────────
+const writeBuffer = new Map(); // cleanId -> Array of docs
+
+const queueTelemetryDoc = (mqttId, doc) => {
+  const cleanId = String(mqttId).toLowerCase();
+  if (!writeBuffer.has(cleanId)) {
+    writeBuffer.set(cleanId, []);
+  }
+  const queue = writeBuffer.get(cleanId);
+  queue.push(doc);
+
+  // If buffer for this device exceeds 250 items, trigger immediate flush
+  if (queue.length >= 250) {
+    flushDeviceQueue(cleanId);
+  }
+};
+
+const flushDeviceQueue = async (cleanId) => {
+  const docs = writeBuffer.get(cleanId);
+  if (!docs || docs.length === 0) return;
+
+  writeBuffer.delete(cleanId); // Drain immediately
+
+  try {
+    const TelemetryModel = getTelemetryModel(cleanId);
+    await TelemetryModel.insertMany(docs, { ordered: false });
+  } catch (err) {
+    console.error(`[MQTT Buffer Flush] Error saving batch for "${cleanId}":`, err.message);
+  }
+};
+
+const flushAllQueues = async () => {
+  const keys = Array.from(writeBuffer.keys());
+  if (keys.length === 0) return;
+
+  // Process collections concurrently in pools of 25 at a time
+  const CONCURRENCY = 25;
+  for (let i = 0; i < keys.length; i += CONCURRENCY) {
+    const chunk = keys.slice(i, i + CONCURRENCY);
+    await Promise.allSettled(chunk.map((k) => flushDeviceQueue(k)));
+  }
+};
+
+// ── Starts MQTT Subscriber Daemon ─────────────────────────────────────────────
 const startMqttSubscriber = () => {
   console.log(`[MQTT Subscriber] Connecting to Mosquitto VPS broker: ${BROKER_URL}`);
+
+  // Warm device cache immediately
+  preloadDeviceCache();
 
   const options = {
     clientId: `backend_subscriber_daemon_${Date.now()}`,
     username: process.env.MQTT_USERNAME,
     password: process.env.MQTT_PASSWORD,
     clean: true,
-    reconnectPeriod: 5000, // Reconnect every 5 seconds if connection is lost
-    rejectUnauthorized: false, // Bypass self-signed certificate validation on raw IP
+    reconnectPeriod: 5000,
+    rejectUnauthorized: false,
   };
   const client = mqtt.connect(BROKER_URL, options);
 
   client.on('connect', () => {
     console.log('✅ [MQTT Subscriber] Connected to Mosquitto VPS broker.');
 
-    // Subscribe to all private broker telemetry topics under inhydro/#
     client.subscribe('inhydro/#', (err) => {
       if (err) console.error('[MQTT Subscriber] Failed to subscribe to inhydro/# topics:', err);
       else console.log('✅ [MQTT Subscriber] Subscribed to inhydro/# (all private broker device telemetry)');
@@ -73,12 +196,9 @@ const startMqttSubscriber = () => {
   client.on('message', async (topic, message, packet) => {
     try {
       const topicParts = topic.split('/');
-      // Topic structure is: inhydro/{mqttId}/...
       const mqttId = topicParts[1];
 
-      if (!mqttId) {
-        return;
-      }
+      if (!mqttId) return;
 
       // Parse payload
       const payloadString = message.toString();
@@ -106,7 +226,7 @@ const startMqttSubscriber = () => {
         topic.includes('/command/') ||
         topic.endsWith('/command/status');
 
-      // Check if this payload contains actual sensor/device telemetry data or heartbeat from hardware
+      // Check if this payload contains sensor/device telemetry data or heartbeat
       const hasTelemetryData = Boolean(
         payloadData && typeof payloadData === 'object' && (
           payloadData.sensor_data ||
@@ -122,22 +242,26 @@ const startMqttSubscriber = () => {
         )
       );
 
-      // Genuine fresh incoming telemetry check (use 3-minute window and prioritize live reception)
       const isFresh = !isOutboundTopic && hasTelemetryData && (
         !isRetain
           ? true
           : Boolean(parsedTime && Math.abs(now.getTime() - parsedTime.getTime()) < 180 * 1000)
       );
 
-      // For live packets, use server reception time 'now' to prevent device clock skew issues
       const packetTimestamp = !isRetain ? now : (parsedTime || now);
 
-      // Update MongoDB with incoming telemetry / settings / config / crop programs
-      const deviceId = await resolveDeviceId(mqttId, topic);
+      // Resolve device info from zero-latency memory cache
+      const devInfo = await resolveDeviceInfo(mqttId);
+      const deviceId = devInfo ? devInfo.id : null;
+
+      // Check if device is blocked (in-memory lookup: 0ms)
+      if (devInfo && devInfo.status === 'blocked') {
+        return; // Device is blocked, ignore telemetry
+      }
+
       if (deviceId) {
         const updateFields = {};
 
-        // Update lastUpdated and status for fresh incoming telemetry or heartbeat
         if (isFresh && packetTimestamp) {
           updateFields.lastUpdated = packetTimestamp;
           updateFields.status = 'online';
@@ -178,12 +302,13 @@ const startMqttSubscriber = () => {
           updateFields['config'] = cfgUpdate;
         }
 
+        // Buffer device state updates into bulkWrite queue (eliminates individual DB queries)
         if (Object.keys(updateFields).length > 0) {
-          Device.findByIdAndUpdate(deviceId, { $set: updateFields }).catch(() => { });
+          queueDeviceStateUpdate(deviceId, updateFields);
         }
       }
 
-      // Broadcast in-memory SSE telemetry event IMMEDIATELY for zero-latency streaming with resolved deviceId
+      // Broadcast in-memory telemetry event IMMEDIATELY for zero-latency WebSocket and SSE streaming
       telemetryEmitter.emit('telemetry', {
         deviceId: deviceId ? String(deviceId) : null,
         mqttId,
@@ -193,39 +318,18 @@ const startMqttSubscriber = () => {
         timestamp: packetTimestamp || now
       });
 
-      if (deviceId) {
-        // Check if device is blocked (cached for 10 seconds to prevent DB saturation)
-        const nowMs = now.getTime();
-        let cachedStatus = deviceStatusCache.get(String(deviceId));
-        if (!cachedStatus || nowMs - cachedStatus.lastCheck > 10000) {
-          const deviceCheck = await Device.findById(deviceId).select('status');
-          cachedStatus = {
-            status: deviceCheck ? deviceCheck.status : 'active',
-            lastCheck: nowMs,
-            lastUpdate: cachedStatus ? cachedStatus.lastUpdate : 0
-          };
-          deviceStatusCache.set(String(deviceId), cachedStatus);
-        }
-
-        if (cachedStatus.status === 'blocked') {
-          return; // Device is blocked, ignore telemetry
-        }
-      }
-
-      // Only live telemetry streams and batch offline historical sync packets should create time-series records.
-      // Configuration & state snapshots (/state, /setpoints/current, /config) must NEVER create time-series telemetry records.
+      // Filter out commands and setpoint configuration packets from time-series storage
       const isTelemetryStream = (topic.includes('/telemetry') || (!topic.includes('/state') && !topic.includes('/setpoints') && !topic.includes('/config'))) && !isRetain;
 
       if (isOutboundTopic || topic.includes('/heartbeat') || topic.endsWith('/command/status') || !hasTelemetryData || !isTelemetryStream) {
         return;
       }
 
-      // ── High-Throughput Bulk Write Queue (P3 Optimization) ──
+      // ── High-Throughput Bulk Write Queue ──
       const saveTimestamp = packetTimestamp || new Date();
 
       const sanitizeTelemetryItem = (item) => {
         if (!item || typeof item !== 'object') return item;
-        // If packet contains heavy setpoints or crop programs, extract only clean sensor telemetry & states
         if (item.sensor_data) {
           return {
             sensor_data: item.sensor_data,
@@ -278,62 +382,24 @@ const startMqttSubscriber = () => {
   return client;
 };
 
-// ── In-Memory Write Queue & Batch Flush Engine ────────────────────────────────
-const writeBuffer = new Map(); // mqttId -> Array of docs
-let flushTimer = null;
+// ── Background Flush Intervals ────────────────────────────────────────────────
+// 1. Flush telemetry document queues every 1000ms
+const telemetryFlushTimer = setInterval(flushAllQueues, 1000);
 
-const queueTelemetryDoc = (mqttId, doc) => {
-  const cleanId = String(mqttId).toLowerCase();
-  if (!writeBuffer.has(cleanId)) {
-    writeBuffer.set(cleanId, []);
-  }
-  const queue = writeBuffer.get(cleanId);
-  queue.push(doc);
-
-  // If buffer for this device exceeds 100 items, trigger immediate flush
-  if (queue.length >= 100) {
-    flushDeviceQueue(cleanId);
-  }
-};
-
-const flushDeviceQueue = async (cleanId) => {
-  const docs = writeBuffer.get(cleanId);
-  if (!docs || docs.length === 0) return;
-
-  writeBuffer.set(cleanId, []); // Drain the queue immediately
-
-  try {
-    const TelemetryModel = getTelemetryModel(cleanId);
-    await TelemetryModel.insertMany(docs, { ordered: false });
-    // console.log(`[MQTT Buffer Flush] Batch saved ${docs.length} packets for "${cleanId}" in ${TelemetryModel.collection.name}`);
-  } catch (err) {
-    console.error(`[MQTT Buffer Flush] Error saving batch for "${cleanId}":`, err.message);
-  }
-};
-
-const flushAllQueues = async () => {
-  const keys = Array.from(writeBuffer.keys());
-  for (const key of keys) {
-    await flushDeviceQueue(key);
-  }
-};
-
-// Start 2-second background flush loop
-if (!flushTimer) {
-  flushTimer = setInterval(flushAllQueues, 2000);
-}
+// 2. Flush device state bulkWrite buffer every 1000ms
+const deviceStateFlushTimer = setInterval(flushDeviceStateUpdates, 1000);
 
 // Graceful process exit cleanup
-process.on('SIGINT', async () => {
-  if (flushTimer) clearInterval(flushTimer);
+const gracefulShutdown = async () => {
+  clearInterval(telemetryFlushTimer);
+  clearInterval(deviceStateFlushTimer);
   await flushAllQueues();
-});
-process.on('SIGTERM', async () => {
-  if (flushTimer) clearInterval(flushTimer);
-  await flushAllQueues();
-});
+  await flushDeviceStateUpdates();
+};
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
 
-// Background 15-second Watchdog to automatically detect offline devices
+// ── High-Efficiency Bulk Offline Watchdog (Every 15s) ─────────────────────────
 setInterval(async () => {
   try {
     const threshold = new Date(Date.now() - 45000);
@@ -343,24 +409,36 @@ setInterval(async () => {
         { lastUpdated: { $lt: threshold } },
         { lastUpdated: null }
       ]
-    });
-    for (const dev of staleDevices) {
-      dev.status = 'offline';
-      await dev.save();
-      deviceStatusCache.delete(String(dev._id));
+    }).select('_id mqttId');
+
+    if (staleDevices.length === 0) return;
+
+    const staleIds = staleDevices.map(d => d._id);
+    // 1 single bulk update for all stale devices instead of loop of dev.save()
+    await Device.updateMany({ _id: { $in: staleIds } }, { $set: { status: 'offline' } });
+
+    staleDevices.forEach(dev => {
+      const idStr = String(dev._id);
+      deviceStatusCache.set(idStr, 'offline');
       telemetryEmitter.emit('telemetry', {
-        deviceId: String(dev._id),
+        deviceId: idStr,
         mqttId: dev.mqttId,
         topic: `inhydro/${dev.mqttId}/status`,
         data: { status: 'offline', timestamp: new Date() },
         isRetain: false,
         timestamp: new Date()
       });
-    }
+    });
   } catch (err) {
     // Ignore transient DB query errors
   }
 }, 15000);
 
-module.exports = { startMqttSubscriber, telemetryEmitter, flushAllQueues };
-
+module.exports = {
+  startMqttSubscriber,
+  telemetryEmitter,
+  flushAllQueues,
+  flushDeviceStateUpdates,
+  updateDeviceCacheStatus,
+  preloadDeviceCache
+};

@@ -34,6 +34,7 @@ import LiveChart from '../../components/LiveChart';
 import { SkeletonCard } from '../../components/Skeleton';
 import { useThrottledStream } from '../../hooks/useThrottledStream';
 import { createMqttClient } from '../../utils/mqtt';
+import { telemetryWs } from '../../utils/websocketClient';
 import {
   getMetricStatus,
   getMetricColor,
@@ -2052,68 +2053,70 @@ const LiveMonitoring = () => {
     };
   }, [selectedDeviceId, candidateIdentifiers, queuePackets]);
 
-  // ── Step 3B: Server-Sent Events (SSE) Live Telemetry Stream (Guaranteed for HTTPS & Production Deployments) ──
+  // ── Step 3B: Enterprise WebSocket & SSE Real-time Telemetry Stream ──
   useEffect(() => {
     if (!selectedDeviceId) return;
 
-    let eventSource = null;
-    let retryTimer = null;
+    const targetRooms = [
+      String(selectedDeviceId).toLowerCase(),
+      targetMqttId ? String(targetMqttId).toLowerCase() : null,
+      ...(candidateIdentifiers || []).map((id) => String(id).toLowerCase()),
+    ].filter(Boolean);
 
-    const connectSSE = () => {
-      try {
-        const queryParams = new URLSearchParams();
-        queryParams.set('deviceId', selectedDeviceId);
-        if (targetMqttId) queryParams.set('mqttId', targetMqttId);
+    // Subscribe only to this device on WebSocket Gateway
+    telemetryWs.subscribe(targetRooms);
 
-        const sseUrl = `${API_BASE}/api/devices/stream?${queryParams.toString()}`;
-        eventSource = new EventSource(sseUrl);
+    const unsubscribeWs = telemetryWs.onMessage((packet) => {
+      if (!packet) return;
+      const incomingDevId = packet.deviceId ? String(packet.deviceId).toLowerCase() : null;
+      const incomingMqttId = packet.mqttId ? String(packet.mqttId).toLowerCase() : null;
 
-        eventSource.onopen = () => {
-          setIsMqttConnected(true);
-        };
-
-        eventSource.onmessage = (event) => {
-          try {
-            if (!event.data || event.data === ': connected' || event.data.startsWith(':')) return;
-            const packet = JSON.parse(event.data);
-            if (packet && (packet.data || packet.telemetry || packet.sensors)) {
-              queuePackets([packet]);
-            }
-          } catch (err) {
-            // Heartbeat or malformed non-json
-          }
-        };
-
-        eventSource.onerror = () => {
-          if (eventSource) {
-            eventSource.close();
-            eventSource = null;
-          }
-          if (!retryTimer) {
-            retryTimer = setTimeout(() => {
-              retryTimer = null;
-              connectSSE();
-            }, 3000);
-          }
-        };
-      } catch (err) {
-        console.warn('[LiveMonitoring] SSE stream setup skipped:', err);
+      const isMatch = targetRooms.includes(incomingDevId) || targetRooms.includes(incomingMqttId);
+      if (isMatch && (packet.data || packet.telemetry || packet.sensors)) {
+        setIsMqttConnected(true);
+        queuePackets([packet]);
       }
-    };
+    });
 
-    connectSSE();
+    // Fallback SSE if WebSocket is blocked by corporate firewall or in reconnecting state
+    let eventSource = null;
+    let fallbackTimer = setTimeout(() => {
+      if (!telemetryWs.isConnected) {
+        try {
+          const queryParams = new URLSearchParams();
+          queryParams.set('deviceId', selectedDeviceId);
+          if (targetMqttId) queryParams.set('mqttId', targetMqttId);
+
+          const sseUrl = `${API_BASE}/api/devices/stream?${queryParams.toString()}`;
+          eventSource = new EventSource(sseUrl);
+
+          eventSource.onopen = () => setIsMqttConnected(true);
+
+          eventSource.onmessage = (event) => {
+            try {
+              if (!event.data || event.data.startsWith(':')) return;
+              const packet = JSON.parse(event.data);
+              if (packet && (packet.data || packet.telemetry || packet.sensors)) {
+                queuePackets([packet]);
+              }
+            } catch (err) {}
+          };
+        } catch (err) {
+          console.warn('[LiveMonitoring] SSE stream setup skipped:', err);
+        }
+      }
+    }, 2500);
 
     return () => {
+      clearTimeout(fallbackTimer);
+      telemetryWs.unsubscribe(targetRooms);
+      unsubscribeWs();
       if (eventSource) {
         eventSource.close();
         eventSource = null;
       }
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-        retryTimer = null;
-      }
     };
-  }, [selectedDeviceId, targetMqttId, API_BASE, handleBatchedPackets]);
+  }, [selectedDeviceId, targetMqttId, candidateIdentifiers, queuePackets, API_BASE]);
 
   // ── Step 3C: Periodic Heartbeat / Analytics Fallback Poll (Keeps data active even if streams disconnect) ──
   useEffect(() => {
