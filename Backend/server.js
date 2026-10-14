@@ -1,9 +1,11 @@
 const express = require('express');
+const http = require('http');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const User = require('./models/User');
 const Admin = require('./models/Admin');
 const { startMqttSubscriber } = require('./utils/mqttSubscriber');
+const { initWebSocketGateway } = require('./utils/websocketGateway');
 require('dotenv').config();
 
 // ── Route imports ────────────────────────────
@@ -141,17 +143,27 @@ const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/iot_project';
 
 const connectWithRetry = (uri, attempt = 1) => {
-  console.log(`Connecting to MongoDB (Attempt ${attempt})...`);
+  const mongooseOptions = {
+    maxPoolSize: 150,
+    minPoolSize: 20,
+    socketTimeoutMS: 45000,
+    serverSelectionTimeoutMS: 10000,
+  };
+
   mongoose
-    .connect(uri)
+    .connect(uri, mongooseOptions)
     .then(async () => {
-      console.log(`✅  MongoDB connected successfully to: ${uri}`);
+      console.log(`✅  MongoDB connected successfully (Pool: min=20, max=150) to: ${uri}`);
 
       await ensureDefaultAdmin();
       await ensureDefaultSuperAdmin();
 
-      app.listen(PORT, () => {
+      const server = http.createServer(app);
+      initWebSocketGateway(server);
+
+      server.listen(PORT, () => {
         console.log(`🚀  Server running on http://localhost:${PORT}`);
+        console.log(`⚡  Real-Time WebSocket Gateway ready on ws://localhost:${PORT}/ws/telemetry`);
         // Start the MQTT Subscriber daemon to store real-time telemetry
         startMqttSubscriber();
       });

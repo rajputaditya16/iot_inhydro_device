@@ -17,6 +17,7 @@ import ColdStorageSettings from './pages/AdminDashboard/ColdStorageSettings';
 import AlmoraSettings from './pages/AdminDashboard/AlmoraSettings';
 import Almora2Settings from './pages/AdminDashboard/Almora2Settings';
 import MonitSettings from './pages/AdminDashboard/MonitSettings';
+import PolyhouseSettings from './pages/AdminDashboard/PolyhouseSettings';
 
 const SharedLayoutRoute = () => (
   <ProtectedRoute allowedAccountTypes={['superadmin', 'admin', 'user']}>
@@ -46,6 +47,7 @@ function App() {
           <Route path="/almora-settings" element={<ProtectedRoute allowedAccountTypes={['admin', 'superadmin']}><AlmoraSettings /></ProtectedRoute>} />
           <Route path="/almora2-settings" element={<ProtectedRoute allowedAccountTypes={['admin', 'superadmin']}><Almora2Settings /></ProtectedRoute>} />
           <Route path="/monit-settings" element={<ProtectedRoute allowedAccountTypes={['admin', 'superadmin']}><MonitSettings /></ProtectedRoute>} />
+          <Route path="/polyhouse-settings" element={<ProtectedRoute allowedAccountTypes={['admin', 'superadmin']}><PolyhouseSettings /></ProtectedRoute>} />
           <Route path="/settings" element={<SettingsPage />} />
 
           {/* Admin only */}

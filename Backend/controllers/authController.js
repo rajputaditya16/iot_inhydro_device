@@ -150,7 +150,7 @@ exports.login = async (req, res) => {
     sendTokenResponse(user, 200, res, accountType);
   } catch (err) {
     console.error('[Login Error]', err.message);
-    res.status(500).json({ success: false, message: 'Server error during login.' });
+    res.status(500).json({ success: false, message: 'Server error during login.'});
   }
 };
 
@@ -222,14 +222,14 @@ exports.forgotPassword = async (req, res) => {
         <p>You requested a password reset. Your OTP is:</p>
         <h3 style="background: #f4f4f4; padding: 10px; display: inline-block; border-radius: 5px; color: #333; letter-spacing: 2px;">${otp}</h3>
         <p>This OTP is valid for 10 minutes. If you did not request this, please ignore this email.</p>
-        <p>Thank you,<br>INHYDRO Smart Soil Team</p>
+        <p>Thank you,<br>INHYDRO Smart Hydroponics System Team</p>
       </div>
     `;
 
     try {
       await sendEmail({
         to: user.email,
-        subject: 'Password Reset OTP - INHYDRO Smart Soil',
+        subject: 'Password Reset OTP - INHYDRO Smart Hydroponics System',
         html: message,
       });
 

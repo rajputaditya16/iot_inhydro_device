@@ -9,6 +9,7 @@ import LightMotorPumpSettings from '../AdminDashboard/LightMotorPumpSettings';
 import OfficeControlSettings from '../AdminDashboard/OfficeControlSettings';
 import ControllingDeviceSettings from '../AdminDashboard/ControllingDeviceSettings';
 import MonitSettings from '../AdminDashboard/MonitSettings';
+import PolyhouseSettings from '../AdminDashboard/PolyhouseSettings';
 
 const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('profile');
@@ -195,6 +196,7 @@ const SettingsPage = () => {
       ...(hasType(['office_control']) ? [{ key: 'office_control_config', label: 'Office Control Setup', icon: Monitor }] : []),
       ...(hasType(['controlling']) ? [{ key: 'controlling_config', label: 'Controller Setup', icon: Monitor }] : []),
       ...(hasType(['monit', 'monnet', 'monit_device', 'dosing']) ? [{ key: 'monit_config', label: 'Monnet Setup', icon: Monitor }] : []),
+      ...(hasType(['itc_polyhouse']) ? [{ key: 'polyhouse_config', label: 'Polyhouse Setup', icon: Monitor }] : []),
     ] : []),
   ];
 
@@ -280,6 +282,11 @@ const SettingsPage = () => {
           {/* Monit Controller */}
           {activeTab === 'monit_config' && (
             <MonitSettings />
+          )}
+
+          {/* Polyhouse Controller */}
+          {activeTab === 'polyhouse_config' && (
+            <PolyhouseSettings />
           )}
 
           {/* Profile */}

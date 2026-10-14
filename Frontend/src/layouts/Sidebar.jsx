@@ -11,18 +11,12 @@ import {
   Settings,
   LogOut,
   Shield,
-  Snowflake,
-  Droplets,
-  Wind
 } from 'lucide-react';
 
 const navItems = [
   { label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
   { label: 'Devices', icon: Cpu, path: '/devices' },
   { label: 'Live Monitoring', icon: Activity, path: '/monitoring' },
-  // { label: 'Cold Storage', icon: Snowflake, path: '/cold-storage', adminOnly: true },
-  // { label: 'Almora Machine', icon: Droplets, path: '/almora-settings', adminOnly: true },
-  // { label: 'Almora Machine 2', icon: Wind, path: '/almora2-settings', adminOnly: true },
   { label: 'Analytics', icon: BarChart3, path: '/analytics' },
   { label: 'User Management', icon: Users, path: '/users', adminOnly: true },
   { label: 'Admin Management', icon: Shield, path: '/admins', superadminOnly: true },
@@ -48,9 +42,11 @@ const Sidebar = ({ collapsed, isMobile = false, isOpen = true, onItemClick, user
   return (
     <motion.aside
       initial={false}
-      animate={isMobile ? { x: isOpen ? 0 : -280, width: 260 } : { x: 0, width: collapsed ? 72 : 260 }}
+      animate={isMobile ? { x: isOpen ? 0 : -320, width: 280 } : { x: 0, width: collapsed ? 72 : 260 }}
       transition={{ duration: 0.3, ease: 'easeInOut' }}
-      className="fixed left-0 top-0 z-40 flex h-screen flex-col border-r border-slate-700/50 bg-slate-900/95 backdrop-blur-xl"
+      className={`fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-slate-700/50 bg-slate-900/95 backdrop-blur-xl overflow-hidden shadow-2xl ${
+        isMobile && !isOpen ? 'pointer-events-none invisible' : 'pointer-events-auto visible'
+      }`}
     >
       {/* Logo */}
       <div className="flex h-16 items-center justify-between px-4">
@@ -65,12 +61,12 @@ const Sidebar = ({ collapsed, isMobile = false, isOpen = true, onItemClick, user
           backgroundPosition: 'top',
         }} >
 
-          <img className='w-45 h-15 p-2' style={{ rotate: '-15deg', }} src={logo} alt="" srcSet="" />
+          <img className='w-50 h-15 p-2' style={{ rotate: '-15deg', }} src={logo} alt="" srcSet="" />
         </div>
       </div>
 
       {/* Navigation */}
-      <nav className="mt-10 flex-1 space-y-1 overflow-y-auto px-3 border-1 border-slate-700/50 rounded-lg mx-3 py-4 mb-1">
+      <nav className="mt-4 flex-1 space-y-1 overflow-y-auto px-3 border border-slate-700/40 rounded-xl mx-3 py-3 mb-1 no-scrollbar">
         {filteredItems.map((item) => {
           let itemPath = item.path;
           if (item.label === 'Dashboard') {

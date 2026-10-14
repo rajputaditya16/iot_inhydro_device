@@ -34,6 +34,7 @@ import LiveChart from '../../components/LiveChart';
 import { SkeletonCard } from '../../components/Skeleton';
 import { useThrottledStream } from '../../hooks/useThrottledStream';
 import { createMqttClient } from '../../utils/mqtt';
+import { telemetryWs } from '../../utils/websocketClient';
 import {
   getMetricStatus,
   getMetricColor,
@@ -659,6 +660,18 @@ const LiveMonitoring = () => {
     water_temp: [], moisture: [], ec: [], ph: [], room_temp: [], room_humi: [], orp: [], co2: [],
     vpd: [], dli: [], wind_speed: [], wind_dir: [], do: [], ppfd: [], n: [], p: [], k: [],
   });
+  // ── ITC Polyhouse Controller Live States ────────────────────────────────────
+  const [polyhouseData, setPolyhouseData] = useState(initialCachedSnapshot?.polyhouseData || null);
+  const [polyhouseHistory, setPolyhouseHistory] = useState(initialCachedSnapshot?.polyhouseHistory || {
+    'PH-01': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+    'PH-02': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+    'PH-03': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+    'PH-04': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+    'PH-05': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+    'PH-06': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+  });
+  const [activePolyhouseTab, setActivePolyhouseTab] = useState('PH-01');
+
   const [isMqttConnected, setIsMqttConnected] = useState(false);
 
   const token = localStorage.getItem('token');
@@ -709,8 +722,8 @@ const LiveMonitoring = () => {
     const name = String(deviceMeta.name || '').toLowerCase();
     const mqttId = String(deviceMeta.mqttId || '').toLowerCase();
 
-    // STRICTLY EXCLUDE single Almora devices (almora1, almora2, almora3, sensor1, type almora/almora2)
-    if (type === 'almora' || type === 'almora2' || mqttId.startsWith('almora') || mqttId === 'sensor1') {
+    // STRICTLY EXCLUDE single Almora devices and ITC Polyhouse
+    if (type === 'almora' || type === 'almora2' || type === 'itc_polyhouse' || mqttId.startsWith('almora') || mqttId === 'sensor1') {
       return false;
     }
 
@@ -725,9 +738,10 @@ const LiveMonitoring = () => {
     );
   }, [deviceMeta]);
 
+  const isPolyhouseDevice = deviceMeta?.deviceType === 'itc_polyhouse';
   const isOfficeControlDevice = deviceMeta?.deviceType === 'office_control';
   const isControllingDevice = deviceMeta?.deviceType === 'controlling';
-  const isStandardDevice = !isMultiSensorDevice && !isOfficeControlDevice && !isControllingDevice;
+  const isStandardDevice = !isMultiSensorDevice && !isOfficeControlDevice && !isControllingDevice && !isPolyhouseDevice;
 
   // ── Real-time freshness ticker (ticks every 5 seconds to evaluate device timeout) ──
   const [nowTime, setNowTime] = useState(Date.now());
@@ -1222,6 +1236,57 @@ const LiveMonitoring = () => {
               setCustomSensorNames(latestFeed.system_config.sensor_names);
             }
           }
+
+          if (deviceMeta?.deviceType === 'itc_polyhouse' && latestFeed) {
+            const rawPoly = latestFeed.telemetry || latestFeed;
+            setPolyhouseData((prev) => ({
+              ...(prev || {}),
+              ...rawPoly,
+              sensor_data: latestFeed.sensor_data || rawPoly.sensor_data || {},
+              relay_states: latestFeed.relay_states || rawPoly.relay_states || {},
+              room_paused_states: latestFeed.room_paused_states || rawPoly.room_paused_states || {},
+              common_pump_active: latestFeed.common_pump_active ?? rawPoly.common_pump_active,
+              active_water_zone: latestFeed.active_water_zone ?? rawPoly.active_water_zone,
+              dli_data: latestFeed.dli_data || rawPoly.dli_data || {},
+            }));
+
+            if (feeds && feeds.length > 0) {
+              const initHist = {
+                'PH-01': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+                'PH-02': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+                'PH-03': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+                'PH-04': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+                'PH-05': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+                'PH-06': { temp: [], humidity: [], co2: [], par: [], dli: [] },
+              };
+              feeds.forEach((feed) => {
+                const time = new Date(feed.created_at || feed.timestamp || Date.now()).toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+                const sData = feed.sensor_data || feed.telemetry?.sensor_data || {};
+                const dliData = feed.dli_data || feed.telemetry?.dli_data || {};
+                ['PH-01', 'PH-02', 'PH-03', 'PH-04', 'PH-05', 'PH-06'].forEach((zKey) => {
+                  if (sData[zKey]) {
+                    const z = sData[zKey];
+                    initHist[zKey].temp.push({ time, value: parseFloat(z.temp) || 0 });
+                    initHist[zKey].humidity.push({ time, value: parseFloat(z.humidity) || 0 });
+                    initHist[zKey].co2.push({ time, value: parseFloat(z.co2) || 0 });
+                    initHist[zKey].par.push({ time, value: parseFloat(z.par) || 0 });
+                    initHist[zKey].dli.push({ time, value: parseFloat(dliData[zKey] ?? z.dli) || 0 });
+                  }
+                });
+              });
+              ['PH-01', 'PH-02', 'PH-03', 'PH-04', 'PH-05', 'PH-06'].forEach((zKey) => {
+                initHist[zKey].temp = initHist[zKey].temp.slice(-24);
+                initHist[zKey].humidity = initHist[zKey].humidity.slice(-24);
+                initHist[zKey].co2 = initHist[zKey].co2.slice(-24);
+                initHist[zKey].par = initHist[zKey].par.slice(-24);
+                initHist[zKey].dli = initHist[zKey].dli.slice(-24);
+              });
+              setPolyhouseHistory((prev) => ({ ...initHist, ...prev }));
+            }
+          }
         }
 
         setLoading(false);
@@ -1259,6 +1324,7 @@ const LiveMonitoring = () => {
           deviceMeta?.name,
           deviceMeta?.deviceType === 'office_control' ? 'system2' : null,
           deviceMeta?.deviceType === 'controlling' ? 'controlling' : null,
+          deviceMeta?.deviceType === 'itc_polyhouse' ? (deviceMeta?.mqttId || deviceMeta?.name) : null,
           isMultiSensorDevice ? 'cold_room' : null,
           isMultiSensorDevice ? 'cold_storage' : null,
           isMultiSensorDevice ? 'control123' : null,
@@ -1278,6 +1344,7 @@ const LiveMonitoring = () => {
       const isMultiSensor = isMultiSensorDevice;
       const isOfficeControl = isOfficeControlDevice;
       const isControlling = isControllingDevice;
+      const isPolyhouse = isPolyhouseDevice;
 
       let latestTelemetryTimestamp = null;
       let hasMatchingTelemetry = false;
@@ -1679,6 +1746,59 @@ const LiveMonitoring = () => {
             });
             return nextHist;
           });
+        } else if (isPolyhouse) {
+          const polyPayload = payload.telemetry || payload.sensor_data ? payload : (payload.data || payload);
+          if (polyPayload.sensor_data || polyPayload.relay_states || polyPayload.common_pump_active !== undefined) {
+            hasMatchingTelemetry = true;
+            if (!packet.isRetain) {
+              latestTelemetryTimestamp = new Date();
+            } else if (packetDate) {
+              if (!latestTelemetryTimestamp || packetDate > latestTelemetryTimestamp) {
+                latestTelemetryTimestamp = packetDate;
+              }
+            }
+            setPolyhouseData((prev) => ({
+              ...(prev || {}),
+              ...polyPayload,
+              sensor_data: {
+                ...(prev?.sensor_data || {}),
+                ...(polyPayload.sensor_data || {}),
+              },
+              relay_states: {
+                ...(prev?.relay_states || {}),
+                ...(polyPayload.relay_states || {}),
+              },
+              room_paused_states: {
+                ...(prev?.room_paused_states || {}),
+                ...(polyPayload.room_paused_states || {}),
+              },
+              common_pump_active: polyPayload.common_pump_active !== undefined ? polyPayload.common_pump_active : prev?.common_pump_active,
+              active_water_zone: polyPayload.active_water_zone !== undefined ? polyPayload.active_water_zone : prev?.active_water_zone,
+              dli_data: {
+                ...(prev?.dli_data || {}),
+                ...(polyPayload.dli_data || {}),
+              },
+            }));
+
+            if (polyPayload.sensor_data) {
+              setPolyhouseHistory((prev) => {
+                const nextHist = { ...prev };
+                Object.keys(polyPayload.sensor_data).forEach((zoneKey) => {
+                  const zData = polyPayload.sensor_data[zoneKey] || {};
+                  const prevZone = nextHist[zoneKey] || { temp: [], humidity: [], co2: [], par: [], dli: [] };
+                  const dliVal = polyPayload.dli_data?.[zoneKey] ?? zData.dli ?? 0;
+                  nextHist[zoneKey] = {
+                    temp: [...(prevZone.temp || []), { time: timeStr, value: parseFloat(zData.temp) || 0 }].slice(-24),
+                    humidity: [...(prevZone.humidity || []), { time: timeStr, value: parseFloat(zData.humidity) || 0 }].slice(-24),
+                    co2: [...(prevZone.co2 || []), { time: timeStr, value: parseFloat(zData.co2) || 0 }].slice(-24),
+                    par: [...(prevZone.par || []), { time: timeStr, value: parseFloat(zData.par) || 0 }].slice(-24),
+                    dli: [...(prevZone.dli || []), { time: timeStr, value: parseFloat(dliVal) || 0 }].slice(-24),
+                  };
+                });
+                return nextHist;
+              });
+            }
+          }
         } else {
           const tel = payload.telemetry || payload.sensors || payload.data || payload || {};
           const tempVal =
@@ -1856,7 +1976,7 @@ const LiveMonitoring = () => {
         }, 2000);
       }
     },
-    [candidateIdentifiers, deviceMeta, selectedDeviceId, isMultiSensorDevice, isOfficeControlDevice, isControllingDevice]
+    [candidateIdentifiers, deviceMeta, selectedDeviceId, isMultiSensorDevice, isOfficeControlDevice, isControllingDevice, isPolyhouseDevice]
   );
 
   // ── High-Performance Micro-Batch Queue (Prevents UI stutter and frame drops) ──
@@ -1933,68 +2053,70 @@ const LiveMonitoring = () => {
     };
   }, [selectedDeviceId, candidateIdentifiers, queuePackets]);
 
-  // ── Step 3B: Server-Sent Events (SSE) Live Telemetry Stream (Guaranteed for HTTPS & Production Deployments) ──
+  // ── Step 3B: Enterprise WebSocket & SSE Real-time Telemetry Stream ──
   useEffect(() => {
     if (!selectedDeviceId) return;
 
-    let eventSource = null;
-    let retryTimer = null;
+    const targetRooms = [
+      String(selectedDeviceId).toLowerCase(),
+      targetMqttId ? String(targetMqttId).toLowerCase() : null,
+      ...(candidateIdentifiers || []).map((id) => String(id).toLowerCase()),
+    ].filter(Boolean);
 
-    const connectSSE = () => {
-      try {
-        const queryParams = new URLSearchParams();
-        queryParams.set('deviceId', selectedDeviceId);
-        if (targetMqttId) queryParams.set('mqttId', targetMqttId);
+    // Subscribe only to this device on WebSocket Gateway
+    telemetryWs.subscribe(targetRooms);
 
-        const sseUrl = `${API_BASE}/api/devices/stream?${queryParams.toString()}`;
-        eventSource = new EventSource(sseUrl);
+    const unsubscribeWs = telemetryWs.onMessage((packet) => {
+      if (!packet) return;
+      const incomingDevId = packet.deviceId ? String(packet.deviceId).toLowerCase() : null;
+      const incomingMqttId = packet.mqttId ? String(packet.mqttId).toLowerCase() : null;
 
-        eventSource.onopen = () => {
-          setIsMqttConnected(true);
-        };
-
-        eventSource.onmessage = (event) => {
-          try {
-            if (!event.data || event.data === ': connected' || event.data.startsWith(':')) return;
-            const packet = JSON.parse(event.data);
-            if (packet && (packet.data || packet.telemetry || packet.sensors)) {
-              queuePackets([packet]);
-            }
-          } catch (err) {
-            // Heartbeat or malformed non-json
-          }
-        };
-
-        eventSource.onerror = () => {
-          if (eventSource) {
-            eventSource.close();
-            eventSource = null;
-          }
-          if (!retryTimer) {
-            retryTimer = setTimeout(() => {
-              retryTimer = null;
-              connectSSE();
-            }, 3000);
-          }
-        };
-      } catch (err) {
-        console.warn('[LiveMonitoring] SSE stream setup skipped:', err);
+      const isMatch = targetRooms.includes(incomingDevId) || targetRooms.includes(incomingMqttId);
+      if (isMatch && (packet.data || packet.telemetry || packet.sensors)) {
+        setIsMqttConnected(true);
+        queuePackets([packet]);
       }
-    };
+    });
 
-    connectSSE();
+    // Fallback SSE if WebSocket is blocked by corporate firewall or in reconnecting state
+    let eventSource = null;
+    let fallbackTimer = setTimeout(() => {
+      if (!telemetryWs.isConnected) {
+        try {
+          const queryParams = new URLSearchParams();
+          queryParams.set('deviceId', selectedDeviceId);
+          if (targetMqttId) queryParams.set('mqttId', targetMqttId);
+
+          const sseUrl = `${API_BASE}/api/devices/stream?${queryParams.toString()}`;
+          eventSource = new EventSource(sseUrl);
+
+          eventSource.onopen = () => setIsMqttConnected(true);
+
+          eventSource.onmessage = (event) => {
+            try {
+              if (!event.data || event.data.startsWith(':')) return;
+              const packet = JSON.parse(event.data);
+              if (packet && (packet.data || packet.telemetry || packet.sensors)) {
+                queuePackets([packet]);
+              }
+            } catch (err) {}
+          };
+        } catch (err) {
+          console.warn('[LiveMonitoring] SSE stream setup skipped:', err);
+        }
+      }
+    }, 2500);
 
     return () => {
+      clearTimeout(fallbackTimer);
+      telemetryWs.unsubscribe(targetRooms);
+      unsubscribeWs();
       if (eventSource) {
         eventSource.close();
         eventSource = null;
       }
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-        retryTimer = null;
-      }
     };
-  }, [selectedDeviceId, targetMqttId, API_BASE, handleBatchedPackets]);
+  }, [selectedDeviceId, targetMqttId, candidateIdentifiers, queuePackets, API_BASE]);
 
   // ── Step 3C: Periodic Heartbeat / Analytics Fallback Poll (Keeps data active even if streams disconnect) ──
   useEffect(() => {
@@ -2505,6 +2627,252 @@ const LiveMonitoring = () => {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── ITC Polyhouse Controller Live View ───────────────────────────── */}
+      {isPolyhouseDevice && (() => {
+        const zones = [
+          { key: 'PH-01', name: 'Polyhouse 01', ch: [1, 2, 3, 4] },
+          { key: 'PH-02', name: 'Polyhouse 02', ch: [5, 6, 7, 8] },
+          { key: 'PH-03', name: 'Polyhouse 03', ch: [9, 10, 11, 12] },
+          { key: 'PH-04', name: 'Polyhouse 04', ch: [13, 14, 15, 16] },
+          { key: 'PH-05', name: 'Polyhouse 05', ch: [17, 18, 19, 20] },
+          { key: 'PH-06', name: 'PH-06 (Outside / Reference)', ch: [] },
+        ];
+
+        const activeZone = zones.find((z) => z.key === activePolyhouseTab) || zones[0];
+        const rawSensorData = polyhouseData?.sensor_data || {};
+        const activeSensor = rawSensorData[activeZone.key] || { temp: null, humidity: null, co2: null, par: null, dli: null };
+        const dliVal = polyhouseData?.dli_data?.[activeZone.key] ?? activeSensor.dli;
+        const rawRelays = polyhouseData?.relay_states || {};
+        const isPaused = Boolean(polyhouseData?.room_paused_states?.[activeZone.key]);
+        const commonPumpOn = Boolean(polyhouseData?.common_pump_active || rawRelays['21'] == 1 || rawRelays[21] == 1);
+        const waterZone = polyhouseData?.active_water_zone || null;
+
+        const polyMetricsConfig = [
+          { key: 'temp', label: 'Temperature', val: activeSensor.temp, unit: '°C', icon: Thermometer, type: 'temperature' },
+          { key: 'humidity', label: 'Humidity', val: activeSensor.humidity, unit: '%', icon: Droplets, type: 'moisture' },
+          { key: 'co2', label: 'CO2 Level', val: activeSensor.co2, unit: 'ppm', icon: Activity, type: 'co2' },
+          { key: 'par', label: 'PAR / PPFD', val: activeSensor.par, unit: 'µmol/m²/s', icon: Sun, type: 'default' },
+          { key: 'dli', label: 'Daily Light Integral (DLI)', val: dliVal, unit: 'mol/m²/d', icon: Sun, type: 'default' },
+        ];
+
+        const activeHist = polyhouseHistory[activeZone.key] || { temp: [], humidity: [], co2: [], par: [], dli: [] };
+
+        return (
+          <div className="space-y-6">
+            {/* System Master Status Bar */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 rounded-2xl border border-emerald-500/20 bg-slate-900/60 p-4 backdrop-blur-sm shadow-xl">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-3 w-3 relative">
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${commonPumpOn ? 'bg-emerald-400' : 'bg-slate-400'}`} />
+                    <span className={`relative inline-flex rounded-full h-3 w-3 ${commonPumpOn ? 'bg-emerald-500' : 'bg-slate-500'}`} />
+                  </span>
+                  <span className="text-sm font-semibold text-white">Master Pump (R21):</span>
+                  <span className={`rounded-lg px-2.5 py-1 text-xs font-bold border ${commonPumpOn ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-slate-800 text-slate-400 border-slate-700'}`}>
+                    {commonPumpOn ? 'RUNNING (ACTIVE)' : 'STANDBY'}
+                  </span>
+                </div>
+
+                <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+
+                <div className="flex items-center gap-2">
+                  <Droplets className="h-4 w-4 text-sky-400" />
+                  <span className="text-sm font-medium text-slate-400">Active Water Zone:</span>
+                  <span className={`rounded-lg px-2 py-0.5 text-xs font-semibold ${waterZone ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-mono' : 'text-slate-400'}`}>
+                    {waterZone ? `${waterZone} Active` : 'None (Idle)'}
+                  </span>
+                </div>
+
+                <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+
+                <div className="flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-emerald-400" />
+                  <span className="text-xs text-slate-400">Hardware Relays: <strong>22 Channels</strong></span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => navigate(`/polyhouse-settings?device=${selectedDeviceId}`)}
+                  className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-emerald-900/40 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                >
+                  <Sliders className="h-3.5 w-3.5" />
+                  <span>Configure Polyhouse Setpoints</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 6 Zones Quick Selection Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+              {zones.map((zone) => {
+                const isActive = activePolyhouseTab === zone.key;
+                const zData = rawSensorData[zone.key] || {};
+                const zDli = polyhouseData?.dli_data?.[zone.key] ?? zData.dli;
+                const zPaused = Boolean(polyhouseData?.room_paused_states?.[zone.key]);
+                const isWatering = waterZone === zone.key;
+
+                return (
+                  <button
+                    key={zone.key}
+                    onClick={() => setActivePolyhouseTab(zone.key)}
+                    className={`flex flex-col text-left p-3.5 rounded-2xl border transition-all relative ${
+                      isActive
+                        ? 'bg-slate-800/90 border-emerald-500/60 shadow-lg shadow-emerald-950/40 ring-1 ring-emerald-500/40'
+                        : 'bg-slate-900/50 border-slate-800/70 hover:bg-slate-800/50 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-2">
+                      <span className="font-bold text-xs text-white flex items-center gap-1.5">
+                        <Leaf className="h-3.5 w-3.5 text-emerald-400" />
+                        {zone.key}
+                      </span>
+                      {zPaused ? (
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          Paused
+                        </span>
+                      ) : isWatering ? (
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 animate-pulse">
+                          Watering
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                          Active
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-1 my-1 w-full font-mono">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-400 text-[10px]">Temp:</span>
+                        <span className="text-white font-bold">{zData.temp != null ? `${zData.temp}°C` : '--'}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-400 text-[10px]">Humi:</span>
+                        <span className="text-white font-bold">{zData.humidity != null ? `${zData.humidity}%` : '--'}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-400 text-[10px]">PAR:</span>
+                        <span className="text-amber-300 font-bold">{zData.par != null ? `${zData.par}` : '--'}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-400 text-[10px]">DLI:</span>
+                        <span className="text-emerald-400 font-bold">{zDli != null ? `${zDli}` : '--'}</span>
+                      </div>
+                    </div>
+
+                    {zone.ch.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-slate-800/80 grid grid-cols-4 gap-1 text-[9px] text-center w-full font-mono">
+                        <div title="Air Circulator Fan (ACF)" className={`py-0.5 rounded ${rawRelays[String(zone.ch[0])] == 1 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-950/40 text-slate-500'}`}>
+                          ACF
+                        </div>
+                        <div title="Sprinkler" className={`py-0.5 rounded ${rawRelays[String(zone.ch[1])] == 1 ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40' : 'bg-slate-950/40 text-slate-500'}`}>
+                          SPR
+                        </div>
+                        <div title="Fogger" className={`py-0.5 rounded ${rawRelays[String(zone.ch[2])] == 1 ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'bg-slate-950/40 text-slate-500'}`}>
+                          FOG
+                        </div>
+                        <div title="Zone Pump" className={`py-0.5 rounded ${rawRelays[String(zone.ch[3])] == 1 ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' : 'bg-slate-950/40 text-slate-500'}`}>
+                          PMP
+                        </div>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Focused Zone Header & Hardware Relays Status */}
+            <div className="rounded-2xl border border-slate-800/80 bg-slate-900/40 p-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/70">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                    <Leaf className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      {activeZone.name}
+                      {isPaused && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          Zone Execution Paused
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs text-slate-400">Live Modbus Telemetry & Irrigation Relay Loop</p>
+                  </div>
+                </div>
+
+                {activeZone.ch.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-slate-400">Zone Relays:</span>
+                    <span className={`px-2 py-1 rounded-lg text-xs font-bold border ${rawRelays[String(activeZone.ch[0])] == 1 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-slate-950/50 text-slate-500 border-slate-800'}`}>
+                      ACF Fan (Ch {activeZone.ch[0]}): {rawRelays[String(activeZone.ch[0])] == 1 ? 'ON' : 'OFF'}
+                    </span>
+                    <span className={`px-2 py-1 rounded-lg text-xs font-bold border ${rawRelays[String(activeZone.ch[1])] == 1 ? 'bg-sky-500/20 text-sky-300 border-sky-500/40' : 'bg-slate-950/50 text-slate-500 border-slate-800'}`}>
+                      Sprinkler (Ch {activeZone.ch[1]}): {rawRelays[String(activeZone.ch[1])] == 1 ? 'ON' : 'OFF'}
+                    </span>
+                    <span className={`px-2 py-1 rounded-lg text-xs font-bold border ${rawRelays[String(activeZone.ch[2])] == 1 ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' : 'bg-slate-950/50 text-slate-500 border-slate-800'}`}>
+                      Fogger (Ch {activeZone.ch[2]}): {rawRelays[String(activeZone.ch[2])] == 1 ? 'ON' : 'OFF'}
+                    </span>
+                    <span className={`px-2 py-1 rounded-lg text-xs font-bold border ${rawRelays[String(activeZone.ch[3])] == 1 ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40' : 'bg-slate-950/50 text-slate-500 border-slate-800'}`}>
+                      Zone Pump (Ch {activeZone.ch[3]}): {rawRelays[String(activeZone.ch[3])] == 1 ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Live Metric Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 pt-4">
+                {polyMetricsConfig.map((m) => (
+                  <BigMetric
+                    key={m.key}
+                    label={m.label}
+                    value={m.val}
+                    unit={m.unit}
+                    icon={m.icon}
+                    type={m.type}
+                    isOnline={isDeviceOnline}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Trend Charts */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <LiveChart
+                data={activeHist.temp || []}
+                type="temperature"
+                title={`${activeZone.key} Temperature Trend`}
+                unit="°C"
+              />
+              <LiveChart
+                data={activeHist.humidity || []}
+                type="moisture"
+                title={`${activeZone.key} Humidity Trend`}
+                unit="%"
+              />
+              <LiveChart
+                data={activeHist.par || []}
+                type="default"
+                title={`${activeZone.key} PAR / PPFD Trend`}
+                unit="µmol/m²/s"
+              />
+              <LiveChart
+                data={activeHist.dli || []}
+                type="default"
+                title={`${activeZone.key} Daily Light Integral (DLI)`}
+                unit="mol/m²/d"
+              />
+              <LiveChart
+                data={activeHist.co2 || []}
+                type="co2"
+                title={`${activeZone.key} CO2 Trend`}
+                unit="ppm"
+              />
             </div>
           </div>
         );

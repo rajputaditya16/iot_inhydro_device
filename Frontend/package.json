@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",
+    "@tanstack/react-virtual": "^3.14.16",
     "framer-motion": "^12.34.3",
     "lucide-react": "^0.575.0",
     "mqtt": "^5.15.0",

@@ -15,6 +15,7 @@ const pageTitles = {
   '/users': 'User Management',
   '/settings': 'Settings',
   '/user-dashboard': 'User Dashboard',
+  '/polyhouse-settings': 'Polyhouse Controller Settings',
 };
 
 const DashboardLayout = ({ userRole: initialUserRole }) => {
@@ -91,7 +92,7 @@ const DashboardLayout = ({ userRole: initialUserRole }) => {
       {/* Mobile overlay for sidebar */}
       {isMobile && mobileOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden transition-opacity"
           onClick={closeMobileSidebar}
         />
       )}

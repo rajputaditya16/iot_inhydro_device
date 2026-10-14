@@ -5,6 +5,7 @@ import StatCard from '../../components/StatCard';
 import DeviceCard from '../../components/DeviceCard';
 import { SkeletonCard, SkeletonDeviceCard } from '../../components/Skeleton';
 import { useNavigate } from 'react-router-dom';
+import { telemetryWs } from '../../utils/websocketClient';
 
 // Parse raw or ISO timestamp safely
 const parseDateSafe = (ts) => {
@@ -94,67 +95,64 @@ const SuperAdminDashboard = () => {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000);
+    // Relaxed background sync: Telemetry is received instantaneously via WebSocket,
+    // so background REST polling only runs once every 30 seconds to catch schema updates.
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // Real-time SSE stream
+  // Synchronize WebSocket Viewport to visible dashboard devices
   useEffect(() => {
-    const sseUrl = `${API_BASE}/api/devices/stream`;
-    let eventSource = null;
-
-    try {
-      eventSource = new EventSource(sseUrl);
-      eventSource.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          if (!payload) return;
-
-          const incomingDevId = payload.deviceId ? String(payload.deviceId) : null;
-          const incomingMqttId = payload.mqttId ? String(payload.mqttId).toLowerCase() : null;
-          const nowIso = new Date().toISOString();
-          const isExplicitOffline = payload.data?.status === 'offline';
-
-          setDevices((prevDevices) =>
-            prevDevices.map((dev) => {
-              const matchesId = incomingDevId && String(dev.id) === incomingDevId;
-              const matchesMqtt = incomingMqttId && dev.mqttId && dev.mqttId.toLowerCase() === incomingMqttId;
-
-              if (matchesId || matchesMqtt) {
-                if (dev.status === 'blocked') return dev;
-                if (isExplicitOffline) return { ...dev, status: 'offline' };
-
-                const data = payload.data || {};
-                const temp = data.temp ?? data.temperature ?? data.room_temp ?? data.soil_temp ?? dev.temp;
-                const moisture = data.moisture ?? data.humidity ?? data.soil_moisture ?? dev.moisture;
-                const ph = data.ph ?? dev.ph;
-                const ec = data.ec ?? dev.ec;
-
-                return {
-                  ...dev,
-                  status: 'online',
-                  lastUpdated: nowIso,
-                  temp: typeof temp === 'number' ? temp : dev.temp,
-                  moisture: typeof moisture === 'number' ? moisture : dev.moisture,
-                  ph: typeof ph === 'number' ? ph : dev.ph,
-                  ec: typeof ec === 'number' ? ec : dev.ec,
-                };
-              }
-              return dev;
-            })
-          );
-        } catch (_ignore) {
-          // Ignore non-JSON heartbeat pings
-        }
-      };
-    } catch (_err) {
-      console.warn('[Dashboard SSE] Real-time stream failed, using polling fallback');
+    if (devices.length > 0) {
+      const ids = devices.slice(0, 60).map((d) => d.id || d._id).filter(Boolean);
+      telemetryWs.setViewport(ids);
     }
+  }, [devices]);
+
+  // Real-time WebSocket Viewport Stream Listener
+  useEffect(() => {
+    const unsubscribe = telemetryWs.onMessage((payload) => {
+      if (!payload) return;
+
+      const incomingDevId = payload.deviceId ? String(payload.deviceId) : null;
+      const incomingMqttId = payload.mqttId ? String(payload.mqttId).toLowerCase() : null;
+      const nowIso = new Date().toISOString();
+      const isExplicitOffline = payload.data?.status === 'offline';
+
+      setDevices((prevDevices) =>
+        prevDevices.map((dev) => {
+          const matchesId = incomingDevId && String(dev.id) === incomingDevId;
+          const matchesMqtt = incomingMqttId && dev.mqttId && dev.mqttId.toLowerCase() === incomingMqttId;
+
+          if (matchesId || matchesMqtt) {
+            if (dev.status === 'blocked') return dev;
+            if (isExplicitOffline) return { ...dev, status: 'offline' };
+
+            const data = payload.data || {};
+            const temp = data.temp ?? data.temperature ?? data.room_temp ?? data.soil_temp ?? dev.temp;
+            const moisture = data.moisture ?? data.humidity ?? data.soil_moisture ?? dev.moisture;
+            const ph = data.ph ?? dev.ph;
+            const ec = data.ec ?? dev.ec;
+
+            return {
+              ...dev,
+              status: 'online',
+              lastUpdated: nowIso,
+              temp: typeof temp === 'number' ? temp : dev.temp,
+              moisture: typeof moisture === 'number' ? moisture : dev.moisture,
+              ph: typeof ph === 'number' ? ph : dev.ph,
+              ec: typeof ec === 'number' ? ec : dev.ec,
+            };
+          }
+          return dev;
+        })
+      );
+    });
 
     return () => {
-      if (eventSource) eventSource.close();
+      unsubscribe();
     };
-  }, [API_BASE]);
+  }, []);
 
   // Local time decay watchdog
   useEffect(() => {

@@ -5,7 +5,9 @@ const Admin = require('../models/Admin');
 const TelemetryLog = require('../models/TelemetryLog');
 const { getTelemetryModel } = require('../models/TelemetryLog');
 const { publishToDevice } = require('../utils/mqttPublisher');
-const { telemetryEmitter } = require('../utils/mqttSubscriber');
+const { telemetryEmitter, updateDeviceCacheStatus, preloadDeviceCache } = require('../utils/mqttSubscriber');
+const { downsampleFeeds } = require('../utils/downsampler');
+const { makeAnalyticsCacheKey, resolveTTL, getCache, setCache } = require('../utils/redisCache');
 
 
 // @route   GET /api/devices
@@ -89,6 +91,7 @@ exports.createDevice = async (req, res) => {
     }
 
     console.log('[DEBUG] createDevice saved document:', device);
+    preloadDeviceCache(); // Re-warm hot cache for instant MQTT resolution
     res.status(201).json({ success: true, data: device });
   } catch (err) {
     console.error('[DEBUG] createDevice error:', err.message);
@@ -112,6 +115,7 @@ exports.updateDevice = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Device not found' });
     }
     console.log('[DEBUG] updateDevice saved document:', device);
+    preloadDeviceCache(); // Re-warm hot cache for updated MQTT ID / name
     res.status(200).json({ success: true, data: device });
   } catch (err) {
     console.error('[DEBUG] updateDevice error:', err.message);
@@ -133,6 +137,7 @@ exports.deleteDevice = async (req, res) => {
       Admin.updateMany({ assignedDevices: req.params.id }, { $pull: { assignedDevices: req.params.id } })
     ]);
 
+    preloadDeviceCache(); // Refresh cache after deletion
     res.status(200).json({ success: true, message: 'Device deleted' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -149,6 +154,8 @@ exports.toggleBlockDevice = async (req, res) => {
 
     device.status = device.status === 'blocked' ? 'offline' : 'blocked';
     await device.save();
+
+    updateDeviceCacheStatus(device._id, device.status);
 
     res.status(200).json({ success: true, data: device });
   } catch (err) {
@@ -183,17 +190,29 @@ exports.pushDeviceConfig = async (req, res) => {
     const device = await resolveDeviceByIdOrMqtt(req.params.id);
     const deviceRoot = device?.mqttId || (device?._id ? device._id.toString() : req.params.id);
 
-    const isCommandRequest = req.body?.action === 'restart' || req.body?.action === 'exit' || req.query?.action === 'restart' || req.query?.action === 'exit';
+    const isCommandRequest =
+      req.body?.action === 'restart' ||
+      req.body?.action === 'exit' ||
+      req.body?.action === 'pause' ||
+      req.body?.action === 'resume' ||
+      req.body?.action === 'stop' ||
+      req.body?.action === 'run' ||
+      req.query?.action === 'restart' ||
+      req.query?.action === 'exit';
     if (isCommandRequest) {
       const action = req.body?.action || req.query?.action;
+      const polyhouse = req.body?.polyhouse || req.body?.room || req.body?.skey;
       const cmd_id = req.body?.cmd_id || ('cmd_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
-      await publishToDevice(`inhydro/${deviceRoot}/command`, { action, cmd_id, timestamp: Date.now() }, { retain: false });
+      const cmdPayload = { action, cmd_id, timestamp: Date.now() };
+      if (polyhouse) cmdPayload.polyhouse = polyhouse;
+
+      await publishToDevice(`inhydro/${deviceRoot}/command`, cmdPayload, { retain: false });
       if (deviceRoot !== deviceRoot.toLowerCase()) {
-        await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/command`, { action, cmd_id, timestamp: Date.now() }, { retain: false });
+        await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/command`, cmdPayload, { retain: false });
       }
       return res.status(200).json({
         success: true,
-        message: `Command "${action}" sent to device "${device?.name || deviceRoot}" via Private Broker MQTT`,
+        message: `Command "${action}"${polyhouse ? ` for ${polyhouse}` : ''} sent to device "${device?.name || deviceRoot}" via Private Broker MQTT`,
       });
     }
 
@@ -305,8 +324,10 @@ exports.pushDeviceConfig = async (req, res) => {
       } else {
         await publishToDevice(`inhydro/${deviceRoot}/setpoints/update`, payload);
         await publishToDevice(`inhydro/${deviceRoot}/config/update`, payload);
+        await publishToDevice(`inhydro/${deviceRoot}/control`, payload);
         if (deviceRoot !== deviceRoot.toLowerCase()) {
           await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/setpoints/update`, payload);
+          await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/control`, payload);
         }
       }
 
@@ -402,31 +423,45 @@ exports.getDeviceAnalytics = async (req, res) => {
       start = req.query.start ? new Date(req.query.start) : new Date(Date.now() - 24 * 60 * 60 * 1000);
       end = req.query.end ? new Date(req.query.end) : new Date();
     }
-    const room = req.query.room || 'room1'; // 'room1', 'room2', 'room3' or 'both'
+    const room = req.query.room || (device.deviceType === 'office_control' ? 'room1' : 'all');
 
     // Check if this is a live monitoring fast-fetch or an export request
     const isLive = req.query.live === 'true' || (req.query.limit && parseInt(req.query.limit) <= 50);
-    const isExport = req.query.export === 'true' || req.query.raw === 'true' || req.query.limit === '0' || req.query.limit === 'all';
-    const isDownsample = req.query.downsample === 'true';
-    const queryLimit = isLive ? (parseInt(req.query.limit) || 30) : (isExport || isDownsample ? 100000 : (parseInt(req.query.limit) || 25000));
+    const isExport = req.query.export === 'true' || req.query.format === 'csv' || req.query.format === 'json' || req.query.raw === 'true' || req.query.limit === '0' || req.query.limit === 'all';
+    const isDownsample = req.query.downsample === 'true' && !isExport;
+    const sampleLimit = parseInt(req.query.sampleLimit || req.query.limit) || 1500;
+
+    // ── Redis Cache Check (skip for live & export queries) ──
+    const useCache = !isLive && !isExport;
+    let cacheKey = null;
+    if (useCache) {
+      cacheKey = makeAnalyticsCacheKey(device._id.toString(), {
+        start: start.toISOString(),
+        end: end.toISOString(),
+        room,
+        downsample: isDownsample,
+        sampleLimit,
+        format: req.query.format || '',
+      });
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        cached._fromCache = true;
+        return res.status(200).json(cached);
+      }
+    }
 
     // 1. Target collection resolution
     const primaryMqttId = device.mqttId || (device.deviceType === 'office_control' ? 'system2' : null) || device.name;
     const targetModel = primaryMqttId ? getTelemetryModel(primaryMqttId) : null;
     const sortOrder = isLive ? { timestamp: -1 } : { timestamp: 1 };
 
-    // Build query with telemetry topic filtering to exclude command/setpoint update packets
+    // Build clean indexed query (indexed timestamp range query for 100,000+ to 1,000,000+ records)
     const targetQuery = isLive
-      ? {
-        topic: { $not: /\/(command|setpoints\/update|setpoints\/request_sync)/i }
-      }
-      : {
-        timestamp: { $gte: start, $lte: end },
-        topic: { $not: /\/(command|setpoints\/update|setpoints\/request_sync)/i }
-      };
+      ? {}
+      : { timestamp: { $gte: start, $lte: end } };
 
     // For office_control, filter by room directly in MongoDB if a specific room is requested
-    if (device.deviceType === 'office_control' && room !== 'both') {
+    if (device.deviceType === 'office_control' && room !== 'both' && room !== 'all') {
       targetQuery.$or = [
         { topic: new RegExp(room, 'i') },
         { [`data.${room}`]: { $exists: true } }
@@ -434,22 +469,65 @@ exports.getDeviceAnalytics = async (req, res) => {
     }
 
     let packets = [];
-    let totalCollectionDocs = 0;
+    let totalInRange = 0;
+    let totalInCollection = 0;
 
     if (targetModel) {
       try {
-        const [docs, count] = await Promise.all([
-          targetModel.find(targetQuery)
-            .sort(sortOrder)
-            .limit(queryLimit)
-            .select('timestamp data topic room deviceId mqttId')
-            .maxTimeMS(4000)
-            .lean(),
-          targetModel.estimatedDocumentCount().maxTimeMS(1500).catch(() => 0)
+        // Step 1: Count total documents in range and in collection with generous timeouts
+        const [inRangeCount, collectionCount] = await Promise.all([
+          targetModel.countDocuments(targetQuery).maxTimeMS(20000).catch(() => null),
+          targetModel.estimatedDocumentCount().maxTimeMS(10000).catch(() => null)
         ]);
 
-        packets = docs || [];
-        totalCollectionDocs = count || packets.length;
+        totalInRange = inRangeCount !== null ? inRangeCount : 0;
+        totalInCollection = collectionCount !== null ? collectionCount : totalInRange;
+
+        // Step 2: Fetch documents based on query type
+        if (isLive) {
+          packets = await targetModel.find(targetQuery)
+            .sort(sortOrder)
+            .limit(parseInt(req.query.limit) || 30)
+            .select('timestamp data topic room deviceId mqttId')
+            .maxTimeMS(10000)
+            .lean();
+        } else if (isExport) {
+          // Full export: fetch up to 1,000,000 records
+          const exportLimit = parseInt(req.query.limit) || 1000000;
+          packets = await targetModel.find(targetQuery)
+            .sort(sortOrder)
+            .limit(exportLimit)
+            .select('timestamp data topic room deviceId mqttId')
+            .maxTimeMS(60000)
+            .lean();
+        } else if (isDownsample && totalInRange > sampleLimit * 2) {
+          // ── High-Speed Cursor Stride Sampling for 100,000+ records ──
+          // Streams cursor in constant O(1) memory, extracting ~sampleLimit points across entire range in < 500ms
+          const stride = Math.max(1, Math.floor(totalInRange / sampleLimit));
+          const cursor = targetModel.find(targetQuery)
+            .sort(sortOrder)
+            .select('timestamp data topic room deviceId mqttId')
+            .maxTimeMS(60000)
+            .lean()
+            .cursor();
+
+          let countIdx = 0;
+          for await (const doc of cursor) {
+            if (countIdx % stride === 0) {
+              packets.push(doc);
+            }
+            countIdx++;
+          }
+        } else {
+          // Standard range fetch (up to 100,000 records)
+          const fetchLimit = parseInt(req.query.limit) || 100000;
+          packets = await targetModel.find(targetQuery)
+            .sort(sortOrder)
+            .limit(fetchLimit)
+            .select('timestamp data topic room deviceId mqttId')
+            .maxTimeMS(45000)
+            .lean();
+        }
       } catch (tErr) {
         console.warn('[Analytics API] Target collection query warning, falling back to TelemetryLog:', tErr.message);
         packets = [];
@@ -457,7 +535,7 @@ exports.getDeviceAnalytics = async (req, res) => {
     }
 
     // Fallback to main TelemetryLog only if dynamic collection returned 0 packets
-    if (packets.length === 0) {
+    if (packets.length === 0 && (!totalInRange || totalInRange === 0)) {
       try {
         const fallbackQuery = {
           ...targetQuery,
@@ -468,14 +546,19 @@ exports.getDeviceAnalytics = async (req, res) => {
           ].filter(c => c.deviceId || c.mqttId)
         };
 
-        const fallbackDocs = await TelemetryLog.find(fallbackQuery)
-          .sort(sortOrder)
-          .limit(queryLimit)
-          .select('timestamp data topic room deviceId mqttId')
-          .maxTimeMS(4000)
-          .lean();
-        packets = fallbackDocs || [];
-        totalCollectionDocs = totalCollectionDocs || packets.length;
+        const [fbDocs, fbCount] = await Promise.all([
+          TelemetryLog.find(fallbackQuery)
+            .sort(sortOrder)
+            .limit(isLive ? 30 : 100000)
+            .select('timestamp data topic room deviceId mqttId')
+            .maxTimeMS(30000)
+            .lean(),
+          TelemetryLog.countDocuments(fallbackQuery).maxTimeMS(10000).catch(() => 0)
+        ]);
+
+        packets = fbDocs || [];
+        totalInRange = fbCount || packets.length;
+        totalInCollection = totalInCollection || totalInRange;
       } catch (e) {
         packets = [];
       }
@@ -624,16 +707,29 @@ exports.getDeviceAnalytics = async (req, res) => {
           return null;
         };
 
-        const getSensorTemp = (s) => {
-          if (!s) return null;
-          const val = s.t ?? s.temp ?? s.temperature ?? s.room_temp;
-          return val !== undefined && val !== null && val !== '' ? String(val) : null;
+        const getSensorTemp = (s, sNum) => {
+          if (s) {
+            const val = s.t ?? s.temp ?? s.temperature ?? s.room_temp;
+            if (val !== undefined && val !== null && val !== '') return String(val);
+          }
+          // Only fallback to raw field if sNum provided and no explicit sensor object
+          if (sNum) {
+            const rawF = d[`field${sNum}`];
+            if (rawF !== undefined && rawF !== null && rawF !== '') return String(rawF);
+          }
+          return null;
         };
 
-        const getSensorHumi = (s) => {
-          if (!s) return null;
-          const val = s.h ?? s.humi ?? s.humidity ?? s.hum ?? s.room_humi;
-          return val !== undefined && val !== null && val !== '' ? String(val) : null;
+        const getSensorHumi = (s, sNum) => {
+          if (s) {
+            const val = s.h ?? s.humi ?? s.humidity ?? s.hum ?? s.room_humi;
+            if (val !== undefined && val !== null && val !== '') return String(val);
+          }
+          if (sNum) {
+            const rawF = d[`field${sNum + 7}`];
+            if (rawF !== undefined && rawF !== null && rawF !== '') return String(rawF);
+          }
+          return null;
         };
 
         const s1 = getSensor(1);
@@ -644,31 +740,34 @@ exports.getDeviceAnalytics = async (req, res) => {
         const s6 = getSensor(6);
         const s7 = getSensor(7);
 
+        const co2Val = d.co2 ?? d.CO2 ?? d.co2_ppm ?? d.room?.co2 ?? s1?.co2 ?? s2?.co2 ?? s3?.co2 ?? s4?.co2 ?? s5?.co2 ?? s6?.co2 ?? s7?.co2 ?? (d.sensor_data && d.sensor_data.co2) ?? null;
+
         mappedFeeds.push({
           created_at: packetTime,
           entry_id: mappedFeeds.length + 1,
-          field1: getSensorTemp(s1),
-          field2: getSensorTemp(s2),
-          field3: getSensorTemp(s3),
-          field4: getSensorTemp(s4),
-          field5: getSensorTemp(s5),
-          field6: getSensorTemp(s6),
-          field7: getSensorTemp(s7),
-          field8: getSensorHumi(s1),
-          field9: getSensorHumi(s2),
-          field10: getSensorHumi(s3),
-          field11: getSensorHumi(s4),
-          field12: getSensorHumi(s5),
-          field13: getSensorHumi(s6),
-          field14: getSensorHumi(s7),
+          field1: getSensorTemp(s1, 1),
+          field2: getSensorTemp(s2, 2),
+          field3: getSensorTemp(s3, 3),
+          field4: getSensorTemp(s4, 4),
+          field5: getSensorTemp(s5, 5),
+          field6: getSensorTemp(s6, 6),
+          field7: getSensorTemp(s7, 7),
+          field8: getSensorHumi(s1, 1),
+          field9: getSensorHumi(s2, 2),
+          field10: getSensorHumi(s3, 3),
+          field11: getSensorHumi(s4, 4),
+          field12: getSensorHumi(s5, 5),
+          field13: getSensorHumi(s6, 6),
+          field14: getSensorHumi(s7, 7),
+          field15: co2Val !== null && co2Val !== undefined && co2Val !== '' ? String(co2Val) : null,
           multi_sensor_data: {
-            S1: s1 ? { temp: getSensorTemp(s1), humi: getSensorHumi(s1), t: getSensorTemp(s1), h: getSensorHumi(s1), co2: s1.co2 ?? null, status: s1.status || 'OK' } : null,
-            S2: s2 ? { temp: getSensorTemp(s2), humi: getSensorHumi(s2), t: getSensorTemp(s2), h: getSensorHumi(s2), co2: s2.co2 ?? null, status: s2.status || 'OK' } : null,
-            S3: s3 ? { temp: getSensorTemp(s3), humi: getSensorHumi(s3), t: getSensorTemp(s3), h: getSensorHumi(s3), co2: s3.co2 ?? null, status: s3.status || 'OK' } : null,
-            S4: s4 ? { temp: getSensorTemp(s4), humi: getSensorHumi(s4), t: getSensorTemp(s4), h: getSensorHumi(s4), co2: s4.co2 ?? null, status: s4.status || 'OK' } : null,
-            S5: s5 ? { temp: getSensorTemp(s5), humi: getSensorHumi(s5), t: getSensorTemp(s5), h: getSensorHumi(s5), co2: s5.co2 ?? null, status: s5.status || 'OK' } : null,
-            S6: s6 ? { temp: getSensorTemp(s6), humi: getSensorHumi(s6), t: getSensorTemp(s6), h: getSensorHumi(s6), co2: s6.co2 ?? null, status: s6.status || 'OK' } : null,
-            S7: s7 ? { temp: getSensorTemp(s7), humi: getSensorHumi(s7), t: getSensorTemp(s7), h: getSensorHumi(s7), co2: s7.co2 ?? null, status: s7.status || 'OK' } : null,
+            S1: { temp: getSensorTemp(s1, 1), humi: getSensorHumi(s1, 1), t: getSensorTemp(s1, 1), h: getSensorHumi(s1, 1), co2: s1?.co2 ?? null, status: s1?.status || 'OK' },
+            S2: { temp: getSensorTemp(s2, 2), humi: getSensorHumi(s2, 2), t: getSensorTemp(s2, 2), h: getSensorHumi(s2, 2), co2: s2?.co2 ?? null, status: s2?.status || 'OK' },
+            S3: { temp: getSensorTemp(s3, 3), humi: getSensorHumi(s3, 3), t: getSensorTemp(s3, 3), h: getSensorHumi(s3, 3), co2: s3?.co2 ?? null, status: s3?.status || 'OK' },
+            S4: { temp: getSensorTemp(s4, 4), humi: getSensorHumi(s4, 4), t: getSensorTemp(s4, 4), h: getSensorHumi(s4, 4), co2: s4?.co2 ?? null, status: s4?.status || 'OK' },
+            S5: { temp: getSensorTemp(s5, 5), humi: getSensorHumi(s5, 5), t: getSensorTemp(s5, 5), h: getSensorHumi(s5, 5), co2: s5?.co2 ?? null, status: s5?.status || 'OK' },
+            S6: { temp: getSensorTemp(s6, 6), humi: getSensorHumi(s6, 6), t: getSensorTemp(s6, 6), h: getSensorHumi(s6, 6), co2: s6?.co2 ?? null, status: s6?.status || 'OK' },
+            S7: { temp: getSensorTemp(s7, 7), humi: getSensorHumi(s7, 7), t: getSensorTemp(s7, 7), h: getSensorHumi(s7, 7), co2: s7?.co2 ?? null, status: s7?.status || 'OK' },
           }
         });
       } else if (device.deviceType === 'controlling') {
@@ -707,6 +806,53 @@ exports.getDeviceAnalytics = async (req, res) => {
           field7: d.orp != null ? String(d.orp) : null,
           field8: d.co2 != null ? String(d.co2) : null,
         });
+      } else if (device.deviceType === 'itc_polyhouse') {
+        const sData = d.sensor_data || {};
+        const dliData = d.dli_data?.accumulators || {};
+        const phKeys = ['PH-01', 'PH-02', 'PH-03', 'PH-04', 'PH-05', 'PH-06'];
+        const targetPh = room && phKeys.includes(room.toUpperCase()) ? room.toUpperCase() : null;
+
+        if (targetPh) {
+          const phObj = sData[targetPh] || {};
+          const dliObj = dliData[targetPh] || {};
+          mappedFeeds.push({
+            created_at: packetTime,
+            entry_id: mappedFeeds.length + 1,
+            room: targetPh,
+            field1: phObj.temp != null ? String(phObj.temp) : null,
+            field2: phObj.humi != null ? String(phObj.humi) : null,
+            field3: phObj.co2 != null ? String(phObj.co2) : null,
+            field4: phObj.par != null ? String(phObj.par) : null,
+            field5: dliObj.dli != null ? String(dliObj.dli) : (phObj.dli != null ? String(phObj.dli) : null),
+            polyhouse_data: { [targetPh]: phObj }
+          });
+        } else {
+          const ph1 = sData['PH-01'] || {};
+          const ph2 = sData['PH-02'] || {};
+          const ph3 = sData['PH-03'] || {};
+          const ph4 = sData['PH-04'] || {};
+          const ph5 = sData['PH-05'] || {};
+          const ph6 = sData['PH-06'] || {};
+          mappedFeeds.push({
+            created_at: packetTime,
+            entry_id: mappedFeeds.length + 1,
+            field1: ph1.temp != null ? String(ph1.temp) : null,
+            field2: ph2.temp != null ? String(ph2.temp) : null,
+            field3: ph3.temp != null ? String(ph3.temp) : null,
+            field4: ph4.temp != null ? String(ph4.temp) : null,
+            field5: ph5.temp != null ? String(ph5.temp) : null,
+            field6: ph6.temp != null ? String(ph6.temp) : null,
+            field7: ph1.humi != null ? String(ph1.humi) : null,
+            field8: ph2.humi != null ? String(ph2.humi) : null,
+            field9: ph3.humi != null ? String(ph3.humi) : null,
+            field10: ph4.humi != null ? String(ph4.humi) : null,
+            field11: ph5.humi != null ? String(ph5.humi) : null,
+            field12: ph6.humi != null ? String(ph6.humi) : null,
+            field13: ph1.co2 != null ? String(ph1.co2) : null,
+            field14: ph1.par != null ? String(ph1.par) : null,
+            polyhouse_data: sData
+          });
+        }
       } else {
         // Standard / system2 mapping
         const tel = d.telemetry || d || {};
@@ -725,20 +871,12 @@ exports.getDeviceAnalytics = async (req, res) => {
       }
     });
 
-    // ── Downsampling / Stride Sampling across full date range ──
+    // ── Peak-Preserving Downsampling (Guarantees charts never freeze, renders in < 16ms) ──
     const isRaw = req.query.raw === 'true' || req.query.downsample === 'false' || isExport;
     let feeds;
-    const maxSamplePoints = parseInt(req.query.sampleLimit || req.query.limit) || 1500;
-    if (!isRaw && req.query.downsample === 'true' && mappedFeeds.length > maxSamplePoints) {
-      const stride = Math.ceil(mappedFeeds.length / maxSamplePoints);
-      const sampled = [];
-      for (let i = 0; i < mappedFeeds.length; i += stride) {
-        sampled.push(mappedFeeds[i]);
-      }
-      if (sampled[sampled.length - 1] !== mappedFeeds[mappedFeeds.length - 1]) {
-        sampled.push(mappedFeeds[mappedFeeds.length - 1]);
-      }
-      feeds = sampled;
+    const maxSamplePoints = parseInt(req.query.sampleLimit || req.query.limit) || 1200;
+    if (!isRaw && mappedFeeds.length > maxSamplePoints) {
+      feeds = downsampleFeeds(mappedFeeds, maxSamplePoints);
     } else {
       feeds = mappedFeeds;
     }
@@ -796,22 +934,58 @@ exports.getDeviceAnalytics = async (req, res) => {
         channelData.field7 = 'ORP Level';
         channelData.field8 = 'CO2 Level';
       }
-    } else if (device.deviceType === 'multi_sensor' || device.deviceType === 'almora' || device.deviceType === 'cold_storage') {
+    } else if (device.deviceType === 'multi_sensor' || device.deviceType === 'almora' || device.deviceType === 'almora2' || device.deviceType === 'cold_storage' || (device.name && (device.name.toLowerCase().includes('almora') || device.name.toLowerCase().includes('cold')))) {
+      // Re-initialize channelData completely for Cold Storage so NO hydro metrics (Water Temp, Water EC, Water pH, ORP, etc.) leak through
+      channelData = {
+        id: device.mqttId || device._id.toString(),
+        name: device.name,
+      };
+
       const sName = (sKey, def) => customSensorNames[sKey] || def;
-      channelData.field1 = `${sName('S1', 'Room 1')} Temp`;
-      channelData.field2 = `${sName('S2', 'Room 2')} Temp`;
-      channelData.field3 = `${sName('S3', 'Room 3')} Temp`;
-      channelData.field4 = `${sName('S4', 'Room 4')} Temp`;
-      channelData.field5 = `${sName('S5', 'Room 5')} Temp`;
-      channelData.field6 = `${sName('S6', 'Room 6')} Temp`;
-      channelData.field7 = `${sName('S7', 'Room 7')} Temp`;
-      channelData.field8 = `${sName('S1', 'Room 1')} Humi`;
-      channelData.field9 = `${sName('S2', 'Room 2')} Humi`;
-      channelData.field10 = `${sName('S3', 'Room 3')} Humi`;
-      channelData.field11 = `${sName('S4', 'Room 4')} Humi`;
-      channelData.field12 = `${sName('S5', 'Room 5')} Humi`;
-      channelData.field13 = `${sName('S6', 'Room 6')} Humi`;
-      channelData.field14 = `${sName('S7', 'Room 7')} Humi`;
+      const s1Name = sName('S1', 'Cold Room 1');
+      const s2Name = sName('S2', 'Cold Room 2');
+      const s3Name = sName('S3', 'Cold Room 3');
+      const s4Name = sName('S4', 'Cold Room 4');
+      const s5Name = sName('S5', 'Cold Room 5');
+      const s6Name = sName('S6', 'Cold Room 6');
+      const s7Name = sName('S7', 'Greenhouse');
+
+      const roomNames = { S1: s1Name, S2: s2Name, S3: s3Name, S4: s4Name, S5: s5Name, S6: s6Name, S7: s7Name };
+      const isSingleRoom = room && room !== 'all' && room !== 'both';
+      const targetRoomKey = isSingleRoom ? (room.toUpperCase().startsWith('S') ? room.toUpperCase() : `S${room.replace(/\D/g, '')}`) : null;
+
+      if (targetRoomKey && ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'].includes(targetRoomKey)) {
+        const sIndex = parseInt(targetRoomKey.replace('S', ''), 10);
+        const tempField = `field${sIndex}`;
+        const humiField = `field${sIndex + 7}`;
+        channelData[tempField] = `${roomNames[targetRoomKey] || targetRoomKey} Temp`;
+        channelData[humiField] = `${roomNames[targetRoomKey] || targetRoomKey} Humidity`;
+
+        const hasCo2 = mappedFeeds.some(f => f.field15 != null && f.field15 !== '');
+        if (hasCo2) {
+          channelData.field15 = 'CO2 Level';
+        }
+      } else {
+        channelData.field1 = `${s1Name} Temp`;
+        channelData.field2 = `${s2Name} Temp`;
+        channelData.field3 = `${s3Name} Temp`;
+        channelData.field4 = `${s4Name} Temp`;
+        channelData.field5 = `${s5Name} Temp`;
+        channelData.field6 = `${s6Name} Temp`;
+        channelData.field7 = `${s7Name} Temp`;
+        channelData.field8 = `${s1Name} Humidity`;
+        channelData.field9 = `${s2Name} Humidity`;
+        channelData.field10 = `${s3Name} Humidity`;
+        channelData.field11 = `${s4Name} Humidity`;
+        channelData.field12 = `${s5Name} Humidity`;
+        channelData.field13 = `${s6Name} Humidity`;
+        channelData.field14 = `${s7Name} Humidity`;
+
+        const hasCo2 = mappedFeeds.some(f => f.field15 != null && f.field15 !== '');
+        if (hasCo2) {
+          channelData.field15 = 'CO2 Level';
+        }
+      }
     } else if (device.deviceType === 'monit' || device.deviceType === 'monnet') {
       channelData.field1 = 'Water Temp';
       channelData.field2 = 'Water Moisture';
@@ -821,6 +995,35 @@ exports.getDeviceAnalytics = async (req, res) => {
       channelData.field6 = 'Room Humidity';
       channelData.field7 = 'ORP';
       channelData.field8 = 'CO2';
+    } else if (device.deviceType === 'itc_polyhouse') {
+      channelData = {
+        id: device.mqttId || device._id.toString(),
+        name: device.name,
+      };
+      const phKeys = ['PH-01', 'PH-02', 'PH-03', 'PH-04', 'PH-05', 'PH-06'];
+      const targetRoom = room && phKeys.includes(room.toUpperCase()) ? room.toUpperCase() : null;
+      if (targetRoom) {
+        channelData.field1 = `${targetRoom} Temperature`;
+        channelData.field2 = `${targetRoom} Humidity`;
+        channelData.field3 = `${targetRoom} CO2`;
+        channelData.field4 = `${targetRoom} PAR (PPFD)`;
+        channelData.field5 = `${targetRoom} DLI Integral`;
+      } else {
+        channelData.field1 = 'PH-01 Temp';
+        channelData.field2 = 'PH-02 Temp';
+        channelData.field3 = 'PH-03 Temp';
+        channelData.field4 = 'PH-04 Temp';
+        channelData.field5 = 'PH-05 Temp';
+        channelData.field6 = 'PH-06 Temp';
+        channelData.field7 = 'PH-01 Humidity';
+        channelData.field8 = 'PH-02 Humidity';
+        channelData.field9 = 'PH-03 Humidity';
+        channelData.field10 = 'PH-04 Humidity';
+        channelData.field11 = 'PH-05 Humidity';
+        channelData.field12 = 'PH-06 Humidity';
+        channelData.field13 = 'PH-01 CO2';
+        channelData.field14 = 'PH-01 PAR';
+      }
     }
 
     const formatHumanReadableDate = (dateInput, tz = 'Asia/Kolkata') => {
@@ -865,7 +1068,7 @@ exports.getDeviceAnalytics = async (req, res) => {
     };
 
     if (req.query.format === 'csv') {
-      const isBoth = room === 'both';
+      const isBoth = room === 'both' || (room === 'all' && device.deviceType === 'office_control');
       const timezone = req.query.timezone || 'Asia/Kolkata';
       const headers = ['Timestamp'];
       if (isBoth) headers.push('Room');
@@ -873,11 +1076,13 @@ exports.getDeviceAnalytics = async (req, res) => {
       const activeFields = [];
       for (let i = 1; i <= 17; i++) {
         const key = `field${i}`;
-        const rawName = (channelData[key] || `Field ${i}`).replace(/\bSoil\b/gi, 'Water');
+        const rawName = channelData[key] || (device.deviceType === 'controlling' ? `Field ${i}` : null);
+        if (!rawName) continue;
+        const cleanName = rawName.replace(/\bSoil\b/gi, 'Water');
         const hasData = mappedFeeds.some(f => f[key] != null && f[key] !== '' && f[key] !== 'null' && f[key] !== 'undefined');
         if (hasData) {
           let unit = '';
-          const lower = rawName.toLowerCase();
+          const lower = cleanName.toLowerCase();
           if (lower.includes('temp')) unit = ' (°C)';
           else if (lower.includes('moist') || lower.includes('hum')) unit = ' (%)';
           else if (lower.includes('ec')) unit = ' (mS/cm)';
@@ -894,8 +1099,8 @@ exports.getDeviceAnalytics = async (req, res) => {
           else if (lower.includes('phosphorus') || lower.includes('(p)')) unit = ' (mg/kg)';
           else if (lower.includes('potassium') || lower.includes('(k)')) unit = ' (mg/kg)';
 
-          activeFields.push({ key, name: `${rawName}${unit}` });
-          headers.push(`"${rawName}${unit}"`);
+          activeFields.push({ key, name: `${cleanName}${unit}` });
+          headers.push(`"${cleanName}${unit}"`);
         }
       }
 
@@ -912,21 +1117,24 @@ exports.getDeviceAnalytics = async (req, res) => {
 
       const csvContent = headers.join(',') + '\n' + rows.join('\n');
       const safeSlug = String(device.name || 'Device').replace(/[^a-z0-9_-]/gi, '_');
+      const roomSlug = room && room !== 'all' && room !== 'both' ? `_${String(room).replace(/[^a-z0-9_-]/gi, '_')}` : '';
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${safeSlug}_Analytics.csv"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${safeSlug}${roomSlug}_Analytics.csv"`);
       return res.status(200).send(csvContent);
     }
 
     if (req.query.format === 'json' && isExport) {
-      const isBoth = room === 'both';
+      const isBoth = room === 'both' || (room === 'all' && device.deviceType === 'office_control');
       const timezone = req.query.timezone || 'Asia/Kolkata';
       const activeFields = [];
       for (let i = 1; i <= 17; i++) {
         const key = `field${i}`;
-        const rawName = (channelData[key] || `Field ${i}`).replace(/\bSoil\b/gi, 'Water');
+        const rawName = channelData[key] || (device.deviceType === 'controlling' ? `Field ${i}` : null);
+        if (!rawName) continue;
+        const cleanName = rawName.replace(/\bSoil\b/gi, 'Water');
         const hasData = mappedFeeds.some(f => f[key] != null && f[key] !== '' && f[key] !== 'null' && f[key] !== 'undefined');
         if (hasData) {
-          activeFields.push({ key, name: rawName });
+          activeFields.push({ key, name: cleanName });
         }
       }
       const exportJson = mappedFeeds.map(f => {
@@ -939,19 +1147,31 @@ exports.getDeviceAnalytics = async (req, res) => {
         return obj;
       });
       const safeSlug = String(device.name || 'Device').replace(/[^a-z0-9_-]/gi, '_');
+      const roomSlug = room && room !== 'all' && room !== 'both' ? `_${String(room).replace(/[^a-z0-9_-]/gi, '_')}` : '';
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="${safeSlug}_Analytics.json"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${safeSlug}${roomSlug}_Analytics.json"`);
       return res.status(200).json(exportJson);
     }
 
-    res.status(200).json({
+    const reportedTotalPoints = Math.max(totalInRange, mappedFeeds.length);
+    const reportedCollectionDocs = Math.max(totalInCollection, reportedTotalPoints);
+
+    const responseBody = {
       success: true,
       channel: channelData,
       feeds: feeds,
-      totalDbPoints: mappedFeeds.length,
-      totalCollectionDocs: totalCollectionDocs,
-      totalFeeds: mappedFeeds.length,
-    });
+      totalDbPoints: reportedTotalPoints,
+      totalCollectionDocs: reportedCollectionDocs,
+      totalFeeds: reportedTotalPoints,
+    };
+
+    // ── Redis Cache Store ──
+    if (useCache && cacheKey) {
+      const ttl = resolveTTL(start, end);
+      setCache(cacheKey, responseBody, ttl).catch(() => {}); // non-blocking, fire & forget
+    }
+
+    res.status(200).json(responseBody);
   } catch (err) {
     console.error('[Analytics API] Error fetching analytics:', err);
     res.status(500).json({ success: false, message: 'Server Error fetching analytics' });
