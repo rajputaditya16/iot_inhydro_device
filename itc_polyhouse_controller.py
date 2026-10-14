@@ -89,9 +89,11 @@ working_relay_id = None
 RELAY_CH_ACF = {"PH-01": 1, "PH-02": 5, "PH-03": 9, "PH-04": 13, "PH-05": 17}
 RELAY_CH_SPRINKLER = {"PH-01": 2, "PH-02": 6, "PH-03": 10, "PH-04": 14, "PH-05": 18}
 RELAY_CH_FOGGER = {"PH-01": 3, "PH-02": 7, "PH-03": 11, "PH-04": 15, "PH-05": 19}
-RELAY_CH_PUMP = {"PH-01": 4, "PH-02": 8, "PH-03": 12, "PH-04": 16, "PH-05": 20}
 RELAY_CH_COMMON_PUMP = 21
 BUZZER_CHANNEL = 22
+# All rooms share the single common water pump
+RELAY_CH_PUMP = {ph: RELAY_CH_COMMON_PUMP for ph in ACTIVE_POLYHOUSES}
+WATER_VALVE_CHANNELS = set(RELAY_CH_SPRINKLER.values()) | set(RELAY_CH_FOGGER.values())
 
 system_config = {
     'relay_port': RELAY_PORT_FIXED,
@@ -151,12 +153,10 @@ def toggle_room_pause(skey):
         ch_acf = RELAY_CH_ACF.get(skey)
         ch_spr = RELAY_CH_SPRINKLER.get(skey)
         ch_fog = RELAY_CH_FOGGER.get(skey)
-        ch_pmp = RELAY_CH_PUMP.get(skey)
         if is_paused:
             if ch_acf: set_relay(ch_acf, False)
             if ch_spr: set_relay(ch_spr, False)
             if ch_fog: set_relay(ch_fog, False)
-            if ch_pmp: set_relay(ch_pmp, False)
             set_ui_toast(f" {get_sensor_display_name(skey)} MANUAL STOPPED", duration_sec=4)
         else:
             set_ui_toast(f" {get_sensor_display_name(skey)} RUNNING (RESUMED)", duration_sec=4)
@@ -408,6 +408,13 @@ def load_config():
         RELAY_PORT_FIXED = system_config['relay_port']
     else:
         system_config['relay_port'] = RELAY_PORT_FIXED
+        need_save = True
+
+    global RELAY_CH_COMMON_PUMP
+    if 'common_pump_channel' in system_config:
+        RELAY_CH_COMMON_PUMP = int(system_config['common_pump_channel'])
+    else:
+        system_config['common_pump_channel'] = RELAY_CH_COMMON_PUMP
         need_save = True
 
     if 'room_paused' in system_config:
@@ -701,8 +708,21 @@ threading.Thread(target=relay_worker_loop, daemon=True).start()
 
 def set_relay(channel, state):
     if channel < 1 or channel > 32: return
-    relay_states[channel] = bool(state)
-    relay_cmd_queue.put((channel, bool(state)))
+    state_bool = bool(state)
+    relay_states[channel] = state_bool
+    relay_cmd_queue.put((channel, state_bool))
+
+    # Automatic Common Pump Interlock:
+    # Whenever ANY room's fogger or sprinkler turns ON, the common pump relay turns ON at that exact same time!
+    # When no foggers or sprinklers are ON across all rooms, the common pump turns OFF.
+    if channel in WATER_VALVE_CHANNELS:
+        any_water_on = any(relay_states.get(ch, False) for ch in WATER_VALVE_CHANNELS)
+        if any_water_on and not relay_states.get(RELAY_CH_COMMON_PUMP, False):
+            relay_states[RELAY_CH_COMMON_PUMP] = True
+            relay_cmd_queue.put((RELAY_CH_COMMON_PUMP, True))
+        elif not any_water_on and relay_states.get(RELAY_CH_COMMON_PUMP, False):
+            relay_states[RELAY_CH_COMMON_PUMP] = False
+            relay_cmd_queue.put((RELAY_CH_COMMON_PUMP, False))
 
 def trigger_buzzer_pulse(duration_sec=5.0):
     def _pulse():
@@ -876,11 +896,9 @@ def on_control_message(client, userdata, msg):
                     ch_acf = RELAY_CH_ACF.get(target_room)
                     ch_spr = RELAY_CH_SPRINKLER.get(target_room)
                     ch_fog = RELAY_CH_FOGGER.get(target_room)
-                    ch_pmp = RELAY_CH_PUMP.get(target_room)
                     if ch_acf: set_relay(ch_acf, False)
                     if ch_spr: set_relay(ch_spr, False)
                     if ch_fog: set_relay(ch_fog, False)
-                    if ch_pmp: set_relay(ch_pmp, False)
                     system_config.setdefault('room_paused', {})[target_room] = True
                     save_config()
                     set_ui_toast(f" {get_sensor_display_name(target_room)} REMOTE STOPPED", duration_sec=4)
@@ -890,11 +908,9 @@ def on_control_message(client, userdata, msg):
                         ch_acf = RELAY_CH_ACF.get(k)
                         ch_spr = RELAY_CH_SPRINKLER.get(k)
                         ch_fog = RELAY_CH_FOGGER.get(k)
-                        ch_pmp = RELAY_CH_PUMP.get(k)
                         if ch_acf: set_relay(ch_acf, False)
                         if ch_spr: set_relay(ch_spr, False)
                         if ch_fog: set_relay(ch_fog, False)
-                        if ch_pmp: set_relay(ch_pmp, False)
                     system_config['room_paused'] = dict(room_paused_states)
                     save_config()
                     set_ui_toast("⚠ ALL POLYHOUSES REMOTE STOPPED", duration_sec=4)
@@ -1134,7 +1150,6 @@ def process_bt_command(text, write_fn):
             st_acf = "ON" if relay_states.get(RELAY_CH_ACF[ph]) else "OFF"
             st_spr = "ON" if relay_states.get(RELAY_CH_SPRINKLER[ph]) else "OFF"
             st_fog = "ON" if relay_states.get(RELAY_CH_FOGGER[ph]) else "OFF"
-            st_pmp = "ON" if relay_states.get(RELAY_CH_PUMP[ph]) else "OFF"
 
             if d.get("status") == "OK":
                 t_str = f"{d.get('temp', '--'):.1f}C"
@@ -1143,7 +1158,7 @@ def process_bt_command(text, write_fn):
                 lines.append(f"{ph}: Temp {t_str}, Humi {h_str}{c_str}")
             else:
                 lines.append(f"{ph}: SENSOR OFFLINE")
-            lines.append(f"       ACF: {st_acf} | Sprinkler: {st_spr} | Fogger: {st_fog} | Pump: {st_pmp}")
+            lines.append(f"       ACF: {st_acf} | Sprinkler: {st_spr} | Fogger: {st_fog}")
             lines.append("")
 
         port6 = SENSOR_MAP.get("PH-06")
@@ -1254,8 +1269,10 @@ def handle_bt_client_sock(client_sock):
         except Exception: pass
 
 def auto_trust_devices():
+    dev_alias = f"Inhydro_{DEVICE_NAME}"
     try:
         subprocess.run(["bluetoothctl", "power", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["bluetoothctl", "system-alias", dev_alias], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["bluetoothctl", "discoverable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["bluetoothctl", "pairable-timeout", "0"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -1264,13 +1281,17 @@ def auto_trust_devices():
 
     while running:
         try:
-            output = subprocess.check_output(['bluetoothctl', 'paired-devices'], text=True)
+            # Re-ensure pairable and discoverable stay on continuously
+            subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+            subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+
+            output = subprocess.check_output(['bluetoothctl', 'devices'], text=True, timeout=3)
             for line in output.split('\n'):
                 if line.startswith('Device '):
-                    mac = line.split(" ")[1]
-                    subprocess.run(["bluetoothctl", "trust", mac], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    mac = line.split(" ")[1].strip()
+                    subprocess.run(["bluetoothctl", "trust", mac], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
         except Exception: pass
-        time.sleep(15)
+        time.sleep(4)
 
 def register_spp_dbus():
     try:
@@ -1281,26 +1302,52 @@ def register_spp_dbus():
         from gi.repository import GLib
 
         DBusGMainLoop(set_as_default=True)
+        bus = dbus.SystemBus()
 
         class BluetoothAgent(dbus.service.Object):
             @dbus.service.method('org.bluez.Agent1', in_signature='', out_signature='')
             def Release(self): pass
+
             @dbus.service.method('org.bluez.Agent1', in_signature='os', out_signature='')
-            def AuthorizeService(self, device, uuid): return
+            def AuthorizeService(self, device, uuid):
+                self._auto_trust(device)
+                return
+
             @dbus.service.method('org.bluez.Agent1', in_signature='o', out_signature='s')
-            def RequestPinCode(self, device): return '0000'
+            def RequestPinCode(self, device):
+                self._auto_trust(device)
+                return '0000'
+
             @dbus.service.method('org.bluez.Agent1', in_signature='o', out_signature='u')
-            def RequestPasskey(self, device): return dbus.UInt32(123456)
+            def RequestPasskey(self, device):
+                self._auto_trust(device)
+                return dbus.UInt32(123456)
+
             @dbus.service.method('org.bluez.Agent1', in_signature='ouq', out_signature='')
             def DisplayPasskey(self, device, passkey, entered): pass
+
             @dbus.service.method('org.bluez.Agent1', in_signature='os', out_signature='')
             def DisplayPinCode(self, device, pincode): pass
+
             @dbus.service.method('org.bluez.Agent1', in_signature='ou', out_signature='')
-            def RequestConfirmation(self, device, passkey): return
+            def RequestConfirmation(self, device, passkey):
+                self._auto_trust(device)
+                return
+
             @dbus.service.method('org.bluez.Agent1', in_signature='o', out_signature='')
-            def RequestAuthorization(self, device): return
+            def RequestAuthorization(self, device):
+                self._auto_trust(device)
+                return
+
             @dbus.service.method('org.bluez.Agent1', in_signature='', out_signature='')
             def Cancel(self): pass
+
+            def _auto_trust(self, dev_path):
+                try:
+                    d_obj = bus.get_object('org.bluez', dev_path)
+                    d_props = dbus.Interface(d_obj, 'org.freedesktop.DBus.Properties')
+                    d_props.Set('org.bluez.Device1', 'Trusted', dbus.Boolean(True))
+                except Exception: pass
 
         class BluezProfile(dbus.service.Object):
             @dbus.service.method('org.bluez.Profile1', in_signature='oha{sv}', out_signature='')
@@ -1309,10 +1356,10 @@ def register_spp_dbus():
                 flags = fcntl.fcntl(fd_int, fcntl.F_GETFL)
                 fcntl.fcntl(fd_int, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
                 threading.Thread(target=handle_bt_client_fd, args=(fd_int,), daemon=True).start()
+
             @dbus.service.method('org.bluez.Profile1', in_signature='o', out_signature='')
             def RequestDisconnection(self, path): pass
 
-        bus = dbus.SystemBus()
         agent_path = '/inhydro/auto_agent'
         try:
             agent = BluetoothAgent(bus, agent_path)
@@ -1322,21 +1369,25 @@ def register_spp_dbus():
             except Exception: pass
             manager.RegisterAgent(agent_path, 'NoInputNoOutput')
             manager.RequestDefaultAgent(agent_path)
-        except Exception: pass
+        except Exception as e:
+            print(f"[BLUETOOTH] Agent notice: {e}")
 
         profile_path = '/inhydro/spp_profile'
         profile = BluezProfile(bus, profile_path)
         manager_p = dbus.Interface(bus.get_object('org.bluez', '/org/bluez'), 'org.bluez.ProfileManager1')
+        try: manager_p.UnregisterProfile(profile_path)
+        except Exception: pass
+
+        spp_uuid = "00001101-0000-1000-8000-00805f9b34fb"
         opts = {
             'AutoConnect': dbus.Boolean(True),
             'Role': 'server',
             'Name': f'Inhydro_{DEVICE_NAME}',
-            'Service': '00001101-0000-1000-8000-00805F9B34FB',
             'Channel': dbus.UInt16(1),
             'RequireAuthentication': dbus.Boolean(False),
             'RequireAuthorization': dbus.Boolean(False)
         }
-        manager_p.RegisterProfile(profile_path, '00001101-0000-1000-8000-00805F9B34FB', opts)
+        manager_p.RegisterProfile(profile_path, spp_uuid, opts)
 
         mainloop = GLib.MainLoop()
         threading.Thread(target=mainloop.run, daemon=True).start()
@@ -1600,7 +1651,6 @@ def sensor_reader():
                 set_relay(RELAY_CH_ACF[skey], False)
                 set_relay(RELAY_CH_FOGGER[skey], False)
                 set_relay(RELAY_CH_SPRINKLER[skey], False)
-                set_relay(RELAY_CH_PUMP[skey], False)
                 continue
 
             port = SENSOR_MAP[skey]
@@ -1629,7 +1679,6 @@ def sensor_reader():
                 set_relay(RELAY_CH_ACF[skey], timer_acf["state"] == "ON")
                 set_relay(RELAY_CH_FOGGER[skey], False)
                 set_relay(RELAY_CH_SPRINKLER[skey], False)
-                set_relay(RELAY_CH_PUMP[skey], False)
                 continue
 
             t, h = d['temp'], d['humi']
@@ -1807,48 +1856,31 @@ def sensor_reader():
                     current_warnings.append(msg)
                     log_alarm_event("PH-06", msg, h6, h6_max)
 
-        # 3. SHARED PUMP ARBITRATION & INTERLOCK ROUTINE (Section 9.4)
-        arb_mode = system_config.get("pump_arbitration_mode", "sequential")
-        start_delay = float(system_config.get("pump_start_delay_sec", 3.0))
-        post_run_delay = float(system_config.get("pump_post_run_delay_sec", 3.0))
+        # 3. SHARED COMMON PUMP ROUTINE & INTERLOCK
+        # Whenever fogger or sprinkler is ON in any room, common pump relay turns ON immediately at that same time!
+        arb_mode = system_config.get("pump_arbitration_mode", "parallel")
 
         if not water_requests:
-            # No water demand: stop pump with post-run delay, then close solenoids and room pumps
-            if pump_active:
-                if pump_stop_scheduled_time == 0:
-                    pump_stop_scheduled_time = now + post_run_delay
-                elif now >= pump_stop_scheduled_time:
-                    set_relay(RELAY_CH_COMMON_PUMP, False)
-                    pump_active = False
-                    pump_stop_scheduled_time = 0
-                    for ph in ACTIVE_POLYHOUSES:
-                        set_relay(RELAY_CH_FOGGER[ph], False)
-                        set_relay(RELAY_CH_SPRINKLER[ph], False)
-                        set_relay(RELAY_CH_PUMP[ph], False)
-                    active_water_zone = None
-            else:
-                set_relay(RELAY_CH_COMMON_PUMP, False)
-                for ph in ACTIVE_POLYHOUSES:
-                    set_relay(RELAY_CH_FOGGER[ph], False)
-                    set_relay(RELAY_CH_SPRINKLER[ph], False)
-                    set_relay(RELAY_CH_PUMP[ph], False)
-                active_water_zone = None
+            # No water demand: turn off all solenoids and common pump immediately
+            for ph in ACTIVE_POLYHOUSES:
+                set_relay(RELAY_CH_FOGGER[ph], False)
+                set_relay(RELAY_CH_SPRINKLER[ph], False)
+            set_relay(RELAY_CH_COMMON_PUMP, False)
+            pump_active = False
+            pump_stop_scheduled_time = 0
+            active_water_zone = None
         else:
             pump_stop_scheduled_time = 0
             if arb_mode == "parallel":
-                # Open all requested valves & respective room pumps first
+                # Open all requested valves & common pump immediately at the exact same time
                 for ph in ACTIVE_POLYHOUSES:
                     f_req = ("FOGGER", ph) in water_requests and not is_room_paused(ph)
                     s_req = ("SPRINKLER", ph) in water_requests and not is_room_paused(ph)
-                    p_req = f_req or s_req
                     set_relay(RELAY_CH_FOGGER[ph], f_req)
                     set_relay(RELAY_CH_SPRINKLER[ph], s_req)
-                    set_relay(RELAY_CH_PUMP[ph], p_req)
 
-                if not pump_active:
-                    time.sleep(start_delay)
-                    set_relay(RELAY_CH_COMMON_PUMP, True)
-                    pump_active = True
+                set_relay(RELAY_CH_COMMON_PUMP, True)
+                pump_active = True
                 active_water_zone = "PARALLEL (ALL ACTIVE)"
             else:
                 # Sequential Priority Arbitration: run one zone at a time
@@ -1868,20 +1900,15 @@ def sensor_reader():
                         is_this_ph = (ph == act_ph)
                         set_relay(RELAY_CH_FOGGER[ph], (act_type == "FOGGER" and is_this_ph))
                         set_relay(RELAY_CH_SPRINKLER[ph], (act_type == "SPRINKLER" and is_this_ph))
-                        set_relay(RELAY_CH_PUMP[ph], is_this_ph)
 
-                    if not pump_active:
-                        time.sleep(start_delay)
-                        set_relay(RELAY_CH_COMMON_PUMP, True)
-                        pump_active = True
+                    set_relay(RELAY_CH_COMMON_PUMP, True)
+                    pump_active = True
                 else:
-                    if pump_active:
-                        set_relay(RELAY_CH_COMMON_PUMP, False)
-                        pump_active = False
                     for ph in ACTIVE_POLYHOUSES:
                         set_relay(RELAY_CH_FOGGER[ph], False)
                         set_relay(RELAY_CH_SPRINKLER[ph], False)
-                        set_relay(RELAY_CH_PUMP[ph], False)
+                    set_relay(RELAY_CH_COMMON_PUMP, False)
+                    pump_active = False
                     active_water_zone = None
 
         # 4. BUZZER HARDWARE ROUTINE WITH 30-SECOND AUTO-SILENCE
@@ -4052,12 +4079,11 @@ def update_ui():
                 ch_acf = RELAY_CH_ACF.get(skey)
                 ch_spr = RELAY_CH_SPRINKLER.get(skey)
                 ch_fog = RELAY_CH_FOGGER.get(skey)
-                ch_pmp = RELAY_CH_PUMP.get(skey)
 
                 acf_s = "ON" if relay_states.get(ch_acf) else "OFF"
                 spr_s = "ON" if relay_states.get(ch_spr) else "OFF"
                 fog_s = "ON" if relay_states.get(ch_fog) else "OFF"
-                pmp_s = "ON" if (relay_states.get(ch_pmp) or relay_states.get(RELAY_CH_COMMON_PUMP)) else "OFF"
+                pmp_s = "ON" if relay_states.get(RELAY_CH_COMMON_PUMP) else "OFF"
 
                 if is_room_paused(skey):
                     txt_detail_data.insert("end", "ACF: ", "black")
@@ -4066,8 +4092,8 @@ def update_ui():
                     txt_detail_data.insert("end", "STOPPED\n", "red")
                     txt_detail_data.insert("end", "Fogger: ", "black")
                     txt_detail_data.insert("end", "STOPPED\n", "red")
-                    txt_detail_data.insert("end", "Pump: ", "black")
-                    txt_detail_data.insert("end", "STOPPED\n", "red")
+                    txt_detail_data.insert("end", "Common Pump: ", "black")
+                    txt_detail_data.insert("end", f"{pmp_s}\n", "green" if pmp_s == "ON" else "red")
                 else:
                     txt_detail_data.insert("end", "ACF: ", "black")
                     txt_detail_data.insert("end", f"{acf_s}\n", "green" if acf_s == "ON" else "red")
@@ -4075,7 +4101,7 @@ def update_ui():
                     txt_detail_data.insert("end", f"{spr_s}\n", "green" if spr_s == "ON" else "red")
                     txt_detail_data.insert("end", "Fogger: ", "black")
                     txt_detail_data.insert("end", f"{fog_s}\n", "green" if fog_s == "ON" else "red")
-                    txt_detail_data.insert("end", "Pump: ", "black")
+                    txt_detail_data.insert("end", "Common Pump: ", "black")
                     txt_detail_data.insert("end", f"{pmp_s}\n", "green" if pmp_s == "ON" else "red")
 
             txt_detail_data.config(state="disabled")
