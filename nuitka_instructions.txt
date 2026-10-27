@@ -99,3 +99,6 @@ run this in terminal:
 --  sudo systemctl daemon-reload
 --  sudo systemctl enable bluetooth
 --  sudo systemctl restart bluetooth
+
+sudo apt install -y libdbus-1-dev libglib2.0-dev build-essential
+pip install dbus-python

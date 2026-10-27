@@ -56,25 +56,21 @@ TIMERS_FILE = os.path.join(BASE_DIR, "config_irrigation_timers.json")
 LOGO_PATH = os.path.join(BASE_DIR, "logo.png")
 running = True
 
-# -----------------------------------------------------------------------------
-# HARDWARE CHANNELS MAPPING (13 CHANNELS MATCHING P&ID DIAGRAM)
-# -----------------------------------------------------------------------------
 class ActuatorMap:
-    EC_VALVE_1              = 1   # S.V 1 (EC 1 - Stock A)
-    EC_VALVE_2              = 2   # S.V 2 (EC 2 - Stock B)
-    PH_DOWN_VALVE           = 3   # S.V 3 (pH Down: Acid Solution)
-    PH_UP_VALVE             = 4   # S.V 4 (pH Up: Alkali Solution)
-    SPARE_VALVE             = 5   # S.V 5 (Spare Relay)
-    RO_WATER_PUMP           = 6   # Pump 6 (RO Fresh Water Makeup Pump)
-    TANK_RETURN_VALVE       = 7   # S.V 7 (Tank Return Loop Valve)
-    MAIN_PUMP               = 8   # Pump 8 (1.5 HP Main Circulation & Delivery Pump)
-    PUMP_OUTLET_VALVE       = 9   # S.V 9 (Pump Discharge / Main Line Valve)
-    FERTIGATION_LOOP_VALVE  = 10  # S.V 10 (Recirculation Venturi Manifold Valve)
-    IRRIGATION_MASTER_VALVE = 11  # S.V 11 (Irrigation Field Master Diverter Valve)
-    ZONE_1_VALVE            = 12  # S.V 12 (Zone 1 Field Delivery Valve)
-    ZONE_2_VALVE            = 13  # S.V 13 (Zone 2 Field Delivery Valve)
+    EC_VALVE_1              = 1
+    EC_VALVE_2              = 2
+    PH_DOWN_VALVE           = 3
+    PH_UP_VALVE             = 4
+    SPARE_VALVE             = 5
+    RO_WATER_PUMP           = 6
+    TANK_RETURN_VALVE       = 7
+    MAIN_PUMP               = 8
+    PUMP_OUTLET_VALVE       = 9
+    FERTIGATION_LOOP_VALVE  = 10
+    IRRIGATION_MASTER_VALVE = 11
+    ZONE_1_VALVE            = 12
+    ZONE_2_VALVE            = 13
 
-    # Aliases for backwards compatibility
     PH_VALVE          = PH_DOWN_VALVE
     EC_VALVE_3        = PH_DOWN_VALVE
     EC_VALVE_4        = PH_UP_VALVE
@@ -98,9 +94,6 @@ ACTUATOR_NAMES = {
     13: "Zone 2",
 }
 
-# -----------------------------------------------------------------------------
-# DEFAULT 4-VENTURI MULTI-CROP RECIPES (2 EC + 2 pH)
-# -----------------------------------------------------------------------------
 DEFAULT_RECIPES = {
     "tomato": {
         "crop_name": "Tomato",
@@ -221,10 +214,6 @@ DEFAULT_CONFIG = {
 }
 
 def load_json(filepath, default_data):
-    """
-    Robust JSON loader that auto-regenerates missing or corrupted files with default_data.
-    Merges missing keys into existing dictionary configs.
-    """
     if os.path.exists(filepath):
         try:
             with open(filepath, "r") as f:
@@ -248,9 +237,6 @@ def load_json(filepath, default_data):
     return copy.deepcopy(default_data)
 
 def save_json(filepath, data):
-    """
-    Guaranteed atomic JSON file writer with direct fallback and fsync.
-    """
     try:
         tmp = filepath + ".tmp"
         with open(tmp, "w") as f:
@@ -301,7 +287,6 @@ for k, rec in crop_recipes.items():
         rec["off_min"] = float(d_rec.get("off_min", 60.0))
         _recipes_modified = True
 
-    # Multi-room / Zone configuration persistence (Both, Zone 1, Zone 2)
     base_zone_cfg = {
         "crop_name": rec.get("crop_name", k.title()),
         "ec_min": float(rec.get("ec_min", 1.80)),
@@ -349,7 +334,6 @@ if _recipes_modified:
     save_json(RECIPE_FILE, crop_recipes)
 
 def get_zone_recipe(crop_key: str, zone_key: str = "both") -> dict:
-    """Retrieve recipe for a specific zone ('both', 'zone_1', 'zone_2') or fallback to crop default."""
     rec = crop_recipes.get(crop_key, DEFAULT_RECIPES.get("tomato", {}))
     zones = rec.get("zones", {})
     if isinstance(zones, dict) and zone_key in zones:
@@ -405,9 +389,6 @@ else:
     system_config = load_json(CONFIG_FILE, DEFAULT_CONFIG)
     save_json(CONFIG_FALLBACK_FILE, system_config)
 
-# -----------------------------------------------------------------------------
-# HARDWARE RELAYS & MODBUS SENSOR CONTROLLER (THREADED NON-BLOCKING)
-# -----------------------------------------------------------------------------
 _relay_lock = threading.Lock()
 _sensor_lock = threading.Lock()
 
@@ -432,7 +413,14 @@ class HardwareController:
 
     def set_relay(self, ch: int, state: bool):
         if self.relays.get(ch) == state:
-            return  # Avoid duplicate writes and queue flooding
+            return
+
+        if state:
+            if ch == ActuatorMap.PH_DOWN_VALVE and self.relays.get(ActuatorMap.PH_UP_VALVE):
+                self.set_relay(ActuatorMap.PH_UP_VALVE, False)
+            elif ch == ActuatorMap.PH_UP_VALVE and self.relays.get(ActuatorMap.PH_DOWN_VALVE):
+                self.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
+
         self.relays[ch] = state
         self.relay_queue.put((ch, state))
 
@@ -440,7 +428,6 @@ class HardwareController:
         return self.relays.get(ch, False)
 
     def emergency_all_off(self):
-        # Clear out any queued pending commands
         while not self.relay_queue.empty():
             try:
                 self.relay_queue.get_nowait()
@@ -449,7 +436,7 @@ class HardwareController:
                 break
         for ch in range(1, 14):
             self.relays[ch] = False
-        # Push single high-speed batch shutdown command to relay worker
+
         self.relay_queue.put(("ALL_OFF", False))
 
     def _relay_worker(self):
@@ -469,7 +456,6 @@ class HardwareController:
                             inst.mode = minimalmodbus.MODE_RTU
                             inst.clear_buffers_before_each_transaction = True
                             if ch == "ALL_OFF":
-                                # Fast sequential coil shutdown across all 16 board channels on single port handle
                                 for coil_i in range(16):
                                     try:
                                         inst.write_bit(coil_i, 0, functioncode=5)
@@ -490,15 +476,6 @@ class HardwareController:
                 print(f"[RELAY WORKER EXCEPTION] {e}")
 
     def _sensor_worker(self):
-        """
-        Continuously reads live EC, pH, and Water Temperature from RS485 Modbus RTU:
-        Target Path strictly from system_config.
-        - EC Meter: Slave ID 1, Reg 0 (raw / 1000.0) -> e.g. 12 -> 0.012 mS/cm
-        - pH Meter: Slave ID 2, Reg 2 (raw / 100.0) -> e.g. 680 -> 6.80 pH
-        - Water Temp: Slave ID 2, Reg 3 (raw °C) -> e.g. 31 -> 31.0 °C
-        If sensor is disconnected or comm error occurs, marks sensor_error = True and pv = None.
-        No dummy data is generated.
-        """
         while True:
             try:
                 target_port = system_config.get("serial_port_sensor")
@@ -507,7 +484,7 @@ class HardwareController:
                 read_ph_ok = False
 
                 if MODBUS_AVAILABLE and target_port and os.path.exists(target_port) and not os.path.isdir(target_port):
-                    # 1. Read EC Meter (Slave ID 1, Register 0)
+
                     ec_slave = int(system_config.get("sensor_slave_ec", 1))
                     inst_ec = None
                     try:
@@ -519,7 +496,7 @@ class HardwareController:
                             inst_ec.clear_buffers_before_each_transaction = True
                             d1 = inst_ec.read_registers(0, 4, functioncode=3)
                         if d1 and len(d1) >= 1:
-                            raw_ec = d1[0]  # Register 0 is EC! (e.g. 12 -> 0.012 mS/cm)
+                            raw_ec = d1[0]
                             ec_v = round(raw_ec / 1000.0, 3)
                             if 0.0 <= ec_v <= 25.0:
                                 self.pv_ec = ec_v
@@ -533,7 +510,6 @@ class HardwareController:
 
                     time.sleep(0.08)
 
-                    # 2. Read pH & Water Temp Meter (Slave ID 2, Register 2 & 3)
                     ph_slave = int(system_config.get("sensor_slave_ph", 2))
                     inst_ph = None
                     try:
@@ -545,9 +521,9 @@ class HardwareController:
                             inst_ph.clear_buffers_before_each_transaction = True
                             d2 = inst_ph.read_registers(0, 4, functioncode=3)
                         if d2 and len(d2) >= 4:
-                            raw_ph = d2[2]  # Register 2 is pH! (e.g. 680 -> 6.80)
+                            raw_ph = d2[2]
                             ph_v = round(raw_ph / 100.0, 2) if raw_ph > 50 else round(float(raw_ph), 2)
-                            raw_temp = d2[3]  # Register 3 is Temp! (e.g. 31 -> 31.0 °C)
+                            raw_temp = d2[3]
                             temp_v = float(raw_temp)
                             if 0.0 <= ph_v <= 14.0:
                                 self.pv_ph = ph_v
@@ -567,7 +543,7 @@ class HardwareController:
                     self.ph_last_seen = time.time()
 
                 now = time.time()
-                # 15.0 second timeout for sensor freshness to prevent transient modbus query drops
+
                 if now - self.ec_last_seen > 15.0:
                     self.pv_ec = None
 
@@ -587,16 +563,10 @@ class HardwareController:
                 time.sleep(1.0)
 
     def simulate_step(self, dt: float = 0.1):
-        # Strict user instruction: No dummy or simulated telemetry data at all.
-        # System operates strictly on real hardware telemetry from Modbus sensors.
         return
-
 
 hw = HardwareController()
 
-# -----------------------------------------------------------------------------
-# CYCLIC IRRIGATION ENGINE (2-ZONE CONTROLLER WITH MANUAL OVERRIDE)
-# -----------------------------------------------------------------------------
 class CyclicIrrigationEngine:
     def __init__(self, hardware: HardwareController):
         self.hw = hardware
@@ -607,22 +577,20 @@ class CyclicIrrigationEngine:
         self.was_irrigating = False
 
     def stop_irrigation(self):
-        """Immediately stop both zones and shut off all irrigation hardware (Ch 6, 10, 11, 12, 13)."""
         for z in ["zone_1", "zone_2"]:
             ts = self.timer_states[z]
             ts["state"] = "STOPPED"
             ts["manual_stopped"] = True
             ts["last_toggle"] = time.time()
             ts["time_left"] = 0.0
-        self.hw.set_relay(ActuatorMap.ZONE_1_VALVE, False)            # 12 OFF
-        self.hw.set_relay(ActuatorMap.ZONE_2_VALVE, False)            # 13 OFF
-        self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, False) # 11 OFF
-        self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, False)  # 10 OFF
-        self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, False)           # 6 OFF
+        self.hw.set_relay(ActuatorMap.ZONE_1_VALVE, False)
+        self.hw.set_relay(ActuatorMap.ZONE_2_VALVE, False)
+        self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, False)
+        self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, False)
+        self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, False)
         self.was_irrigating = False
 
     def stop_zone(self, zone_key: str):
-        """Stop a specific zone and keep it in STOPPED state without restarting."""
         if zone_key in self.timer_states:
             ts = self.timer_states[zone_key]
             ts["state"] = "STOPPED"
@@ -634,13 +602,24 @@ class CyclicIrrigationEngine:
 
         other_key = "zone_2" if zone_key == "zone_1" else "zone_1"
         if self.timer_states.get(other_key, {}).get("state") != "ON":
-            self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, False) # 11 OFF
-            self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, False)  # 10 OFF
-            self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, False)           # 6 OFF
+            self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, False)
+            self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, False)
+            self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, False)
             self.was_irrigating = False
 
     def start_zone(self, zone_key: str):
-        """Manually trigger or resume irrigation for a specific zone (Ch 6, 10, 11, and zone valve ON)."""
+        if 'engine' in globals() and getattr(engine, 'is_running', False):
+            engine.stop_cycle()
+            self.hw.set_relay(ActuatorMap.EC_VALVE_1, False)
+            self.hw.set_relay(ActuatorMap.EC_VALVE_2, False)
+            self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
+            self.hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
+            self.hw.set_relay(ActuatorMap.TANK_RETURN_VALVE, False)
+            self.hw.set_relay(ActuatorMap.PUMP_OUTLET_VALVE, False)
+            engine.active_venturis = {1: False, 2: False, 3: False, 4: False}
+            engine.state = "INTERRUPTED BY IRRIGATION"
+            engine.status_msg = f" Fertigation aborted: Cyclic Irrigation ({zone_key}) started!"
+
         if zone_key in self.timer_states:
             ts = self.timer_states[zone_key]
             ts["manual_stopped"] = False
@@ -650,10 +629,15 @@ class CyclicIrrigationEngine:
             ts["time_left"] = float(cfg.get("on_min", 5.0)) * 60.0
             ch = ActuatorMap.ZONE_1_VALVE if zone_key == "zone_1" else ActuatorMap.ZONE_2_VALVE
             self.hw.set_relay(ch, True)
-            self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, True)            # 6 RO PUMP ON
-            self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, True)   # 10 LOOP VALVE ON
-            self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, True)  # 11 MASTER VALVE ON
-            self.hw.set_relay(ActuatorMap.MAIN_PUMP, False)               # 8 MAIN PUMP STRICTLY OFF
+            self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, True)
+            self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, True)
+            self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, True)
+            self.hw.set_relay(ActuatorMap.MAIN_PUMP, False)
+
+            self.hw.set_relay(ActuatorMap.EC_VALVE_1, False)
+            self.hw.set_relay(ActuatorMap.EC_VALVE_2, False)
+            self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
+            self.hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
             self.was_irrigating = True
 
     def process_tick(self):
@@ -670,7 +654,6 @@ class CyclicIrrigationEngine:
             cfg = cyclic_timer_cfg.get(z_key, {})
             ts = self.timer_states[z_key]
 
-            # If user explicitly stopped this zone or disabled it, keep it STOPPED
             if not cfg.get("enabled", True) or ts.get("manual_stopped", False):
                 if ts.get("manual_stopped", False):
                     ts["state"] = "STOPPED"
@@ -695,7 +678,7 @@ class CyclicIrrigationEngine:
 
             if in_window:
                 if ts["state"] in ["OFF", "WINDOW_CLOSED", "DISABLED", "STOPPED"]:
-                    # Must wait for full OFF duration before transitioning to ON
+
                     if ts["last_toggle"] == 0.0 or (now_sec - ts["last_toggle"] >= off_sec):
                         ts["state"] = "ON"
                         ts["last_toggle"] = now_sec
@@ -725,24 +708,26 @@ class CyclicIrrigationEngine:
                     self.hw.set_relay(ch_valve, False)
 
         if any_zone_on:
-            # RO Water Cyclic Irrigation: Ch 6 ON, Ch 10 ON, Ch 11 ON, Zone 12/13 ON
-            self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, True)           # 6 RO PUMP ON
-            self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, True)  # 10 LOOP VALVE ON
-            self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, True) # 11 S.V 11 ON
-            self.hw.set_relay(ActuatorMap.MAIN_PUMP, False)              # 8 MAIN PUMP STRICTLY OFF
+
+            self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, True)
+            self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, True)
+            self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, True)
+            self.hw.set_relay(ActuatorMap.MAIN_PUMP, False)
+
+            self.hw.set_relay(ActuatorMap.EC_VALVE_1, False)
+            self.hw.set_relay(ActuatorMap.EC_VALVE_2, False)
+            self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
+            self.hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
             self.was_irrigating = True
         else:
             if self.was_irrigating:
-                self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, False)          # 6 RO PUMP OFF
-                self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, False) # 10 OFF
-                self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, False)# 11 OFF
+                self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, False)
+                self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, False)
+                self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, False)
                 self.was_irrigating = False
 
 irrigation_engine = CyclicIrrigationEngine(hw)
 
-# -----------------------------------------------------------------------------
-# FERTIGATION AUTOMATION ENGINE (DYNAMIC DEFICIT + SAFETY LIMITS)
-# -----------------------------------------------------------------------------
 class FertigationAutomationEngine:
     def __init__(self, hardware: HardwareController):
         self.hw = hardware
@@ -755,7 +740,6 @@ class FertigationAutomationEngine:
         self.baseline_ec = 0.60
         self.baseline_ph = 7.20
 
-        # Venturis: 1=EC1, 2=EC2, 3=pH Down, 4=pH Up
         self.active_venturis = {1: False, 2: False, 3: False, 4: False}
         self.venturi_safety_status = {1: "OK", 2: "OK", 3: "OK", 4: "OK"}
         self.dosing_time_remaining = 0.0
@@ -788,8 +772,6 @@ class FertigationAutomationEngine:
         ec_needs_dosing = (current_ec <= ec_min)
         ph_needs_dosing = (current_ph >= ph_max or current_ph <= ph_min)
 
-        # STRICT SAFETY RULE:
-        # If both EC and pH are already satisfied and it's not a sequential run
         if not ec_needs_dosing and not ph_needs_dosing and delivery_target != "sequential":
             self.state = "SETPOINTS SATISFIED"
             self.status_msg = (
@@ -803,7 +785,6 @@ class FertigationAutomationEngine:
                 f"Main Pump will start when EC <= {ec_min:.2f} or pH triggers."
             )
 
-        # Isolate RO Water irrigation if active so fertigation takes control
         if self.hw.get_relay(ActuatorMap.RO_WATER_PUMP):
             self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, False)
 
@@ -823,27 +804,6 @@ class FertigationAutomationEngine:
         self.status_msg = "Fertigation Cycle Aborted / Emergency Stop"
 
     def _execute_single_batch(self, recipe: dict, target_zones: list, stage_prefix: str = "") -> bool:
-        """
-        Executes nutrient preparation and field delivery sequence:
-        1. Check live sensor values against crop setpoints.
-        2. If values need conditioning:
-           - Step 1: Ch 8 (Main Pump) ON
-           - Step 2: Ch 9 (Pump Outlet Valve) ON
-           - Step 3: Ch 10 (Fertigation Loop Valve) ON
-           - Step 4: Ch 7 (Tank Return Valve) ON (Closed loop recirculation active)
-           - Dosing triggers:
-             * EC <= ec_min: Ch 1 (EC1) and Ch 2 (EC2) ON together until ec_max.
-             * pH <= ph_min: Ch 4 (pH Up) ON until ph_target.
-             * pH >= ph_max: Ch 3 (pH Down) ON until ph_target.
-             * pH Up and pH Down never run together; EC and pH can dose in parallel.
-           - Continuous live monitoring through recirculation loop until values become favourable (no fixed mix time).
-        3. Once values are favourable (or if already matched):
-           - Ch 10 (Fertigation Loop Valve) turns OFF.
-           - Ch 7 (Tank Return Valve) turns OFF.
-           - Ch 11 (Irrigation Master Valve) turns ON.
-           - Target zone valves (Ch 12, Ch 13, or both) turn ON.
-           - Solution is delivered to target zone(s).
-        """
         ec_min = float(recipe.get("ec_min", 1.80))
         ec_max = float(recipe.get("ec_max", 2.20))
         ph_min = float(recipe.get("ph_min", 5.40))
@@ -871,194 +831,291 @@ class FertigationAutomationEngine:
         needs_conditioning = needs_ec_dosing or needs_ph_down or needs_ph_up
 
         if needs_conditioning:
-            # STEP 1: Main Pump (Ch 8) ON
+
             self.state = f"{stage_prefix}STARTING PUMP"
             self.status_msg = f"{stage_prefix}Step 1: Main Pump (Ch 8) ON..."
             self.hw.set_relay(ActuatorMap.MAIN_PUMP, True)
             time.sleep(0.8)
             if self.stop_event.is_set(): return False
 
-            # STEP 2: Pump Outlet Valve (Ch 9) ON
             self.status_msg = f"{stage_prefix}Step 2: Pump Outlet Valve (Ch 9) ON..."
             self.hw.set_relay(ActuatorMap.PUMP_OUTLET_VALVE, True)
             time.sleep(0.5)
             if self.stop_event.is_set(): return False
 
-            # STEP 3: Fertigation Loop Valve (Ch 10) ON
             self.status_msg = f"{stage_prefix}Step 3: Fertigation Loop Valve (Ch 10) ON..."
             self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, True)
             time.sleep(0.5)
             if self.stop_event.is_set(): return False
 
-            # STEP 4: Tank Return Valve (Ch 7) ON (Loop: 8 -> 9 -> 10 -> 7)
             self.status_msg = f"{stage_prefix}Step 4: Tank Return Valve (Ch 7) ON (Loop established)..."
             self.hw.set_relay(ActuatorMap.TANK_RETURN_VALVE, True)
             time.sleep(0.5)
             if self.stop_event.is_set(): return False
 
-            # Keep field delivery lines and RO pump strictly OFF during loop
             self.hw.set_relay(ActuatorMap.RO_WATER_PUMP, False)
             self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, False)
             self.hw.set_relay(ActuatorMap.ZONE_1_VALVE, False)
             self.hw.set_relay(ActuatorMap.ZONE_2_VALVE, False)
 
-            # STEP 5: Dynamic Parallel Dosing & Recirculation Loop (No mix time delay)
-            self.state = f"{stage_prefix}RECIRCULATION & DOSING"
-            dosing_start_time = time.time()
-            max_dosing_timeout = 180.0
-            sensor_err_start = 0.0
+            # Record initial values when fertigation starts
+            initial_start_ec = round(self.hw.pv_ec, 3) if self.hw.pv_ec is not None else 0.0
+            initial_start_ph = round(self.hw.pv_ph, 2) if self.hw.pv_ph is not None else 0.0
+            prev_loop_ec = initial_start_ec
+            prev_loop_ph = initial_start_ph
+            stagnant_loops = 0
+            max_dosing_timeout = float(recipe.get("dosing_timeout_sec", 180.0))
+            mix_seconds = float(recipe.get("mixing_time_sec", 30.0))
+            loop_idx = 0
+            target_reached = False
 
             while not self.stop_event.is_set():
-                if getattr(self.hw, "sensor_error", False) or self.hw.pv_ec is None or self.hw.pv_ph is None:
-                    if sensor_err_start == 0.0:
-                        sensor_err_start = time.time()
-                    if time.time() - sensor_err_start > 12.0:
-                        self.status_msg = "⚠ Sensor communication lost for >12s during dosing! Aborting cycle."
-                        self.hw.emergency_all_off()
-                        return False
-                    time.sleep(0.5)
-                    continue
-                else:
-                    sensor_err_start = 0.0
+                loop_idx += 1
+                self.state = f"{stage_prefix}RECIRCULATION & DOSING (Loop {loop_idx})"
+                dosing_start_time = time.time()
+                sensor_err_start = 0.0
 
-                cur_ec = round(self.hw.pv_ec, 3)
-                cur_ph = round(self.hw.pv_ph, 2)
+                while not self.stop_event.is_set():
+                    if self.hw.get_relay(ActuatorMap.IRRIGATION_MASTER_VALVE) or \
+                       self.hw.get_relay(ActuatorMap.ZONE_1_VALVE) or \
+                       self.hw.get_relay(ActuatorMap.ZONE_2_VALVE) or \
+                       self.hw.get_relay(ActuatorMap.RO_WATER_PUMP):
+                        self.status_msg = "⚠ Fertigation aborted: Irrigation valve became active during dosing!"
+                        self.stop_event.set()
+                        break
 
-                # EC Dosing Control (EC1 Ch 1 & EC2 Ch 2 together in tandem)
-                if cur_ec <= ec_min and not self.active_venturis.get(1):
-                    self.hw.set_relay(ActuatorMap.EC_VALVE_1, True)
-                    self.hw.set_relay(ActuatorMap.EC_VALVE_2, True)
-                    self.active_venturis[1] = True
-                    self.active_venturis[2] = True
-                    self.venturi_safety_status[1] = "DOSING"
-                    self.venturi_safety_status[2] = "DOSING"
-                elif cur_ec >= ec_max and self.active_venturis.get(1):
-                    self.hw.set_relay(ActuatorMap.EC_VALVE_1, False)
-                    self.hw.set_relay(ActuatorMap.EC_VALVE_2, False)
-                    self.active_venturis[1] = False
-                    self.active_venturis[2] = False
-                    self.venturi_safety_status[1] = "AT SETPOINT"
-                    self.venturi_safety_status[2] = "AT SETPOINT"
+                    if getattr(self.hw, "sensor_error", False) or self.hw.pv_ec is None or self.hw.pv_ph is None:
+                        if sensor_err_start == 0.0:
+                            sensor_err_start = time.time()
+                        if time.time() - sensor_err_start > 12.0:
+                            self.status_msg = "⚠ Sensor communication lost for >12s during dosing! Aborting cycle."
+                            self.hw.emergency_all_off()
+                            return False
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        sensor_err_start = 0.0
 
-                # EC Safety limits
-                if cur_ec >= ec1_safety_max or cur_ec >= ec2_safety_max:
-                    if self.active_venturis.get(1):
+                    cur_ec = round(self.hw.pv_ec, 3)
+                    cur_ph = round(self.hw.pv_ph, 2)
+
+                    if cur_ec <= ec_min and not self.active_venturis.get(1):
+                        self.hw.set_relay(ActuatorMap.EC_VALVE_1, True)
+                        self.hw.set_relay(ActuatorMap.EC_VALVE_2, True)
+                        self.active_venturis[1] = True
+                        self.active_venturis[2] = True
+                        self.venturi_safety_status[1] = "DOSING"
+                        self.venturi_safety_status[2] = "DOSING"
+                    elif cur_ec >= ec_max and self.active_venturis.get(1):
                         self.hw.set_relay(ActuatorMap.EC_VALVE_1, False)
                         self.hw.set_relay(ActuatorMap.EC_VALVE_2, False)
                         self.active_venturis[1] = False
                         self.active_venturis[2] = False
-                        self.venturi_safety_status[1] = f"TRIPPED (EC >= {ec1_safety_max:.2f})"
-                        self.venturi_safety_status[2] = f"TRIPPED (EC >= {ec2_safety_max:.2f})"
+                        self.venturi_safety_status[1] = "AT SETPOINT"
+                        self.venturi_safety_status[2] = "AT SETPOINT"
 
-                # pH Dosing Control (pH Up and pH Down NEVER run together)
-                if cur_ph >= ph_max and not self.active_venturis.get(3) and not self.active_venturis.get(4):
-                    self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, True)
-                    self.active_venturis[3] = True
-                    self.venturi_safety_status[3] = "DOSING"
-                elif cur_ph <= ph_target and self.active_venturis.get(3):
-                    self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
-                    self.active_venturis[3] = False
-                    self.venturi_safety_status[3] = "AT SETPOINT"
+                    if cur_ec >= ec1_safety_max or cur_ec >= ec2_safety_max:
+                        if self.active_venturis.get(1):
+                            self.hw.set_relay(ActuatorMap.EC_VALVE_1, False)
+                            self.hw.set_relay(ActuatorMap.EC_VALVE_2, False)
+                            self.active_venturis[1] = False
+                            self.active_venturis[2] = False
+                            self.venturi_safety_status[1] = f"TRIPPED (EC >= {ec1_safety_max:.2f})"
+                            self.venturi_safety_status[2] = f"TRIPPED (EC >= {ec2_safety_max:.2f})"
 
-                if cur_ph <= ph_min and not self.active_venturis.get(4) and not self.active_venturis.get(3):
-                    self.hw.set_relay(ActuatorMap.PH_UP_VALVE, True)
-                    self.active_venturis[4] = True
-                    self.venturi_safety_status[4] = "DOSING"
-                elif cur_ph >= ph_target and self.active_venturis.get(4):
-                    self.hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
-                    self.active_venturis[4] = False
-                    self.venturi_safety_status[4] = "AT SETPOINT"
+                    if cur_ph >= ph_max and not self.active_venturis.get(3) and not self.active_venturis.get(4):
+                        self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, True)
+                        self.active_venturis[3] = True
+                        self.venturi_safety_status[3] = "DOSING"
+                    elif cur_ph <= ph_target and self.active_venturis.get(3):
+                        self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
+                        self.active_venturis[3] = False
+                        self.venturi_safety_status[3] = "AT SETPOINT"
 
-                # pH Safety cutoffs
-                if cur_ph <= ph_down_safety_min and self.active_venturis.get(3):
-                    self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
-                    self.active_venturis[3] = False
-                    self.venturi_safety_status[3] = f"TRIPPED (pH <= {ph_down_safety_min:.2f})"
+                    if cur_ph <= ph_min and not self.active_venturis.get(4) and not self.active_venturis.get(3):
+                        self.hw.set_relay(ActuatorMap.PH_UP_VALVE, True)
+                        self.active_venturis[4] = True
+                        self.venturi_safety_status[4] = "DOSING"
+                    elif cur_ph >= ph_target and self.active_venturis.get(4):
+                        self.hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
+                        self.active_venturis[4] = False
+                        self.venturi_safety_status[4] = "AT SETPOINT"
 
-                if cur_ph >= ph_up_safety_max and self.active_venturis.get(4):
-                    self.hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
-                    self.active_venturis[4] = False
-                    self.venturi_safety_status[4] = f"TRIPPED (pH >= {ph_up_safety_max:.2f})"
+                    if cur_ph <= ph_down_safety_min and self.active_venturis.get(3):
+                        self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
+                        self.active_venturis[3] = False
+                        self.venturi_safety_status[3] = f"TRIPPED (pH <= {ph_down_safety_min:.2f})"
 
-                # Check if values are now favourable
-                ec_favourable = (not self.active_venturis.get(1)) and (cur_ec >= ec_min)
-                ph_favourable = (not self.active_venturis.get(3)) and (not self.active_venturis.get(4)) and (ph_min <= cur_ph <= ph_max)
+                    if cur_ph >= ph_up_safety_max and self.active_venturis.get(4):
+                        self.hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
+                        self.active_venturis[4] = False
+                        self.venturi_safety_status[4] = f"TRIPPED (pH >= {ph_up_safety_max:.2f})"
 
-                active_dosing_txt = []
-                if self.active_venturis.get(1): active_dosing_txt.append("EC1+EC2 (Tandem)")
-                if self.active_venturis.get(3): active_dosing_txt.append(f"pH Down ➔ {ph_target:.2f}")
-                if self.active_venturis.get(4): active_dosing_txt.append(f"pH Up ➔ {ph_target:.2f}")
+                    ec_favourable = (not self.active_venturis.get(1)) and (cur_ec >= ec_min)
+                    ph_favourable = (not self.active_venturis.get(3)) and (not self.active_venturis.get(4)) and (ph_min <= cur_ph <= ph_max)
 
-                if active_dosing_txt:
-                    self.status_msg = f"{stage_prefix}Loop Active: EC={cur_ec:.3f}, pH={cur_ph:.2f} | Dosing: {', '.join(active_dosing_txt)}"
+                    active_dosing_txt = []
+                    if self.active_venturis.get(1): active_dosing_txt.append("EC1+EC2 (Tandem)")
+                    if self.active_venturis.get(3): active_dosing_txt.append(f"pH Down ➔ {ph_target:.2f}")
+                    if self.active_venturis.get(4): active_dosing_txt.append(f"pH Up ➔ {ph_target:.2f}")
+
+                    if active_dosing_txt:
+                        self.status_msg = f"{stage_prefix}[Loop {loop_idx}] Dosing: EC={cur_ec:.3f}, pH={cur_ph:.2f} | {', '.join(active_dosing_txt)}"
+                    else:
+                        self.status_msg = f"{stage_prefix}[Loop {loop_idx}] Monitoring: EC={cur_ec:.3f} (Req >= {ec_min:.2f}), pH={cur_ph:.2f} (Req {ph_min:.2f}..{ph_max:.2f})"
+
+                    if ec_favourable and ph_favourable:
+                        self.status_msg = f"✔ Values Favourable! EC={cur_ec:.3f} mS/cm, pH={cur_ph:.2f} ➔ Commencing 30s Circulation & Mixing..."
+                        break
+
+                    if time.time() - dosing_start_time > max_dosing_timeout:
+                        break
+
+                    time.sleep(0.4)
+
+                # Dosing phase over (either matched or 180s expired) -> Immediately turn OFF nutrient relays (Ch 1, 2, 3, 4)
+                self.hw.set_relay(ActuatorMap.EC_VALVE_1, False)
+                self.hw.set_relay(ActuatorMap.EC_VALVE_2, False)
+                self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
+                self.hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
+                self.active_venturis = {1: False, 2: False, 3: False, 4: False}
+
+                if self.stop_event.is_set():
+                    return False
+
+                # 30-Second Circulation & Mixing stage: Ch 1, 2, 3, 4 OFF; Ch 7, 8, 9, 10 remain ON
+                self.state = f"{stage_prefix}CIRCULATION & MIXING (Loop {loop_idx})"
+                mix_start = time.time()
+                while (time.time() - mix_start < mix_seconds) and not self.stop_event.is_set():
+                    rem_m = max(0.0, mix_seconds - (time.time() - mix_start))
+                    cur_ec_m = self.hw.pv_ec if self.hw.pv_ec is not None else 0.0
+                    cur_ph_m = self.hw.pv_ph if self.hw.pv_ph is not None else 0.0
+                    self.status_msg = f"{stage_prefix}Mixing (Loop {loop_idx}): {rem_m:.0f}s left (EC={cur_ec_m:.3f}, pH={cur_ph_m:.2f})..."
+                    time.sleep(0.5)
+
+                if self.stop_event.is_set():
+                    return False
+
+                # After 30s mixing completes, check final live EC and pH
+                cur_ec_after = round(self.hw.pv_ec, 3) if self.hw.pv_ec is not None else 0.0
+                cur_ph_after = round(self.hw.pv_ph, 2) if self.hw.pv_ph is not None else 0.0
+                ec_ok = (ec_min <= cur_ec_after <= ec_max)
+                ph_ok = (ph_min <= cur_ph_after <= ph_max)
+
+                if ec_ok and ph_ok:
+                    target_reached = True
+                    break
+
+                # Progress evaluation after 30s mixing:
+                # 1. EC must go UP by at least +0.2 each loop if EC is below ec_min
+                ec_step = cur_ec_after - prev_loop_ec
+                ec_progress = False
+                if prev_loop_ec < ec_min:
+                    if ec_step >= 0.2:
+                        ec_progress = True
                 else:
-                    self.status_msg = f"{stage_prefix}Loop Recirculating & Monitoring: EC={cur_ec:.3f} (Req >= {ec_min:.2f}), pH={cur_ph:.2f} (Req {ph_min:.2f}..{ph_max:.2f})"
+                    ec_progress = True
 
-                if ec_favourable and ph_favourable:
-                    self.status_msg = f"✔ Values Favourable! EC={cur_ec:.3f} mS/cm, pH={cur_ph:.2f} ➔ Commencing Circulation & Mixing..."
-                    break
+                # 2. pH can go +0.2 (if pH Up needed) or -0.2 (if pH Down needed)
+                ph_progress = False
+                ph_step = cur_ph_after - prev_loop_ph
+                if prev_loop_ph > ph_max:
+                    # pH Down needed -> pH must decrease by at least 0.2 (-0.2 or lower)
+                    if (prev_loop_ph - cur_ph_after) >= 0.2:
+                        ph_progress = True
+                elif prev_loop_ph < ph_min:
+                    # pH Up needed -> pH must increase by at least 0.2 (+0.2 or higher)
+                    if (cur_ph_after - prev_loop_ph) >= 0.2:
+                        ph_progress = True
+                else:
+                    ph_progress = True
 
-                if time.time() - dosing_start_time > max_dosing_timeout:
-                    self.status_msg = f"⚠ Dosing Timeout reached! (EC={cur_ec:.3f}, pH={cur_ph:.2f}) ➔ Commencing Circulation & Mixing..."
-                    break
+                # If values progressed in the needed direction (EC up >= 0.2 or pH +/- >= 0.2):
+                if ec_progress or ph_progress:
+                    stagnant_loops = 0
+                    print(f"[FERTIGATION PROGRESS] Loop {loop_idx}: Values progressing (EC step={ec_step:+.3f}, pH step={ph_step:+.2f}). Keeping Ch 7, 8, 9, 10 ON.")
+                else:
+                    stagnant_loops += 1
+                    print(f"[FERTIGATION STAGNANT] Loop {loop_idx}: No progress (EC step={ec_step:+.3f} < +0.2, pH step={ph_step:+.2f}). Stagnant Count={stagnant_loops}/3")
 
-                time.sleep(0.4)
+                # Update previous loop reference for next iteration
+                prev_loop_ec = cur_ec_after
+                prev_loop_ph = cur_ph_after
 
-            # Ensure all dosing relays are OFF
-            self.hw.set_relay(ActuatorMap.EC_VALVE_1, False)
-            self.hw.set_relay(ActuatorMap.EC_VALVE_2, False)
-            self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
-            self.hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
-            self.active_venturis = {1: False, 2: False, 3: False, 4: False}
-
-            if self.stop_event.is_set():
-                return False
-
-            # STEP 6: 15-Second Circulation & Mixing Loop (Homogenizing Solution before field delivery)
-            self.state = f"{stage_prefix}CIRCULATION & MIXING"
-            mix_seconds = float(recipe.get("mixing_time_sec", 15.0))
-            mix_start = time.time()
-            while (time.time() - mix_start < mix_seconds) and not self.stop_event.is_set():
-                rem_m = max(0.0, mix_seconds - (time.time() - mix_start))
-                cur_ec_m = self.hw.pv_ec if self.hw.pv_ec is not None else 0.0
-                cur_ph_m = self.hw.pv_ph if self.hw.pv_ph is not None else 0.0
-                self.status_msg = f"{stage_prefix}Circulation & Mixing: {rem_m:.0f}s remaining (EC={cur_ec_m:.3f}, pH={cur_ph_m:.2f})..."
-                time.sleep(0.5)
-
-            if self.stop_event.is_set():
-                return False
+                if stagnant_loops >= 3:
+                    # 3 consecutive loops with no progress: SHUT DOWN ALL RELAYS
+                    self.state = "DELIVERY BLOCKED: STAGNANT (3 LOOPS)"
+                    self.status_msg = f"⚠ Fertigation Aborted! Values stagnant for 3 loops (EC didn't increase >= 0.2 or pH didn't change >= 0.2). All relays OFF."
+                    print(f"[FERTIGATION STOPPED] {self.status_msg}")
+                    self.hw.set_relay(ActuatorMap.EC_VALVE_1, False)
+                    self.hw.set_relay(ActuatorMap.EC_VALVE_2, False)
+                    self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
+                    self.hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
+                    self.hw.set_relay(ActuatorMap.MAIN_PUMP, False)
+                    self.hw.set_relay(ActuatorMap.PUMP_OUTLET_VALVE, False)
+                    self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, False)
+                    self.hw.set_relay(ActuatorMap.TANK_RETURN_VALVE, False)
+                    self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, False)
+                    self.hw.set_relay(ActuatorMap.ZONE_1_VALVE, False)
+                    self.hw.set_relay(ActuatorMap.ZONE_2_VALVE, False)
+                    return False
 
         else:
-            # Live values already matched setpoints
+
             self.status_msg = f"{stage_prefix}Live values already match setpoints (EC={cur_ec:.3f}, pH={cur_ph:.2f}). Starting Main Pump..."
-            self.hw.set_relay(ActuatorMap.MAIN_PUMP, True)         # 8 ON
+            self.hw.set_relay(ActuatorMap.MAIN_PUMP, True)
             time.sleep(0.5)
-            self.hw.set_relay(ActuatorMap.PUMP_OUTLET_VALVE, True) # 9 ON
+            self.hw.set_relay(ActuatorMap.PUMP_OUTLET_VALVE, True)
             time.sleep(0.5)
 
-        # FIELD DELIVERY PHASE
-        # Ch 10 turns OFF, Ch 7 turns OFF, Ch 11 turns ON, and selected zone valves turn ON
+        # STRICT HARD SAFETY GATE: Verify final live EC and pH strictly match required setpoint range!
+        final_ec = round(self.hw.pv_ec, 3) if self.hw.pv_ec is not None else None
+        final_ph = round(self.hw.pv_ph, 2) if self.hw.pv_ph is not None else None
+
+        if final_ec is None or final_ph is None or getattr(self.hw, "sensor_error", False):
+            self.state = "DELIVERY BLOCKED: SENSOR ERROR"
+            self.status_msg = "⚠ Field delivery blocked: Sensor communication lost after mixing! SV 11, 12, 13 kept OFF."
+            print(f"[FERTIGATION BLOCKED] {self.status_msg}")
+            self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, False)
+            self.hw.set_relay(ActuatorMap.ZONE_1_VALVE, False)
+            self.hw.set_relay(ActuatorMap.ZONE_2_VALVE, False)
+            return False
+
+        ec_ok = (ec_min <= final_ec <= ec_max)
+        ph_ok = (ph_min <= final_ph <= ph_max)
+
+        if not ec_ok or not ph_ok:
+            fail_reasons = []
+            if not ec_ok:
+                fail_reasons.append(f"EC={final_ec:.2f} mS/cm (Req {ec_min:.2f}..{ec_max:.2f})")
+            if not ph_ok:
+                fail_reasons.append(f"pH={final_ph:.2f} (Req {ph_min:.2f}..{ph_max:.2f})")
+            self.state = "DELIVERY BLOCKED: UNMATCHED VALUES"
+            self.status_msg = f"⚠ Field delivery blocked! {', '.join(fail_reasons)} not matching required setpoints! SV 11, 12, 13 kept OFF."
+            print(f"[FERTIGATION BLOCKED] {self.status_msg}")
+            self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, False)
+            self.hw.set_relay(ActuatorMap.ZONE_1_VALVE, False)
+            self.hw.set_relay(ActuatorMap.ZONE_2_VALVE, False)
+            return False
+
         if target_zones:
             zone_names = " & ".join([f"Zone {z - 11} (Room {z - 11})" for z in target_zones])
             self.state = f"{stage_prefix}DELIVERING"
 
-            # 1. Channel 10 turns OFF
-            self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, False) # 10 OFF!
-            # 2. Channel 7 turns OFF
-            self.hw.set_relay(ActuatorMap.TANK_RETURN_VALVE, False)      # 7 OFF!
+            self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, False)
 
-            # 3. Channel 11 (Irrigation Master Valve) turns ON
-            self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, True) # 11 ON!
+            self.hw.set_relay(ActuatorMap.TANK_RETURN_VALVE, False)
 
-            # 4. As per selection, target zone valves (Ch 12, 13, or both) turn ON
+            self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, True)
+
             for z_pin in [ActuatorMap.ZONE_1_VALVE, ActuatorMap.ZONE_2_VALVE]:
                 if z_pin in target_zones:
                     self.hw.set_relay(z_pin, True)
                 else:
                     self.hw.set_relay(z_pin, False)
 
-            self.hw.set_relay(ActuatorMap.MAIN_PUMP, True)               # 8 ON
-            self.hw.set_relay(ActuatorMap.PUMP_OUTLET_VALVE, True)       # 9 ON
+            self.hw.set_relay(ActuatorMap.MAIN_PUMP, True)
+            self.hw.set_relay(ActuatorMap.PUMP_OUTLET_VALVE, True)
 
             self.status_msg = f"{stage_prefix}Delivering nutrient solution to {zone_names} (Ch 11, Ch {', '.join([str(z) for z in target_zones])} ON; Ch 10 OFF)..."
 
@@ -1069,7 +1126,6 @@ class FertigationAutomationEngine:
                 self.status_msg = f"{stage_prefix}Delivering to {zone_names}: {rem_del:.0f}s left..."
                 time.sleep(0.5)
 
-            # Close delivery valves after batch
             self.hw.set_relay(ActuatorMap.IRRIGATION_MASTER_VALVE, False)
             for z_pin in target_zones:
                 self.hw.set_relay(z_pin, False)
@@ -1080,14 +1136,14 @@ class FertigationAutomationEngine:
         crop_k = self.active_recipe_key
         try:
             if self.delivery_target == "sequential":
-                # Batch 1: Zone 1 (Room 1)
+
                 rec_z1 = get_zone_recipe(crop_k, "zone_1")
                 ok1 = self._execute_single_batch(rec_z1, target_zones=[ActuatorMap.ZONE_1_VALVE], stage_prefix="[Room 1] ")
                 if ok1 and not self.stop_event.is_set():
                     self.state = "[Refill] PREPARING ROOM 2"
                     self.status_msg = "Batch 1 (Room 1) Delivered! Waiting for solution before Room 2 batch..."
                     time.sleep(3.0)
-                    # Batch 2: Zone 2 (Room 2)
+
                     rec_z2 = get_zone_recipe(crop_k, "zone_2")
                     self._execute_single_batch(rec_z2, target_zones=[ActuatorMap.ZONE_2_VALVE], stage_prefix="[Room 2] ")
             elif self.delivery_target == "zone_1":
@@ -1096,11 +1152,10 @@ class FertigationAutomationEngine:
             elif self.delivery_target == "zone_2":
                 rec_z2 = get_zone_recipe(crop_k, "zone_2")
                 self._execute_single_batch(rec_z2, target_zones=[ActuatorMap.ZONE_2_VALVE], stage_prefix="[Room 2] ")
-            else: # "both" (Common)
+            else:
                 rec_both = get_zone_recipe(crop_k, "both")
                 self._execute_single_batch(rec_both, target_zones=[ActuatorMap.ZONE_1_VALVE, ActuatorMap.ZONE_2_VALVE], stage_prefix="[Common Rooms 1 & 2] ")
 
-            # Fertigation complete: shut OFF Main Pump and all valves
             self.hw.set_relay(ActuatorMap.EC_VALVE_1, False)
             self.hw.set_relay(ActuatorMap.EC_VALVE_2, False)
             self.hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
@@ -1111,11 +1166,14 @@ class FertigationAutomationEngine:
             self.hw.set_relay(ActuatorMap.FERTIGATION_LOOP_VALVE, False)
             self.hw.set_relay(ActuatorMap.TANK_RETURN_VALVE, False)
             self.hw.set_relay(ActuatorMap.PUMP_OUTLET_VALVE, False)
-            self.hw.set_relay(ActuatorMap.MAIN_PUMP, False)              # 8 MAIN PUMP SHUT OFF
+            self.hw.set_relay(ActuatorMap.MAIN_PUMP, False)
 
             if not self.stop_event.is_set():
-                self.state = "COMPLETED"
-                self.status_msg = f"✔ Fertigation Complete. Target reached and delivered. Main Pump OFF."
+                if "BLOCKED" in self.state or "TIMEOUT" in self.state or "ERROR" in self.state:
+                    pass
+                else:
+                    self.state = "COMPLETED"
+                    self.status_msg = f"✔ Fertigation Complete. Target reached and delivered. Main Pump OFF."
             else:
                 self.state = "STOPPED"
                 self.status_msg = "Fertigation Cycle Aborted by User."
@@ -1132,9 +1190,6 @@ class FertigationAutomationEngine:
 
 engine = FertigationAutomationEngine(hw)
 
-# -----------------------------------------------------------------------------
-# FULLSCREEN TOUCH KEYPAD (EXACT COLD1.PY ARCHITECTURE)
-# -----------------------------------------------------------------------------
 keypad_modal = None
 
 def add_logo(parent):
@@ -1323,7 +1378,7 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
             b.grid(row=r, column=c, padx=6, pady=3)
 
     else:
-        # Alphanumeric mode
+
         rows = [list("1234567890"), list("QWERTYUIOP"), list("ASDFGHJKL:"), list("ZXCVBNM._- ")]
         for ri, row_k in enumerate(rows):
             r_f = tk.Frame(kp_buttons_frame, bg="white")
@@ -1337,7 +1392,6 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
                     command=lambda x=ch: kp_press(x)
                 ).pack(side="left", padx=3)
 
-    # Action Buttons matching cold1.py
     kp_actions_frame = tk.Frame(kp_main, bg="white")
     kp_actions_frame.pack(pady=8)
 
@@ -1349,12 +1403,8 @@ def open_almora_keypad(title_text, initial_value, callback_on_confirm, is_alphan
     tk.Button(kp_actions_frame, text="SAVE", font=btn_act_font, bg="#2e7d32", fg="white", width=btn_act_w, height=1, cursor="hand2", relief="raised", bd=1, command=kp_confirm).pack(side="left", padx=6)
     tk.Button(kp_actions_frame, text="CANCEL", font=btn_act_font, bg="#64748b", fg="white", width=btn_act_w, height=1, cursor="hand2", relief="raised", bd=1, command=kp_cancel).pack(side="left", padx=6)
 
-# Alias for backwards compatibility
 open_keypad = open_almora_keypad
 
-# =============================================================================
-# BLUETOOTH SERIAL TERMINAL, WI-FI MANAGER & MQTT CLOUD SYNC ENGINE
-# =============================================================================
 CONTROL_BROKER = "147.93.106.142"
 CONTROL_PORT = 1883
 CONTROL_USER = "Inhydro@5598"
@@ -1502,10 +1552,10 @@ def get_bluetooth_live_status() -> str:
         wifi_str = f"CONNECTED ({curr_ssid})" if curr_ssid else "DISCONNECTED"
         lines = [
             f"INHYDRO FERTIGATION & CYCLIC IRRIGATION CONTROLLER",
-            #f"Device ID: {DEVICE_NAME}",
+
             f"Timestamp: {time.strftime('%d-%m-%Y %H:%M:%S')}",
             f"WiFi Status: {wifi_str}",
-            #f"MQTT Status: {'CONNECTED' if is_mqtt_connected else 'OFFLINE / RECONNECTING'}",
+
             "",
             "[LIVE TANK SENSORS]",
             f"  EC        : {f'{hw.pv_ec:.2f} mS/cm' if (hw.pv_ec is not None and not getattr(hw, 'sensor_error', False)) else 'Sensor Error / Offline'}",
@@ -1525,7 +1575,7 @@ def get_bluetooth_live_status() -> str:
             f"  Dosing    : EC1={'ON' if hw.get_relay(1) else 'OFF'}, EC2={'ON' if hw.get_relay(2) else 'OFF'}, pH Down={'ON' if hw.get_relay(3) else 'OFF'}, pH Up={'ON' if hw.get_relay(4) else 'OFF'}",
             f"  Pumps/Loop: Spare={'ON' if hw.get_relay(5) else 'OFF'}, RO Pump={'ON' if hw.get_relay(6) else 'OFF'}, Return={'ON' if hw.get_relay(7) else 'OFF'}, Main Pump={'ON' if hw.get_relay(8) else 'OFF'}, Outlet={'ON' if hw.get_relay(9) else 'OFF'}",
             f"  Valves  : Fert Loop={'ON' if hw.get_relay(10) else 'OFF'}, Master={'ON' if hw.get_relay(11) else 'OFF'}, Zone 1={'ON' if hw.get_relay(12) else 'OFF'}, Zone 2={'ON' if hw.get_relay(13) else 'OFF'}",
-            #"==========================================================="
+
         ]
         return "\r\n".join(lines) + "\r\n"
     except Exception as ex:
@@ -1541,7 +1591,7 @@ def process_bt_command(raw_cmd: str) -> str:
     if raw_cmd.startswith('{') and raw_cmd.endswith('}'):
         try:
             data = json.loads(raw_cmd)
-            # check if JSON is asking for wifi status / info
+
             if data.get('cmd') in ['wifi', 'wifistatus', 'status', 'check_wifi'] or data.get('action') in ['wifi', 'get_wifi']:
                 curr_ssid = get_connected_wifi_ssid()
                 ip_addr = get_system_ip_summary()
@@ -1598,8 +1648,7 @@ def process_bt_command(raw_cmd: str) -> str:
                 "\r\n--- WI-FI CONNECTIVITY STATUS ---\r\n"
                 "STATUS     : CONNECTED\r\n"
                 f"NETWORK    : {curr_ssid}\r\n"
-                #f"IP ADDRESS : {ip_addr}\r\n"
-                #"---------------------------------\r\n\r\n"
+
             )
         else:
             resp = (
@@ -1607,7 +1656,7 @@ def process_bt_command(raw_cmd: str) -> str:
                 "STATUS     : Not Connected\r\n"
                 "Note       : Send 'SCAN' or '1' to search networks,\r\n"
                 "             or 'WIFI:SSID:PASSWORD' to connect.\r\n"
-                #"---------------------------------\r\n\r\n"
+
             )
         return resp
 
@@ -1619,7 +1668,7 @@ def process_bt_command(raw_cmd: str) -> str:
             "3. STATUS\r\n"
             "4. PING\r\n"
             "5. HELP\r\n"
-            #"Or JSON: {\"ssid\":\"...\",\"password\":\"...\"} / {\"crop_recipes\":...}\r\n\r\n"
+
         )
 
     ssid_in = None
@@ -1668,7 +1717,7 @@ def handle_bt_client_fd(fd_int):
     try:
         banner = (
             f"\r\n  INHYDRO FERTIGATION & CYCLIC IRRIGATION CONTROLLER  \r\n"
-            #f"Device ID: {DEVICE_NAME}\r\n"
+
             "Commands:\r\n"
             "  1. SCAN                  (Scan nearby WiFi networks)\r\n"
             "  2. WIFI:SSID:PASSWORD    (Connect to WiFi)\r\n"
@@ -1837,7 +1886,7 @@ def start_bluetooth_server():
                     print(f"[BT] Raw RFCOMM Terminal connected from {client_info}")
                     banner = (
                         f"\r\n  INHYDRO FERTIGATION & CYCLIC IRRIGATION CONTROLLER  \r\n"
-                        #f"Device ID: {DEVICE_NAME}\r\n"
+
                         "Commands:\r\n"
                         "  1. SCAN\r\n"
                         "  2. WIFI:SSID:PASSWORD\r\n"
@@ -1890,7 +1939,6 @@ def auto_trust_devices():
 
     while running:
         try:
-            # Re-ensure pairable and discoverable stay on continuously
             subprocess.run(["bluetoothctl", "discoverable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
             subprocess.run(["bluetoothctl", "pairable", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
 
@@ -1939,9 +1987,6 @@ def network_watchdog():
             if not reconnected:
                 consecutive_failures += 1
 
-# -----------------------------------------------------------------------------
-# TWO-WAY MQTT CLOUD ENGINE (PRIVATE BROKER)
-# -----------------------------------------------------------------------------
 def broadcast_current_state():
     if not is_mqtt_connected or not control_client:
         return
@@ -1981,7 +2026,6 @@ def on_control_message(client, userdata, msg):
         if isinstance(new_data, dict) and (new_data.get("source") == "device" or new_data.get("from") == "device"):
             return
 
-        # 1. Hardware Commands Handling
         if topic.endswith("/command"):
             action = str(new_data.get("action", new_data.get("raw", ""))).lower().strip()
             print(f"[MQTT CMD] Received remote action: '{action}'")
@@ -2009,12 +2053,21 @@ def on_control_message(client, userdata, msg):
                 ch = int(new_data.get("channel", 0))
                 st = bool(new_data.get("state", False))
                 if 1 <= ch <= 13:
+                    if ch in [ActuatorMap.ZONE_1_VALVE, ActuatorMap.ZONE_2_VALVE, ActuatorMap.RO_WATER_PUMP, ActuatorMap.IRRIGATION_MASTER_VALVE] and st:
+                        if engine.is_running:
+                            engine.stop_cycle()
+                            hw.set_relay(ActuatorMap.EC_VALVE_1, False)
+                            hw.set_relay(ActuatorMap.EC_VALVE_2, False)
+                            hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
+                            hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
+                            hw.set_relay(ActuatorMap.TANK_RETURN_VALVE, False)
+                            hw.set_relay(ActuatorMap.PUMP_OUTLET_VALVE, False)
+                            engine.active_venturis = {1: False, 2: False, 3: False, 4: False}
                     hw.set_relay(ch, st)
 
             cmd_ack = {"device": DEVICE_NAME, "action": action, "status": "executed", "timestamp": time.time()}
             client.publish(f"inhydro/{DEVICE_NAME}/command/status", json.dumps(cmd_ack), retain=False)
 
-        # 2. Setpoints Update from Web (CRITICAL: Saved to local JSON file first, then displayed live!)
         elif topic.endswith("/setpoints/update") or topic.endswith("/config/update"):
             print(f"[MQTT SYNC] Cloud update received: {new_data}")
             updated_recipes = False
@@ -2046,7 +2099,6 @@ def on_control_message(client, userdata, msg):
                     cyclic_timer_cfg["zone_2"].update(new_data["zone_2"])
                     updated_timers = True
 
-            # Save to JSON file FIRST
             if updated_recipes:
                 save_json(RECIPE_FILE, crop_recipes)
                 print(f"[MQTT SYNC] Saved updated crop recipes to {RECIPE_FILE}")
@@ -2054,14 +2106,11 @@ def on_control_message(client, userdata, msg):
                 save_json(TIMERS_FILE, cyclic_timer_cfg)
                 print(f"[MQTT SYNC] Saved updated timers to {TIMERS_FILE}")
 
-            # Update UI on display screen immediately
             if active_app_instance:
                 active_app_instance.after(0, active_app_instance.sync_ui_from_cloud)
 
-            # Confirm sync back to cloud
             broadcast_current_state()
 
-        # 3. Request Sync from Web
         elif topic.endswith("/request_sync"):
             broadcast_current_state()
     except Exception as e:
@@ -2174,11 +2223,6 @@ def mqtt_telemetry_worker():
             pass
 
 class GridTouchDropdown:
-    """
-    Touch-friendly grid dropdown matching cold1.py architecture.
-    Opens a multi-column grid of large touch buttons instead of a narrow vertical list,
-    highlighting the active choice with a checkmark and auto-closing on outside click.
-    """
     def __init__(self, parent, root, var, values, on_select=None, cols=3, display_map=None, btn_width=None):
         self.parent = parent
         self.root = root
@@ -2244,7 +2288,6 @@ class GridTouchDropdown:
         for w in self.menu_frame.winfo_children():
             w.destroy()
 
-        # Dynamic columns: if <= 4 items and cols > 2, use 2 columns for better balance
         effective_cols = self.cols
         if len(self.values) <= 4 and self.cols > 2:
             effective_cols = 2
@@ -2254,7 +2297,6 @@ class GridTouchDropdown:
         display_texts = [self.display_map.get(v, str(v).replace("_", " ").title()) for v in self.values]
         longest_len = max(len(t) for t in display_texts) if display_texts else 10
 
-        # Dynamic column width calculated from text length: ensures words fit without truncation
         col_w = max(115, min(220, longest_len * 9 + 30))
         menu_w = col_w * effective_cols + 16
 
@@ -2295,7 +2337,6 @@ class GridTouchDropdown:
         bx = self.btn.winfo_rootx() - self.root.winfo_rootx()
         by = self.btn.winfo_rooty() - self.root.winfo_rooty() + self.btn.winfo_height() + 2
 
-        # Prevent overflowing the 1024 width screen
         if bx + menu_w > 1000:
             bx = max(10, 1000 - menu_w)
 
@@ -2318,10 +2359,6 @@ class GridTouchDropdown:
         if self.on_select:
             self.on_select()
 
-
-# -----------------------------------------------------------------------------
-# GRAPHICAL APPLICATION (7-INCH DISPLAY OPTIMIZED)
-# -----------------------------------------------------------------------------
 class InHydroFertigationApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -2335,15 +2372,14 @@ class InHydroFertigationApp(tk.Tk):
         except Exception:
             pass
 
-        # Color Palette matching itc_polyhouse_controller.py
         self.COLOR_BG = "white"
         self.COLOR_CARD_BG = "#f8fafc"
         self.COLOR_PRIMARY = "#1565c0"
         self.COLOR_ACCENT = "#0284c7"
         self.COLOR_TEXT_MAIN = "#0f172a"
         self.COLOR_TEXT_SUB = "#475569"
-        self.COLOR_SUCCESS = "#16a34a"  # Vivid Green for Relay ON
-        self.COLOR_OFF = "#64748b"      # Slate for Relay OFF
+        self.COLOR_SUCCESS = "#16a34a"
+        self.COLOR_OFF = "#64748b"
         self.COLOR_DANGER = "#dc2626"
 
         self.font_title = font.Font(family="Helvetica", size=15, weight="bold")
@@ -2354,7 +2390,6 @@ class InHydroFertigationApp(tk.Tk):
         self.font_sub_bold = font.Font(family="Helvetica", size=10, weight="bold")
         self.font_val_big = font.Font(family="Helvetica", size=22, weight="bold")
 
-        # TTK Style for Touch Dropdowns (Enhanced Height for 7-inch screens)
         style = ttk.Style()
         try: style.theme_use('clam')
         except Exception: pass
@@ -2378,17 +2413,13 @@ class InHydroFertigationApp(tk.Tk):
         self.screens = {}
         self.current_screen_key = "dashboard"
 
-        # 1. Top Header (matching itc_polyhouse_controller.py)
         self._build_header()
 
-        # 2. Bottom Dock with Persistent Navigation (RESTART, PREV, DASHBOARD, NEXT, CLOCK, EXIT)
         self._build_bottom_dock()
 
-        # 3. Center Workspace Container
         self.container = tk.Frame(self, bg="white")
         self.container.pack(fill="both", expand=True, padx=8, pady=2)
 
-        # Screens Construction
         self.screens["dashboard"]   = self._create_dashboard_screen(self.container)
         self.screens["monitoring"]  = self._create_monitoring_screen(self.container)
         self.screens["fertigation"] = self._create_fertigation_screen(self.container)
@@ -2397,7 +2428,6 @@ class InHydroFertigationApp(tk.Tk):
 
         self.show_screen("dashboard")
 
-        # Global Click Outside Handler to dismiss Grid Dropdowns (matching cold1.py)
         def _on_click_outside_dropdowns(event):
             active_dd = getattr(self, "_active_grid_dropdown", None)
             if active_dd and active_dd.is_open:
@@ -2415,7 +2445,6 @@ class InHydroFertigationApp(tk.Tk):
 
         self.bind("<Button-1>", _on_click_outside_dropdowns, add="+")
 
-        # Global Hotkeys
         self.bind("<Escape>", lambda e: self.exit_application())
         self.bind("<F11>", lambda e: self.toggle_fullscreen())
         self.bind("<Home>", lambda e: self.show_screen("dashboard"))
@@ -2423,16 +2452,10 @@ class InHydroFertigationApp(tk.Tk):
         global active_app_instance
         active_app_instance = self
 
-        # Periodic Loop
         self.after(100, self._periodic_tick)
 
     def sync_ui_from_cloud(self):
-        """
-        Immediately refreshes all screen labels, values and active recipes
-        after a cloud update has been saved to local JSON files.
-        """
         try:
-            # 1. Update dropdowns
             if hasattr(self, "dd_fert_crop"):
                 self.dd_fert_crop.values = list(crop_recipes.keys())
                 self.dd_fert_crop.display_map = {k: crop_recipes[k].get("crop_name", k.title()) for k in crop_recipes}
@@ -2442,12 +2465,10 @@ class InHydroFertigationApp(tk.Tk):
                 self.dd_set_crop.display_map = {k: crop_recipes[k].get("crop_name", k.title()) for k in crop_recipes}
                 self.dd_set_crop.update_label()
 
-            # 2. Reload fertigation & settings displays
             self._load_recipe_into_fert_screen()
             if hasattr(self, "_load_crop_into_settings_tab"):
                 self._load_crop_into_settings_tab()
 
-            # 3. Reload irrigation timers display
             if hasattr(self, "lbl_t_z1_start"):
                 z1_cfg = cyclic_timer_cfg.get("zone_1", {})
                 z2_cfg = cyclic_timer_cfg.get("zone_2", {})
@@ -2490,7 +2511,6 @@ class InHydroFertigationApp(tk.Tk):
             sys.exit(0)
 
     def restart_application(self):
-        """Full clean restart preserving environment and display."""
         hw.emergency_all_off()
         engine.stop_cycle()
         irrigation_engine.stop_irrigation()
@@ -2525,14 +2545,12 @@ class InHydroFertigationApp(tk.Tk):
         h.pack(fill="x", side="top", pady=(4, 2))
         h.pack_propagate(False)
 
-        # Top-Left Clock: Bold, larger text on top left of ALL screens across two lines (Date & Time)
         self.lbl_clock = tk.Label(
             h, text="", font=("Helvetica", 12, "bold"),
             fg="#0f172a", bg="white", justify="left"
         )
         self.lbl_clock.place(relx=0.0, rely=0.5, anchor="w", x=16)
 
-        # Centered bold title
         lbl_title = tk.Label(
             h,
             text="INHYDRO FERTIGATION & CYCLIC IRRIGATION SYSTEM",
@@ -2542,7 +2560,6 @@ class InHydroFertigationApp(tk.Tk):
         )
         lbl_title.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Top-right Logo
         if self.logo_img:
             lbl_logo = tk.Label(h, image=self.logo_img, bg="white")
             lbl_logo.place(relx=1.0, rely=0.5, anchor="e", x=-16)
@@ -2555,7 +2572,6 @@ class InHydroFertigationApp(tk.Tk):
         self.dock.pack(fill="x", side="bottom")
         self.dock.pack_propagate(False)
 
-        # Restart Button - ONLY visible on Front Screen (Dashboard)
         self.btn_dock_restart = tk.Button(
             self.dock, text="🔄 RESTART ", font=("Helvetica", 13, "bold"),
             bg="#1565c0", fg="white", activebackground="#0d47a1", activeforeground="white",
@@ -2578,7 +2594,6 @@ class InHydroFertigationApp(tk.Tk):
             command=lambda: self.show_screen("dashboard")
         )
 
-        # Navigation: NEXT Page Button
         self.btn_dock_next = tk.Button(
             self.dock_nav_frame, text="NEXT ▶", font=("Helvetica", 13, "bold"),
             bg="#1565c0", fg="white", activebackground="#0d47a1", activeforeground="white",
@@ -2606,7 +2621,6 @@ class InHydroFertigationApp(tk.Tk):
         if screen_key not in self.screens:
             return
 
-        # Close any open grid dropdowns on screen switch
         if hasattr(self, "_active_grid_dropdown") and self._active_grid_dropdown:
             try:
                 self._active_grid_dropdown.close()
@@ -2619,7 +2633,6 @@ class InHydroFertigationApp(tk.Tk):
         self.screens[screen_key].pack(fill="both", expand=True)
         self.current_screen_key = screen_key
 
-        # Clear existing dock elements
         self.btn_dock_restart.pack_forget()
         self.dock_nav_frame.pack_forget()
         self.btn_dock_prev.pack_forget()
@@ -2627,10 +2640,10 @@ class InHydroFertigationApp(tk.Tk):
         self.btn_dock_next.pack_forget()
 
         if screen_key == "dashboard":
-            # ON FRONT SCREEN (DASHBOARD): ONLY RESTART BUTTON IS SHOWN (NO EXIT BUTTON)
+
             self.btn_dock_restart.pack(anchor="center", pady=6)
         else:
-            # ON DETAIL SCREENS: ONLY PREV, DASHBOARD, NEXT (NO RESTART, NO EXIT, NO STATUS/SENSOR TEXTS)
+
             self.dock_nav_frame.pack(anchor="center", pady=6)
             self.btn_dock_prev.pack(side="left", padx=14)
             self.btn_dock_dash.pack(side="left", padx=14)
@@ -2645,7 +2658,6 @@ class InHydroFertigationApp(tk.Tk):
     def _create_dashboard_screen(self, parent):
         f = tk.Frame(parent, bg="white")
 
-        # Responsive grid container that expands and fits perfectly on any display (specially 7 inch 1024x600)
         grid_frame = tk.Frame(f, bg="white")
         grid_frame.pack(fill="both", expand=True, padx=10, pady=8)
 
@@ -2684,7 +2696,6 @@ class InHydroFertigationApp(tk.Tk):
             r = idx // 2
             c = idx % 2
 
-            # Large raised card tile fitting smoothly and responsively across 100% of any display
             card = tk.Frame(grid_frame, bg="#1565c0", bd=6, relief="raised", cursor="hand2")
             card.grid(row=r, column=c, padx=10, pady=8, sticky="nsew")
 
@@ -2718,7 +2729,6 @@ class InHydroFertigationApp(tk.Tk):
         for col_i in range(3):
             top_live_row.columnconfigure(col_i, minsize=295, weight=1, uniform="live_col")
 
-        # 1. EC Card (Left)
         card_ec = tk.LabelFrame(
             top_live_row, text=" EC VALUE (mS/cm) ", font=("Helvetica", 11, "bold"),
             fg="#1565c0", bg="white", bd=2, relief="groove", padx=12, pady=4
@@ -2729,7 +2739,6 @@ class InHydroFertigationApp(tk.Tk):
         self.lbl_mon_ec_target = tk.Label(card_ec, text="Target: 2.20 mS/cm", font=("Helvetica", 10, "bold"), fg=self.COLOR_TEXT_SUB, bg="white")
         self.lbl_mon_ec_target.pack(anchor="center")
 
-        # 2. pH Card (Center)
         card_ph = tk.LabelFrame(
             top_live_row, text=" pH VALUE ", font=("Helvetica", 11, "bold"),
             fg="#1565c0", bg="white", bd=2, relief="groove", padx=12, pady=4
@@ -2740,7 +2749,6 @@ class InHydroFertigationApp(tk.Tk):
         self.lbl_mon_ph_target = tk.Label(card_ph, text="Target: 5.80", font=("Helvetica", 10, "bold"), fg=self.COLOR_TEXT_SUB, bg="white")
         self.lbl_mon_ph_target.pack(anchor="center")
 
-        # 3. Temperature Card (Right)
         card_temp = tk.LabelFrame(
             top_live_row, text=" WATER TEMPERATURE ", font=("Helvetica", 11, "bold"),
             fg="#1565c0", bg="white", bd=2, relief="groove", padx=12, pady=4
@@ -2750,7 +2758,6 @@ class InHydroFertigationApp(tk.Tk):
         self.lbl_mon_temp.pack(anchor="center", pady=1)
         tk.Label(card_temp, text="Tank Sensor", font=("Helvetica", 10, "bold"), fg=self.COLOR_TEXT_SUB, bg="white").pack(anchor="center")
 
-        # BOTTOM SECTION: 13 VALVES & PUMPS HARDWARE RELAY CONTROL (CENTERED, 3 RELAYS PER ROW)
         col_relays = tk.LabelFrame(
             center_container,
             text=" 13-CHANNEL HARDWARE RELAYS ",
@@ -2779,7 +2786,6 @@ class InHydroFertigationApp(tk.Tk):
             for ch_idx, badge_btn in self.mon_valve_badges.items():
                 badge_btn.config(text="OFF", bg=self.COLOR_OFF, relief="raised")
 
-        # Emergency All Off Button
         tk.Button(
             top_info, text="ALL OFF", font=("Helvetica", 11, "bold"),
             bg="#dc2626", fg="white", activebackground="#b91c1c", activeforeground="white",
@@ -2794,12 +2800,6 @@ class InHydroFertigationApp(tk.Tk):
 
         self.mon_valve_badges = {}
 
-        # 13 Channels filled underneath in 3 columns per row:
-        # Row 0: Ch 1, 2, 3
-        # Row 1: Ch 4, 5, 6
-        # Row 2: Ch 7, 8, 9
-        # Row 3: Ch 10, 11, 12
-        # Row 4: Ch 13 (centered in column 1)
         ch_order = [
             (1,  0, 0), (2,  0, 1), (3,  0, 2),
             (4,  1, 0), (5,  1, 1), (6,  1, 2),
@@ -2820,37 +2820,62 @@ class InHydroFertigationApp(tk.Tk):
                     cur = hw.get_relay(target_ch)
                     new_st = not cur
 
-                    if target_ch == ActuatorMap.ZONE_1_VALVE:
+                    if target_ch in [ActuatorMap.ZONE_1_VALVE, ActuatorMap.ZONE_2_VALVE]:
+                        z_k = "zone_1" if target_ch == ActuatorMap.ZONE_1_VALVE else "zone_2"
                         if new_st:
-                            irrigation_engine.start_zone("zone_1")
+
+                            if engine.is_running:
+                                engine.stop_cycle()
+                                hw.set_relay(ActuatorMap.EC_VALVE_1, False)
+                                hw.set_relay(ActuatorMap.EC_VALVE_2, False)
+                                hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
+                                hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
+                                hw.set_relay(ActuatorMap.TANK_RETURN_VALVE, False)
+                                hw.set_relay(ActuatorMap.PUMP_OUTLET_VALVE, False)
+                                engine.active_venturis = {1: False, 2: False, 3: False, 4: False}
+                            irrigation_engine.start_zone(z_k)
                         else:
-                            irrigation_engine.stop_zone("zone_1")
-                    elif target_ch == ActuatorMap.ZONE_2_VALVE:
-                        if new_st:
-                            irrigation_engine.start_zone("zone_2")
-                        else:
-                            irrigation_engine.stop_zone("zone_2")
+                            irrigation_engine.stop_zone(z_k)
+                    elif target_ch in [ActuatorMap.RO_WATER_PUMP, ActuatorMap.IRRIGATION_MASTER_VALVE] and new_st:
+
+                        if engine.is_running:
+                            engine.stop_cycle()
+                            hw.set_relay(ActuatorMap.EC_VALVE_1, False)
+                            hw.set_relay(ActuatorMap.EC_VALVE_2, False)
+                            hw.set_relay(ActuatorMap.PH_DOWN_VALVE, False)
+                            hw.set_relay(ActuatorMap.PH_UP_VALVE, False)
+                            hw.set_relay(ActuatorMap.TANK_RETURN_VALVE, False)
+                            hw.set_relay(ActuatorMap.PUMP_OUTLET_VALVE, False)
+                            engine.active_venturis = {1: False, 2: False, 3: False, 4: False}
+                        hw.set_relay(target_ch, True)
+                    elif target_ch in [ActuatorMap.EC_VALVE_1, ActuatorMap.EC_VALVE_2, ActuatorMap.PH_DOWN_VALVE, ActuatorMap.PH_UP_VALVE] and new_st:
+
+                        if irrigation_engine.was_irrigating or any(
+                            irrigation_engine.timer_states[z]["state"] == "ON" for z in ["zone_1", "zone_2"]
+                        ):
+                            irrigation_engine.stop_irrigation()
+                        hw.set_relay(target_ch, True)
                     elif target_ch == ActuatorMap.RO_WATER_PUMP and not new_st:
-                        # If manually turning off RO pump while irrigation is active, stop irrigation
+
                         if irrigation_engine.was_irrigating or any(
                             irrigation_engine.timer_states[z]["state"] == "ON" for z in ["zone_1", "zone_2"]
                         ):
                             irrigation_engine.stop_irrigation()
                         hw.set_relay(target_ch, False)
                     elif target_ch == ActuatorMap.IRRIGATION_MASTER_VALVE and not new_st:
-                        # If manually turning off Master Valve while irrigation is active, stop irrigation
+
                         if irrigation_engine.was_irrigating or any(
                             irrigation_engine.timer_states[z]["state"] == "ON" for z in ["zone_1", "zone_2"]
                         ):
                             irrigation_engine.stop_irrigation()
                         hw.set_relay(target_ch, False)
                     elif target_ch == ActuatorMap.MAIN_PUMP and not new_st:
-                        # If manually turning off Main Pump while fertigation is active, abort cycle
+
                         if engine.is_running:
                             engine.stop_cycle()
                         hw.set_relay(target_ch, False)
                     elif target_ch == ActuatorMap.MAIN_PUMP and new_st:
-                        # If manually turning on Main Pump, ensure RO irrigation is stopped so they don't collide
+
                         if irrigation_engine.was_irrigating:
                             irrigation_engine.stop_irrigation()
                         hw.set_relay(target_ch, True)
@@ -2863,11 +2888,12 @@ class InHydroFertigationApp(tk.Tk):
                     else:
                         hw.set_relay(target_ch, new_st)
 
-                    if target_ch in self.mon_valve_badges:
-                        self.mon_valve_badges[target_ch].config(
-                            text="ON" if new_st else "OFF",
-                            bg=self.COLOR_SUCCESS if new_st else self.COLOR_OFF,
-                            relief="sunken" if new_st else "raised"
+                    for b_ch, b_btn in self.mon_valve_badges.items():
+                        st_now = hw.get_relay(b_ch)
+                        b_btn.config(
+                            text="ON" if st_now else "OFF",
+                            bg=self.COLOR_SUCCESS if st_now else self.COLOR_OFF,
+                            relief="sunken" if st_now else "raised"
                         )
                 return do_toggle
 
@@ -2881,11 +2907,9 @@ class InHydroFertigationApp(tk.Tk):
 
         return f
 
-
     def _create_fertigation_screen(self, parent):
         f = tk.Frame(parent, bg="white")
 
-        # Top Bar: Crop selector & Target Delivery Zone
         top_bar = tk.Frame(f, bg="#f8fafc", bd=1, relief="groove", padx=8, pady=3)
         top_bar.pack(fill="x", pady=(0, 2))
 
@@ -2919,7 +2943,6 @@ class InHydroFertigationApp(tk.Tk):
         self.dd_fert_crop.btn.config(font=("Helvetica", 12, "bold"), padx=10, pady=4)
         self.dd_fert_crop.btn.pack(side="left", padx=4)
 
-        # Target Delivery Zone selector - Persisted to JSON
         tk.Label(top_bar, text="Delivery Zone :", font=("Helvetica", 12, "bold"), fg=self.COLOR_TEXT_MAIN, bg="#f8fafc").pack(side="left", padx=(10, 2))
         if not hasattr(self, "var_fert_delivery_zone"):
             self.var_fert_delivery_zone = tk.StringVar(value=system_config.get("selected_fert_zone", "both"))
@@ -2951,7 +2974,6 @@ class InHydroFertigationApp(tk.Tk):
         self.dd_fert_delivery.btn.config(font=("Helvetica", 12, "bold"), padx=10, pady=4)
         self.dd_fert_delivery.btn.pack(side="left", padx=4)
 
-        # Auto-Fertigation Physical Push Button (Auto / Manual Toggle) - DEFAULT TO TRUE (AUTO MODE)
         if not hasattr(self, "var_auto_fertigation"):
             self.var_auto_fertigation = tk.BooleanVar(value=True)
 
@@ -3001,11 +3023,9 @@ class InHydroFertigationApp(tk.Tk):
         self.btn_auto_fert.pack(side="right", padx=4)
         _update_auto_fert_ui()
 
-        # Centered Container to ensure both grids are centrally aligned and stacked vertically (upar-neeche)
         center_wrap = tk.Frame(f, bg="white")
         center_wrap.pack(anchor="center", pady=1)
 
-        # GRID 1 (TOP CARD): ACTIVE CROP SETPOINTS & 4-VENTURI SOLUTION DOSING ENGINE
         top_card = tk.LabelFrame(
             center_wrap,
             text=" ACTIVE CROP SETPOINTS & MULTI-INJECTOR SYSTEM ",
@@ -3019,7 +3039,6 @@ class InHydroFertigationApp(tk.Tk):
         )
         top_card.pack(fill="x", pady=1)
 
-        # 1. Active Crop Setpoints Grid
         sp_frame = tk.LabelFrame(
             top_card,
             text=" ACTIVE CROP TARGET SETPOINTS ",
@@ -3033,7 +3052,6 @@ class InHydroFertigationApp(tk.Tk):
         )
         sp_frame.pack(fill="x", pady=(0, 1))
 
-        # Helper to create styled setpoint display cell with enlarged +2 bold text
         def make_sp_disp(parent_row, label_text, default_v, val_fg="#1565c0"):
             cell = tk.Frame(parent_row, bg="white", bd=1, relief="solid", padx=3, pady=1)
             cell.pack(side="left", expand=True, fill="x", padx=2)
@@ -3042,7 +3060,6 @@ class InHydroFertigationApp(tk.Tk):
             lbl_val.pack(anchor="center")
             return lbl_val
 
-        # Row 1: Crop Name, EC Min, EC Max, pH Min, pH Target, pH Max (6 items in one row)
         row1 = tk.Frame(sp_frame, bg="#f8fafc")
         row1.pack(fill="x", pady=0)
         self.lbl_fert_crop_name = make_sp_disp(row1, "Crop Name:", "Cucumber", val_fg="#0f172a")
@@ -3052,14 +3069,12 @@ class InHydroFertigationApp(tk.Tk):
         self.lbl_fert_ph_target = make_sp_disp(row1, "pH Target:", "5.80", val_fg="#1565c0")
         self.lbl_fert_ph_max    = make_sp_disp(row1, "pH Max (Down):", "6.40", val_fg="#dc2626")
 
-        # Row 2: Cyclic Timer Parameters (3 items in one row)
         row2 = tk.Frame(sp_frame, bg="#f8fafc")
         row2.pack(fill="x", pady=0)
         self.lbl_fert_timer_window = make_sp_disp(row2, "Timer Window:", "06:00 - 18:00", val_fg="#1565c0")
         self.lbl_fert_timer_on     = make_sp_disp(row2, "Delivery (ON):", "5.0 min", val_fg="#0891b2")
         self.lbl_fert_timer_off    = make_sp_disp(row2, "Interval (OFF):", "60.0 min", val_fg="#1565c0")
 
-        # 2. 4-Venturi Solution Dosing Engine Table
         v_frame = tk.LabelFrame(
             top_card,
             text=" 4-VENTURI SOLUTION DOSING ENGINE ",
@@ -3080,7 +3095,6 @@ class InHydroFertigationApp(tk.Tk):
         v_grid.columnconfigure(2, weight=3, uniform="vcol")
         v_grid.columnconfigure(3, weight=2, uniform="vcol")
 
-        # Header Row (headings kept at 11 bold)
         vh_bg = "#e2e8f0"
         tk.Label(v_grid, text="Venturi Channel", font=("Helvetica", 11, "bold"), fg="#0f172a", bg=vh_bg, anchor="center").grid(row=0, column=0, sticky="ew", padx=1, pady=0)
         tk.Label(v_grid, text="Dosing Trigger", font=("Helvetica", 11, "bold"), fg="#0f172a", bg=vh_bg, anchor="center").grid(row=0, column=1, sticky="ew", padx=1, pady=0)
@@ -3090,7 +3104,6 @@ class InHydroFertigationApp(tk.Tk):
         self.labels_fert_v_status = {}
         self.labels_fert_v_safety = {}
 
-        # Row 1: EC 1 (Relay 1: Stock A) - Enlarged to 13 bold (+2 from 11)
         tk.Label(v_grid, text="EC 1 ", font=("Helvetica", 13, "bold"), fg=self.COLOR_TEXT_MAIN, bg="#f8fafc", anchor="center", bd=1, relief="solid").grid(row=1, column=0, sticky="ew", padx=1, pady=0)
         self.lbl_v1_trig = tk.Label(v_grid, text="EC <= 1.80", font=("Helvetica", 13, "bold"), fg="#1e293b", bg="#f8fafc", anchor="center", bd=1, relief="solid")
         self.lbl_v1_trig.grid(row=1, column=1, sticky="ew", padx=1, pady=0)
@@ -3100,7 +3113,6 @@ class InHydroFertigationApp(tk.Tk):
         lbl_v1_st.grid(row=1, column=3, sticky="ew", padx=1, pady=0)
         self.labels_fert_v_status[1] = lbl_v1_st
 
-        # Row 2: EC 2 (Relay 2: Stock B) - Enlarged to 13 bold (+2 from 11)
         tk.Label(v_grid, text="EC 2", font=("Helvetica", 13, "bold"), fg=self.COLOR_TEXT_MAIN, bg="#f8fafc", anchor="center", bd=1, relief="solid").grid(row=2, column=0, sticky="ew", padx=1, pady=0)
         self.lbl_v2_trig = tk.Label(v_grid, text="EC <= 1.80", font=("Helvetica", 13, "bold"), fg="#1e293b", bg="#f8fafc", anchor="center", bd=1, relief="solid")
         self.lbl_v2_trig.grid(row=2, column=1, sticky="ew", padx=1, pady=0)
@@ -3110,7 +3122,6 @@ class InHydroFertigationApp(tk.Tk):
         lbl_v2_st.grid(row=2, column=3, sticky="ew", padx=1, pady=0)
         self.labels_fert_v_status[2] = lbl_v2_st
 
-        # Row 3: pH Down (Relay 3: Acid) - Enlarged to 13 bold (+2 from 11)
         tk.Label(v_grid, text="pH Down", font=("Helvetica", 13, "bold"), fg=self.COLOR_TEXT_MAIN, bg="#f8fafc", anchor="center", bd=1, relief="solid").grid(row=3, column=0, sticky="ew", padx=1, pady=0)
         self.lbl_v3_trig = tk.Label(v_grid, text="pH >= 6.40", font=("Helvetica", 13, "bold"), fg="#1e293b", bg="#f8fafc", anchor="center", bd=1, relief="solid")
         self.lbl_v3_trig.grid(row=3, column=1, sticky="ew", padx=1, pady=0)
@@ -3120,7 +3131,6 @@ class InHydroFertigationApp(tk.Tk):
         lbl_v3_st.grid(row=3, column=3, sticky="ew", padx=1, pady=0)
         self.labels_fert_v_status[3] = lbl_v3_st
 
-        # Row 4: pH Up (Relay 4: Base / Alkali) - Enlarged to 13 bold (+2 from 11)
         tk.Label(v_grid, text="pH Up", font=("Helvetica", 13, "bold"), fg=self.COLOR_TEXT_MAIN, bg="#f8fafc", anchor="center", bd=1, relief="solid").grid(row=4, column=0, sticky="ew", padx=1, pady=0)
         self.lbl_v4_trig = tk.Label(v_grid, text="pH <= 5.40", font=("Helvetica", 13, "bold"), fg="#1e293b", bg="#f8fafc", anchor="center", bd=1, relief="solid")
         self.lbl_v4_trig.grid(row=4, column=1, sticky="ew", padx=1, pady=0)
@@ -3130,7 +3140,6 @@ class InHydroFertigationApp(tk.Tk):
         lbl_v4_st.grid(row=4, column=3, sticky="ew", padx=1, pady=0)
         self.labels_fert_v_status[4] = lbl_v4_st
 
-        # GRID 2 (BOTTOM CARD): AUTOMATION SEQUENCE & PROCESS MONITOR (Centrally stacked below Grid 1)
         bottom_card = tk.LabelFrame(
             center_wrap,
             text=" AUTOMATION SEQUENCE & PROCESS MONITOR ",
@@ -3149,7 +3158,6 @@ class InHydroFertigationApp(tk.Tk):
         b_body.columnconfigure(0, weight=5, uniform="bcol")
         b_body.columnconfigure(1, weight=6, uniform="bcol")
 
-        # 1. LIVE TANK SENSORS (Left side of bottom card)
         self.frame_live_m_frame = tk.LabelFrame(
             b_body,
             text=" LIVE TANK SENSORS ",
@@ -3166,57 +3174,48 @@ class InHydroFertigationApp(tk.Tk):
         live_row = tk.Frame(self.frame_live_m_frame, bg="#f8fafc")
         live_row.pack(fill="both", expand=True, pady=1)
 
-        # Live EC: Label 12 bold (+2 from 10), Value 20 bold (+2 from 18)
         c_ec = tk.Frame(live_row, bg="white", bd=1, relief="solid", padx=3, pady=1)
         c_ec.pack(side="left", expand=True, fill="both", padx=1)
         tk.Label(c_ec, text="LIVE EC", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack()
         self.lbl_fert_live_ec = tk.Label(c_ec, text="--", font=("Helvetica", 20, "bold"), fg="#1565c0", bg="white")
         self.lbl_fert_live_ec.pack()
 
-        # Live pH: Label 12 bold (+2 from 10), Value 20 bold (+2 from 18)
         c_ph = tk.Frame(live_row, bg="white", bd=1, relief="solid", padx=3, pady=1)
         c_ph.pack(side="left", expand=True, fill="both", padx=1)
         tk.Label(c_ph, text="LIVE pH", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack()
         self.lbl_fert_live_ph = tk.Label(c_ph, text="--", font=("Helvetica", 20, "bold"), fg="#0891b2", bg="white")
         self.lbl_fert_live_ph.pack()
 
-        # Live Water Temp: Label 12 bold (+2 from 10), Value 20 bold (+2 from 18)
         c_tp = tk.Frame(live_row, bg="white", bd=1, relief="solid", padx=3, pady=1)
         c_tp.pack(side="left", expand=True, fill="both", padx=1)
         tk.Label(c_tp, text="WATER TEMP", font=("Helvetica", 12, "bold"), fg="#475569", bg="white").pack()
         self.lbl_fert_live_temp = tk.Label(c_tp, text="--", font=("Helvetica", 20, "bold"), fg="#0f172a", bg="white")
         self.lbl_fert_live_temp.pack()
 
-        # 2. SEQUENCE AUTOMATION MONITOR & ACTIONS (Right side of bottom card)
         r_panel = tk.Frame(b_body, bg="white")
         r_panel.grid(row=0, column=1, sticky="nsew", padx=(3, 0), pady=1)
 
-        # Status Box
         st_box = tk.Frame(r_panel, bg="#0f172a", bd=1, relief="solid", padx=5, pady=2)
         st_box.pack(fill="x", pady=(0, 1))
 
-        # Phase badge: 15 bold (+2 from 13)
         self.lbl_fert_phase_badge = tk.Label(
             st_box, text="PHASE: IDLE / READY", font=("Helvetica", 15, "bold"),
             fg="#38bdf8", bg="#0f172a", anchor="w"
         )
         self.lbl_fert_phase_badge.pack(fill="x")
 
-        # Log text: 13 bold (+2 from 11)
         self.lbl_fert_log = tk.Label(
             st_box, text="System Ready",
             font=("Helvetica", 13, "bold"), fg="#e2e8f0", bg="#0f172a", anchor="w", wraplength=480, justify="left"
         )
         self.lbl_fert_log.pack(fill="x", pady=0)
 
-        # Countdown: 15 bold (+2 from 13)
         self.lbl_fert_countdown = tk.Label(
             st_box, text="Status: Ready", font=("Helvetica", 15, "bold"),
             fg="#fbbf24", bg="#0f172a", anchor="w"
         )
         self.lbl_fert_countdown.pack(fill="x")
 
-        # 3. DIRECT ACTION BUTTONS (Start: 15 bold (+2 from 13), Stop: 15 bold (+2 from 13))
         btn_action_box = tk.Frame(r_panel, bg="white")
         btn_action_box.pack(fill="x", pady=(1, 0))
 
@@ -3266,7 +3265,6 @@ class InHydroFertigationApp(tk.Tk):
         if hasattr(self, "lbl_dash_crop"):
             self.lbl_dash_crop.config(text=f"Active Crop: {crop_title} [{zone_tag}]")
 
-        # Update Active Crop Setpoints Grid (Mirrors New Settings Screen Grid)
         if hasattr(self, "lbl_fert_crop_name"):
             self.lbl_fert_crop_name.config(text=f"{crop_title} [{zone_tag}]")
         if hasattr(self, "lbl_fert_ec_min"):
@@ -3280,7 +3278,6 @@ class InHydroFertigationApp(tk.Tk):
         if hasattr(self, "lbl_fert_ph_max"):
             self.lbl_fert_ph_max.config(text=f"{ph_max:.2f}")
 
-        # Update Respective Cyclic Timer Setpoints in boxes
         t_start = str(recipe.get("start_time", "06:00"))
         t_stop  = str(recipe.get("stop_time", "18:00"))
         t_on    = float(recipe.get("on_min", 5.0))
@@ -3293,7 +3290,6 @@ class InHydroFertigationApp(tk.Tk):
         if hasattr(self, "lbl_fert_timer_off"):
             self.lbl_fert_timer_off.config(text=f"{t_off:.1f} min")
 
-        # Update 4-Venturi Dynamic Trigger & Cutoff labels
         if hasattr(self, "lbl_v1_trig"):
             self.lbl_v1_trig.config(text=f"EC <= {ec_min:.2f}")
             self.lbl_v1_cut.config(text=f"EC >= {ec_max:.2f}")
@@ -3307,7 +3303,6 @@ class InHydroFertigationApp(tk.Tk):
             self.lbl_v4_trig.config(text=f"pH <= {ph_min:.2f}")
             self.lbl_v4_cut.config(text=f"pH >= {ph_target:.2f}")
 
-        # Backward compatibility
         if hasattr(self, "lbl_fert_sp_ec_band"):
             self.lbl_fert_sp_ec_band.config(text=f"EC: {ec_min:.2f} - {ec_max:.2f} mS/cm")
         if hasattr(self, "lbl_fert_sp_ph_band"):
@@ -3351,7 +3346,6 @@ class InHydroFertigationApp(tk.Tk):
             messagebox.showwarning("Fertigation Standby", msg)
 
     def _on_reset_batch(self):
-        # ABORT operates in both Auto and Manual mode
         if hasattr(self, "var_auto_fertigation") and self.var_auto_fertigation is not None:
             self.var_auto_fertigation.set(False)
             if hasattr(self, "_update_auto_fert_ui") and callable(self._update_auto_fert_ui):
@@ -3359,9 +3353,6 @@ class InHydroFertigationApp(tk.Tk):
         engine.stop_cycle()
         hw.emergency_all_off()
 
-    # -------------------------------------------------------------------------
-    # SCREEN 4: CYCLIC IRRIGATION (2-ZONE CONTROLLER - RESPONSIVE & LARGE TOUCH)
-    # -------------------------------------------------------------------------
     def _create_irrigation_screen(self, parent):
         f = tk.Frame(parent, bg="white")
 
@@ -3373,7 +3364,6 @@ class InHydroFertigationApp(tk.Tk):
         body = tk.Frame(f, bg="white")
         body.pack(fill="both", expand=True, padx=10, pady=2)
 
-        # Center wrapper to reduce grid width and keep it neatly centered
         center_wrap = tk.Frame(body, bg="white")
         center_wrap.pack(anchor="center", pady=1)
 
@@ -3390,14 +3380,12 @@ class InHydroFertigationApp(tk.Tk):
         )
         card.pack(anchor="center", pady=1)
 
-        # Centered Responsive Grid Container for 2-Zone Table with narrowed width
         t_grid = tk.Frame(card, bg="white")
         t_grid.pack(anchor="center", pady=1)
         t_grid.columnconfigure(0, minsize=210)
         t_grid.columnconfigure(1, minsize=265)
         t_grid.columnconfigure(2, minsize=265)
 
-        # Table Header Row (Row 0)
         vh_bg = "#e2e8f0"
         tk.Label(t_grid, text="Setting Parameter", font=("Helvetica", 11, "bold"), fg="#1e293b", bg=vh_bg, anchor="w", padx=8, pady=3).grid(row=0, column=0, sticky="ew", padx=2, pady=1)
         tk.Label(t_grid, text="ZONE 1 (S.V 12)", font=("Helvetica", 11, "bold"), fg="#1565c0", bg=vh_bg, anchor="center", pady=3).grid(row=0, column=1, sticky="ew", padx=2, pady=1)
@@ -3406,7 +3394,6 @@ class InHydroFertigationApp(tk.Tk):
         z1_cfg = cyclic_timer_cfg.get("zone_1", {})
         z2_cfg = cyclic_timer_cfg.get("zone_2", {})
 
-        # Row 1: Line Name
         tk.Label(t_grid, text="Timer Line Name:", font=("Helvetica", 11, "bold"), fg="#334155", bg="#f8fafc", anchor="w", padx=8, pady=3).grid(row=1, column=0, sticky="ew", padx=2, pady=1)
 
         f_z1_n = tk.Frame(t_grid, bg="#f8fafc", bd=1, relief="solid")
@@ -3431,10 +3418,8 @@ class InHydroFertigationApp(tk.Tk):
         self.lbl_t_z2_name.bind("<Button-1>", lambda e: edit_z2_name())
         tk.Button(f_z2_n_in, text="EDIT", font=("Helvetica", 11, "bold"), bg="#0284c7", fg="white", activebackground="#0369a1", activeforeground="white", bd=2, relief="raised", padx=16, pady=3, cursor="hand2", command=edit_z2_name).pack(side="left", padx=4)
 
-        # Row 2: Enable State Physical Buttons
         tk.Label(t_grid, text="Timer Automation:", font=("Helvetica", 11, "bold"), fg="#334155", bg="white", anchor="w", padx=8, pady=3).grid(row=2, column=0, sticky="ew", padx=2, pady=1)
 
-        # Zone 1 Physical Enable/Disable Button
         f_z1_en = tk.Frame(t_grid, bg="white", bd=1, relief="solid")
         f_z1_en.grid(row=2, column=1, sticky="ew", padx=2, pady=1)
         self.var_z1_en = tk.BooleanVar(value=z1_cfg.get("enabled", True))
@@ -3466,7 +3451,6 @@ class InHydroFertigationApp(tk.Tk):
         self.btn_z1_en.pack(anchor="center", pady=2)
         _update_z1_en_btn()
 
-        # Zone 2 Physical Enable/Disable Button
         f_z2_en = tk.Frame(t_grid, bg="white", bd=1, relief="solid")
         f_z2_en.grid(row=2, column=2, sticky="ew", padx=2, pady=1)
         self.var_z2_en = tk.BooleanVar(value=z2_cfg.get("enabled", True))
@@ -3501,7 +3485,6 @@ class InHydroFertigationApp(tk.Tk):
         def make_2zone_param_row(r_idx, label_text, z1_val, z2_val, kmode="numeric", bg_clr="white"):
             tk.Label(t_grid, text=label_text, font=("Helvetica", 11, "bold"), fg="#334155", bg=bg_clr, anchor="w", padx=8, pady=3).grid(row=r_idx, column=0, sticky="ew", padx=2, pady=1)
 
-            # Zone 1
             f1 = tk.Frame(t_grid, bg=bg_clr, bd=1, relief="solid")
             f1.grid(row=r_idx, column=1, sticky="ew", padx=2, pady=1)
             f1_in = tk.Frame(f1, bg=bg_clr)
@@ -3513,7 +3496,6 @@ class InHydroFertigationApp(tk.Tk):
             lbl1.bind("<Button-1>", lambda e: do_e1())
             tk.Button(f1_in, text="EDIT", font=("Helvetica", 11, "bold"), bg="#0284c7", fg="white", activebackground="#0369a1", activeforeground="white", bd=2, relief="raised", padx=16, pady=3, cursor="hand2", command=do_e1).pack(side="left", padx=3)
 
-            # Zone 2
             f2 = tk.Frame(t_grid, bg=bg_clr, bd=1, relief="solid")
             f2.grid(row=r_idx, column=2, sticky="ew", padx=2, pady=1)
             f2_in = tk.Frame(f2, bg=bg_clr)
@@ -3532,7 +3514,6 @@ class InHydroFertigationApp(tk.Tk):
         self.lbl_t_z1_on,    self.lbl_t_z2_on    = make_2zone_param_row(5, "ON Duration (Min):",  z1_cfg.get("on_min", 5.0),         z2_cfg.get("on_min", 5.0),         kmode="numeric", bg_clr="#f8fafc")
         self.lbl_t_z1_off,   self.lbl_t_z2_off   = make_2zone_param_row(6, "OFF Interval (Min):", z1_cfg.get("off_min", 15.0),       z2_cfg.get("off_min", 15.0),       kmode="numeric", bg_clr="white")
 
-        # Row 7: Live Status & Countdown
         tk.Label(t_grid, text="Live Operation Status:", font=("Helvetica", 11, "bold"), fg="#1565c0", bg="#f1f5f9", anchor="w", padx=8, pady=3).grid(row=7, column=0, sticky="ew", padx=2, pady=1)
 
         f1_live = tk.Frame(t_grid, bg="#f1f5f9", bd=1, relief="solid")
@@ -3553,7 +3534,6 @@ class InHydroFertigationApp(tk.Tk):
         self.lbl_z2_rem = tk.Label(f2_live_in, text="Rem: 00:00", font=("Helvetica", 12, "bold"), fg="#0891b2", bg="#e0f2fe", padx=8, pady=3, relief="groove", bd=2)
         self.lbl_z2_rem.pack(side="left", padx=3)
 
-        # Action Buttons Box - Centered
         act_box = tk.Frame(center_wrap, bg="white")
         act_box.pack(anchor="center", pady=4)
 
@@ -3610,7 +3590,6 @@ class InHydroFertigationApp(tk.Tk):
                 "off_min": float(self.lbl_t_z2_off.cget("text"))
             }
 
-            # If enabled, clear manual_stopped so newly updated settings take effect immediately
             if self.var_z1_en.get():
                 irrigation_engine.timer_states["zone_1"]["manual_stopped"] = False
             if self.var_z2_en.get():
@@ -3622,13 +3601,9 @@ class InHydroFertigationApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save timer settings: {e}")
 
-    # -------------------------------------------------------------------------
-    # SCREEN 5: SETTINGS & PER-VENTURI SAFETY PAGE (4 VENTURIS: 2 EC + 2 pH)
-    # -------------------------------------------------------------------------
     def _create_settings_screen(self, parent):
         f = tk.Frame(parent, bg="white")
 
-        # Top Crop Selector & Target Zone Selector - Centered with Enhanced Touch Dropdowns
         top_sel = tk.Frame(f, bg="#f8fafc", bd=1, relief="groove", pady=5)
         top_sel.pack(fill="x", pady=(0, 2))
 
@@ -3656,7 +3631,6 @@ class InHydroFertigationApp(tk.Tk):
         self.dd_set_crop.btn.config(font=("Helvetica", 13, "bold"), padx=14, pady=5)
         self.dd_set_crop.btn.pack(side="left", padx=4)
 
-        # Target Zone / Room dropdown
         tk.Label(sel_inner, text="Target Zone / Room:", font=("Helvetica", 13, "bold"), fg="#1565c0", bg="#f8fafc").pack(side="left", padx=(18, 8))
 
         self.var_set_zone = tk.StringVar(value="both")
@@ -3676,11 +3650,9 @@ class InHydroFertigationApp(tk.Tk):
         self.dd_set_zone.btn.config(font=("Helvetica", 13, "bold"), padx=14, pady=5)
         self.dd_set_zone.btn.pack(side="left", padx=4)
 
-        # Centered Container to ensure both grids have an identical compact width & equal layout
         center_wrap = tk.Frame(f, bg="white")
         center_wrap.pack(anchor="center", pady=2)
 
-        # Card 1: Main Form Container: Crop Nutrient Setpoints (Clean, Compact, Equal Columns)
         form_card = tk.LabelFrame(
             center_wrap,
             text="  CROP NUTRIENT TARGET SETPOINTS (EC & pH)  ",
@@ -3694,14 +3666,12 @@ class InHydroFertigationApp(tk.Tk):
         )
         form_card.pack(fill="x", pady=2)
 
-        # SETPOINTS GRID CONTAINER: 3 EQUAL COLUMNS
         sp_outer = tk.Frame(form_card, bg="#f8fafc", bd=1, relief="groove", padx=6, pady=4)
         sp_outer.pack(fill="x", pady=2)
         sp_outer.columnconfigure(0, weight=1, uniform="sp_col")
         sp_outer.columnconfigure(1, weight=1, uniform="sp_col")
         sp_outer.columnconfigure(2, weight=1, uniform="sp_col")
 
-        # Helper to create an editable value box inside an equally-aligned grid cell with larger height & bold text
         def make_sp_field(parent_frame, r_idx, c_idx, label_text, default_v, val_fg="#1565c0", box_w=5, mode="numeric", btn_px=14):
             f_cell = tk.Frame(parent_frame, bg="#f8fafc", bd=1, relief="solid", padx=6, pady=7)
             f_cell.grid(row=r_idx, column=c_idx, sticky="nsew", padx=3, pady=3)
@@ -3721,8 +3691,6 @@ class InHydroFertigationApp(tk.Tk):
             ).pack(side="left", padx=2)
             return l_box
 
-        # Row 0: Crop Name & EC Setpoints (3 equal columns)
-        # 1. Crop Name (Row 0, Col 0)
         f_name = tk.Frame(sp_outer, bg="#f8fafc", bd=1, relief="solid", padx=6, pady=7)
         f_name.grid(row=0, column=0, sticky="nsew", padx=3, pady=3)
         tk.Label(f_name, text="Crop Name:", font=("Helvetica", 12, "bold"), fg="#0f172a", bg="#f8fafc").pack(side="left", padx=(0, 4))
@@ -3732,7 +3700,29 @@ class InHydroFertigationApp(tk.Tk):
         )
         self.lbl_set_crop_name.pack(side="left", padx=2)
         def edit_crop_name():
-            open_almora_keypad("Edit Crop Name", self.lbl_set_crop_name.cget("text"), lambda v: self.lbl_set_crop_name.config(text=v), is_alphanumeric=True, root_window=self)
+            def on_crop_name_confirmed(new_val):
+                new_val = str(new_val).strip()
+                if not new_val:
+                    return
+                self.lbl_set_crop_name.config(text=new_val)
+                k = self.var_recipe.get()
+                if k in crop_recipes:
+                    crop_recipes[k]["crop_name"] = new_val
+                    if "zones" in crop_recipes[k] and isinstance(crop_recipes[k]["zones"], dict):
+                        for zk in ["both", "zone_1", "zone_2"]:
+                            if zk in crop_recipes[k]["zones"] and isinstance(crop_recipes[k]["zones"][zk], dict):
+                                crop_recipes[k]["zones"][zk]["crop_name"] = new_val
+                    save_json(RECIPE_FILE, crop_recipes)
+                    new_disp_map = {rk: crop_recipes[rk].get("crop_name", rk.title()) for rk in crop_recipes}
+                    if hasattr(self, "dd_fert_crop"):
+                        self.dd_fert_crop.display_map = dict(new_disp_map)
+                        self.dd_fert_crop.update_label()
+                    if hasattr(self, "dd_set_crop"):
+                        self.dd_set_crop.display_map = dict(new_disp_map)
+                        self.dd_set_crop.update_label()
+                    self._load_recipe_into_fert_screen()
+                    broadcast_current_state()
+            open_almora_keypad("Edit Crop Name", self.lbl_set_crop_name.cget("text"), on_crop_name_confirmed, is_alphanumeric=True, root_window=self)
         self.lbl_set_crop_name.bind("<Button-1>", lambda e: edit_crop_name())
         tk.Button(
             f_name, text="EDIT", font=("Helvetica", 12, "bold"),
@@ -3740,20 +3730,16 @@ class InHydroFertigationApp(tk.Tk):
             bd=2, relief="raised", padx=14, pady=5, cursor="hand2", command=edit_crop_name
         ).pack(side="left", padx=2)
 
-        # 2. EC Min (Row 0, Col 1)
         self.lbl_set_ec_min = make_sp_field(sp_outer, 0, 1, "EC Min (Start):", "1.80", val_fg="#1565c0", box_w=5, btn_px=14)
-        # 3. EC Max (Row 0, Col 2)
+
         self.lbl_set_ec_max = make_sp_field(sp_outer, 0, 2, "EC Max (Stop):", "2.20", val_fg="#1565c0", box_w=5, btn_px=14)
 
-        # Row 1: pH Setpoints (3 equal columns)
-        # 4. pH Min (Row 1, Col 0)
         self.lbl_set_ph_min = make_sp_field(sp_outer, 1, 0, "pH Min (Up):", "5.40", val_fg="#0891b2", box_w=5, btn_px=14)
-        # 5. pH Target (Row 1, Col 1)
+
         self.lbl_set_ph_target = make_sp_field(sp_outer, 1, 1, "pH Target:", "5.80", val_fg="#1565c0", box_w=5, btn_px=14)
-        # 6. pH Max (Row 1, Col 2)
+
         self.lbl_set_ph_max = make_sp_field(sp_outer, 1, 2, "pH Max (Down):", "6.40", val_fg="#dc2626", box_w=5, btn_px=14)
 
-        # Card 2: CYCLIC FERTIGATION TIMER CONFIGURATION: 2 EQUAL COLUMNS
         timer_card = tk.LabelFrame(
             center_wrap,
             text="  CYCLIC FERTIGATION TIMER CONFIGURATION  ",
@@ -3772,15 +3758,12 @@ class InHydroFertigationApp(tk.Tk):
         timer_outer.columnconfigure(0, weight=1, uniform="tm_col")
         timer_outer.columnconfigure(1, weight=1, uniform="tm_col")
 
-        # Timer Row 0: Operating Window (Col 0: Start Time, Col 1: Stop Time)
         self.lbl_set_start_time = make_sp_field(timer_outer, 0, 0, "Window Start Time:", "06:00", val_fg="#1565c0", box_w=5, mode="time", btn_px=16)
         self.lbl_set_stop_time  = make_sp_field(timer_outer, 0, 1, "Window Stop Time:",  "18:00", val_fg="#1565c0", box_w=5, mode="time", btn_px=16)
 
-        # Timer Row 1: Durations (Col 0: Delivery ON, Col 1: Interval OFF)
         self.lbl_set_on_min  = make_sp_field(timer_outer, 1, 0, "Delivery ON (min):",  "5.0",  val_fg="#0891b2", box_w=5, mode="numeric", btn_px=16)
         self.lbl_set_off_min = make_sp_field(timer_outer, 1, 1, "Interval OFF (min):", "60.0", val_fg="#1565c0", box_w=5, mode="numeric", btn_px=16)
 
-        # Save Button Container - Vertically arranged at the bottom
         f_save = tk.Frame(f, bg="white")
         f_save.pack(fill="x", pady=(3, 2))
 
@@ -3878,6 +3861,12 @@ class InHydroFertigationApp(tk.Tk):
                 "off_min": t_off
             }
 
+            crop_recipes[k]["crop_name"] = c_name
+            if "zones" in crop_recipes[k] and isinstance(crop_recipes[k]["zones"], dict):
+                for zk in ["both", "zone_1", "zone_2"]:
+                    if zk in crop_recipes[k]["zones"] and isinstance(crop_recipes[k]["zones"][zk], dict):
+                        crop_recipes[k]["zones"][zk]["crop_name"] = c_name
+
             if z_key == "both":
                 crop_recipes[k]["zones"]["both"] = dict(data_dict)
                 crop_recipes[k].update(data_dict)
@@ -3887,7 +3876,17 @@ class InHydroFertigationApp(tk.Tk):
                 msg_txt = f"Setpoints & Cyclic Timer saved specifically for {z_title} under {c_name}!"
 
             save_json(RECIPE_FILE, crop_recipes)
+
+            new_disp_map = {rk: crop_recipes[rk].get("crop_name", rk.title()) for rk in crop_recipes}
+            if hasattr(self, "dd_fert_crop"):
+                self.dd_fert_crop.display_map = dict(new_disp_map)
+                self.dd_fert_crop.update_label()
+            if hasattr(self, "dd_set_crop"):
+                self.dd_set_crop.display_map = dict(new_disp_map)
+                self.dd_set_crop.update_label()
+
             self._load_recipe_into_fert_screen()
+            self._load_crop_into_settings_tab()
             broadcast_current_state()
             messagebox.showinfo("Saved", msg_txt)
         except Exception as err:
@@ -3901,7 +3900,6 @@ class InHydroFertigationApp(tk.Tk):
         cur_time = now_dt.time()
         now_sec = time.time()
 
-        # Auto-Fertigation Cyclic Timer execution
         if getattr(self, "var_auto_fertigation", None) and self.var_auto_fertigation.get():
             target_z = self._get_delivery_target_key()
             z_key = target_z if target_z in ["zone_1", "zone_2"] else "both"
@@ -3910,7 +3908,7 @@ class InHydroFertigationApp(tk.Tk):
             t_en = recipe.get("timer_enabled", True)
 
             if engine.is_running:
-                # Keep last cycle time updated to current time during run so countdown begins from batch finish
+
                 self.fert_last_cycle_time[z_key] = now_sec
             else:
                 if t_en:
@@ -3953,7 +3951,6 @@ class InHydroFertigationApp(tk.Tk):
         now_str = f"{now_dt.strftime('%d-%m-%Y')}\n{now_dt.strftime('%I:%M:%S %p')}"
         self.lbl_clock.config(text=now_str)
 
-        # Monitoring Screen
         if hasattr(self, "lbl_mon_ec_val"):
             if hw.pv_ec is None or getattr(hw, "sensor_error", False):
                 self.lbl_mon_ec_val.config(text="SENSOR ERROR", fg="#dc2626", font=("Helvetica", 18, "bold"))
@@ -3978,7 +3975,6 @@ class InHydroFertigationApp(tk.Tk):
                     relief="sunken" if is_on else "raised"
                 )
 
-        # Fertigation Screen
         if hasattr(self, "lbl_fert_phase_badge"):
             if hasattr(self, "lbl_fert_live_ec"):
                 if hw.pv_ec is None or getattr(hw, "sensor_error", False):
@@ -4070,7 +4066,6 @@ class InHydroFertigationApp(tk.Tk):
             if hasattr(self, "lbl_deliv_zone2"):
                 self.lbl_deliv_zone2.config(text=f"Zone 2: {'ON' if zone2_on else 'OFF'}", fg=self.COLOR_SUCCESS if zone2_on else self.COLOR_TEXT_SUB)
 
-        # Cyclic Irrigation Screen (2 Zones)
         if hasattr(self, "lbl_z1_state"):
             ts1 = irrigation_engine.timer_states.get("zone_1", {})
             st1 = ts1.get("state", "OFF")
@@ -4121,7 +4116,6 @@ class InHydroFertigationApp(tk.Tk):
                         activebackground="#bbf7d0", activeforeground="#14532d"
                     )
 
-        # Dashboard status
         if hasattr(self, "lbl_dash_status"):
             if engine.is_running:
                 self.lbl_dash_status.config(text=f"ACTIVE: {engine.state}", bg="#0284c7")
@@ -4131,12 +4125,11 @@ class InHydroFertigationApp(tk.Tk):
         self.after(100, self._periodic_tick)
 
 if __name__ == "__main__":
-    # Start Bluetooth RFCOMM SPP Server (Terminal App communication for Wi-Fi & status)
+
     threading.Thread(target=start_bluetooth_server, daemon=True, name="BT_Server").start()
     threading.Thread(target=auto_trust_devices, daemon=True, name="BT_Trust").start()
     threading.Thread(target=network_watchdog, daemon=True, name="Net_Watchdog").start()
 
-    # Start MQTT Client and Background Sync Workers (Cloud sync with VPS Broker)
     threading.Thread(target=start_mqtt_client, daemon=True, name="MQTT_Client").start()
     threading.Thread(target=mqtt_heartbeat_worker, daemon=True, name="MQTT_Heartbeat").start()
     threading.Thread(target=mqtt_telemetry_worker, daemon=True, name="MQTT_Telemetry").start()

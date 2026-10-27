@@ -53,7 +53,7 @@ DEFAULT_CONFIG = {
     },
     "relays": {
         "name": "Modbus Relays",
-        "path": "/dev/serial/by-path/platform-xhci-hcd.1-usb-0:2:1.0-port0",
+        "path": "/dev/serial/by-path/pci-0000:00:14.0-usb-0:3:1.0-port0",
         "slave_id": 1,
         "enabled": True
     }
