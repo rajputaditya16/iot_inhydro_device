@@ -18,6 +18,7 @@ import AlmoraSettings from './pages/AdminDashboard/AlmoraSettings';
 import Almora2Settings from './pages/AdminDashboard/Almora2Settings';
 import MonitSettings from './pages/AdminDashboard/MonitSettings';
 import PolyhouseSettings from './pages/AdminDashboard/PolyhouseSettings';
+import FertigationSettings from './pages/AdminDashboard/FertigationSettings';
 
 const SharedLayoutRoute = () => (
   <ProtectedRoute allowedAccountTypes={['superadmin', 'admin', 'user']}>
@@ -43,6 +44,7 @@ function App() {
           <Route path="/devices" element={<DevicesPage />} />
           <Route path="/monitoring" element={<LiveMonitoring />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/fertigation-settings" element={<ProtectedRoute allowedAccountTypes={['admin', 'superadmin']}><FertigationSettings /></ProtectedRoute>} />
           <Route path="/cold-storage" element={<ProtectedRoute allowedAccountTypes={['admin', 'superadmin']}><ColdStorageSettings /></ProtectedRoute>} />
           <Route path="/almora-settings" element={<ProtectedRoute allowedAccountTypes={['admin', 'superadmin']}><AlmoraSettings /></ProtectedRoute>} />
           <Route path="/almora2-settings" element={<ProtectedRoute allowedAccountTypes={['admin', 'superadmin']}><Almora2Settings /></ProtectedRoute>} />

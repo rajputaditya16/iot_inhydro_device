@@ -722,8 +722,8 @@ const LiveMonitoring = () => {
     const name = String(deviceMeta.name || '').toLowerCase();
     const mqttId = String(deviceMeta.mqttId || '').toLowerCase();
 
-    // STRICTLY EXCLUDE single Almora devices and ITC Polyhouse
-    if (type === 'almora' || type === 'almora2' || type === 'itc_polyhouse' || mqttId.startsWith('almora') || mqttId === 'sensor1') {
+    // STRICTLY EXCLUDE single Almora devices, ITC Polyhouse, and Fertigation
+    if (type === 'almora' || type === 'almora2' || type === 'itc_polyhouse' || type === 'fertigation' || mqttId.startsWith('almora') || mqttId === 'sensor1') {
       return false;
     }
 
@@ -1008,7 +1008,14 @@ const LiveMonitoring = () => {
             deviceMeta?.deviceType === 'almora' ||
             deviceMeta?.deviceType === 'almora2';
 
-          if (isMonitType) {
+          if (deviceMeta?.deviceType === 'fertigation') {
+            fields = [
+              { key: 'field1', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
+              { key: 'field2', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
+              { key: 'field3', label: 'Water Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
+              { key: 'field4', label: 'Fertigation Phase', icon: Activity, unit: '', type: 'default' },
+            ];
+          } else if (isMonitType) {
             fields = [
               { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
               { key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
@@ -1878,7 +1885,16 @@ const LiveMonitoring = () => {
           let currentMetrics = {};
           let fields = [];
 
-          if (isMonitType) {
+          if (deviceMeta?.deviceType === 'fertigation') {
+            const phaseStr = tel.phase || tel.fertigation?.phase || (tel.fertigation?.is_running ? 'RUNNING' : 'READY');
+            currentMetrics = { field1: ecVal, field2: phVal, field3: tempVal, field4: phaseStr };
+            fields = [
+              { key: 'field1', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
+              { key: 'field2', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
+              { key: 'field3', label: 'Water Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
+              { key: 'field4', label: 'Fertigation Phase', icon: Activity, unit: '', type: 'default' },
+            ];
+          } else if (isMonitType) {
             currentMetrics = { field3: ecVal, field4: phVal, field5: roomTempVal, field6: roomHumiVal };
             fields = [
               { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
@@ -2212,6 +2228,17 @@ const LiveMonitoring = () => {
               >
                 <Sliders className="h-3.5 w-3.5" />
                 <span>Cold Storage Settings</span>
+              </button>
+            )}
+
+            {deviceMeta?.deviceType === 'fertigation' && (
+              <button
+                onClick={() => navigate(`/fertigation-settings?device=${selectedDeviceId}&mqttId=${deviceMeta?.mqttId || ''}`)}
+                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-green-500/15 text-green-400 hover:bg-green-500/25 border border-green-500/30 text-xs font-semibold transition-all shadow-sm shadow-green-500/10 active:scale-95 cursor-pointer"
+                title="Open Fertigation Controller Setpoints & Recirculation Loop"
+              >
+                <Sliders className="h-3.5 w-3.5" />
+                <span>Fertigation Settings</span>
               </button>
             )}
           </div>

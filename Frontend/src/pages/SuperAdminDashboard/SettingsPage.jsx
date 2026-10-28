@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Bell, Shield, Palette, Globe, Save, Moon, Sun, Monitor, Settings, CheckCircle2, X, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { User, Bell, Shield, Palette, Globe, Save, Moon, Sun, Monitor, Settings, CheckCircle2, X, Eye, EyeOff, AlertCircle, FlaskConical } from 'lucide-react';
 import DeviceSettings from '../AdminDashboard/DeviceSettings';
 import AlmoraSettings from '../AdminDashboard/AlmoraSettings';
 import Almora2Settings from '../AdminDashboard/Almora2Settings';
@@ -10,6 +10,7 @@ import OfficeControlSettings from '../AdminDashboard/OfficeControlSettings';
 import ControllingDeviceSettings from '../AdminDashboard/ControllingDeviceSettings';
 import MonitSettings from '../AdminDashboard/MonitSettings';
 import PolyhouseSettings from '../AdminDashboard/PolyhouseSettings';
+import FertigationSettings from '../AdminDashboard/FertigationSettings';
 
 const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('profile');
@@ -179,8 +180,12 @@ const SettingsPage = () => {
     return userDevices.some(d => {
       const type = (d.deviceType || '').toLowerCase();
       const name = (d.name || '').toLowerCase();
+      const mqttId = (d.mqttId || '').toLowerCase();
       if (types.includes(type)) return true;
-      if (nameCheck && (name.includes('cold') || name.includes('storage') || name.includes('room'))) return true;
+      if (nameCheck && (
+        name.includes('cold') || name.includes('storage') || name.includes('room') ||
+        name.includes('fert') || mqttId.includes('fert') || mqttId.includes('control12')
+      )) return true;
       return false;
     });
   };
@@ -197,6 +202,7 @@ const SettingsPage = () => {
       ...(hasType(['controlling']) ? [{ key: 'controlling_config', label: 'Controller Setup', icon: Monitor }] : []),
       ...(hasType(['monit', 'monnet', 'monit_device', 'dosing']) ? [{ key: 'monit_config', label: 'Monnet Setup', icon: Monitor }] : []),
       ...(hasType(['itc_polyhouse']) ? [{ key: 'polyhouse_config', label: 'Polyhouse Setup', icon: Monitor }] : []),
+      ...(hasType(['fertigation'], true) ? [{ key: 'fertigation_config', label: 'Fertigation Setup', icon: FlaskConical }] : []),
     ] : []),
   ];
 
@@ -287,6 +293,11 @@ const SettingsPage = () => {
           {/* Polyhouse Controller */}
           {activeTab === 'polyhouse_config' && (
             <PolyhouseSettings />
+          )}
+
+          {/* Fertigation Controller */}
+          {activeTab === 'fertigation_config' && (
+            <FertigationSettings />
           )}
 
           {/* Profile */}

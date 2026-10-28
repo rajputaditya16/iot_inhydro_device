@@ -308,6 +308,15 @@ exports.pushDeviceConfig = async (req, res) => {
           if (payload.system_config && typeof payload.system_config === 'object') {
             updateFields['config'] = payload.system_config;
           }
+          if (payload.crop_recipes || payload.cyclic_timers || payload.ec_min || payload.ec_max) {
+            updateFields['settings.fertigation'] = {
+              crop_recipes: payload.crop_recipes,
+              cyclic_timers: payload.cyclic_timers,
+              active_crop: payload.active_crop,
+              delivery_zone: payload.delivery_zone,
+              ...payload
+            };
+          }
           if (Object.keys(updateFields).length > 0) {
             await Device.findByIdAndUpdate(device._id, { $set: updateFields }).catch(() => { });
           }
@@ -321,6 +330,15 @@ exports.pushDeviceConfig = async (req, res) => {
         await publishToDevice(`inhydro/${deviceRoot}/room${room}/setpoints/update`, payload);
       } else if (device && device.deviceType === 'controlling') {
         await publishToDevice(`inhydro/${deviceRoot}/monitor/setpoints/update`, payload);
+      } else if (device && device.deviceType === 'fertigation') {
+        await publishToDevice(`inhydro/${deviceRoot}/setpoints/set`, payload);
+        await publishToDevice(`inhydro/${deviceRoot}/setpoints/update`, payload);
+        await publishToDevice(`inhydro/${deviceRoot}/config/update`, payload);
+        if (deviceRoot !== deviceRoot.toLowerCase()) {
+          await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/setpoints/set`, payload);
+          await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/setpoints/update`, payload);
+          await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/config/update`, payload);
+        }
       } else {
         await publishToDevice(`inhydro/${deviceRoot}/setpoints/update`, payload);
         await publishToDevice(`inhydro/${deviceRoot}/config/update`, payload);
@@ -380,6 +398,7 @@ exports.sendDeviceCommand = async (req, res) => {
 
     const cmd_id = req.body?.cmd_id || ('cmd_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6));
     const cmdPayload = {
+      ...req.body,
       action,
       cmd_id,
       room: req.body?.room || req.body?.skey || req.query?.room,
@@ -853,6 +872,18 @@ exports.getDeviceAnalytics = async (req, res) => {
             polyhouse_data: sData
           });
         }
+      } else if (device.deviceType === 'fertigation') {
+        const tel = d.telemetry || d || {};
+        mappedFeeds.push({
+          created_at: packetTime,
+          entry_id: mappedFeeds.length + 1,
+          field1: tel.ec != null ? String(tel.ec) : (d.ec != null ? String(d.ec) : null),
+          field2: tel.ph != null ? String(tel.ph) : (d.ph != null ? String(d.ph) : null),
+          field3: tel.water_temp != null ? String(tel.water_temp) : (d.water_temp != null ? String(d.water_temp) : null),
+          field4: tel.phase || d.phase || tel.state || d.state || null,
+          field5: d.active_venturis ? JSON.stringify(d.active_venturis) : null,
+          fertigation_data: d
+        });
       } else {
         // Standard / system2 mapping
         const tel = d.telemetry || d || {};
@@ -1024,6 +1055,16 @@ exports.getDeviceAnalytics = async (req, res) => {
         channelData.field13 = 'PH-01 CO2';
         channelData.field14 = 'PH-01 PAR';
       }
+    } else if (device.deviceType === 'fertigation') {
+      channelData = {
+        id: device.mqttId || device._id.toString(),
+        name: device.name,
+        field1: 'Water EC (mS/cm)',
+        field2: 'Water pH',
+        field3: 'Water Temp (°C)',
+        field4: 'Fertigation Phase',
+        field5: 'Active Venturis',
+      };
     }
 
     const formatHumanReadableDate = (dateInput, tz = 'Asia/Kolkata') => {

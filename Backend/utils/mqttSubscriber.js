@@ -220,6 +220,7 @@ const startMqttSubscriber = () => {
       // Check if this is an outbound server command / setpoint push topic
       const isOutboundTopic =
         topic.endsWith('/setpoints/update') ||
+        topic.endsWith('/setpoints/set') ||
         topic.endsWith('/config/update') ||
         topic.endsWith('/command') ||
         topic.endsWith('/setpoints/request_sync') ||

@@ -400,7 +400,9 @@ const DevicesPage = () => {
 
                         <button
                           onClick={() => {
-                            if (device.deviceType === 'cold_storage') {
+                            if (device.deviceType === 'fertigation') {
+                              navigate(`/fertigation-settings?device=${deviceId}&mqttId=${device.mqttId || ''}`);
+                            } else if (device.deviceType === 'cold_storage') {
                               navigate(`/cold-storage?device=${deviceId}&mqttId=${device.mqttId || ''}`);
                             } else if (device.deviceType === 'itc_polyhouse') {
                               navigate(`/polyhouse-settings?device=${deviceId}&mqttId=${device.mqttId || ''}`);
@@ -562,6 +564,7 @@ const DevicesPage = () => {
                     className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2 text-white outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
                   >
                     <option value="system2">Standard System (system2.py)</option>
+                    <option value="fertigation">Fertigation Controller (fertigation_hmi_controller.py)</option>
                     <option value="itc_polyhouse">ITC Polyhouse Controller (itc_polyhouse_controller.py)</option>
                     <option value="cold_storage">Cold Storage Almora (sensor_monitor2_almora.py)</option>
                     <option value="controlling">InHydro Controller (controlling.py)</option>
@@ -732,6 +735,7 @@ const DevicesPage = () => {
                     <p className="text-xs text-slate-400 mt-1 font-mono">
                       Type: <span className="text-slate-300 font-semibold">{
                         selectedDeviceDetails.deviceType === 'system2' ? 'Standard System' :
+                          selectedDeviceDetails.deviceType === 'fertigation' ? 'Fertigation Controller' :
                           selectedDeviceDetails.deviceType === 'itc_polyhouse' ? 'ITC Polyhouse Controller' :
                           selectedDeviceDetails.deviceType === 'cold_storage' ? 'Cold Storage Almora' :
                             selectedDeviceDetails.deviceType === 'controlling' ? 'InHydro Controller' :
@@ -904,7 +908,9 @@ const DevicesPage = () => {
                     setShowDetailsModal(false);
                     const devId = selectedDeviceDetails._id || selectedDeviceDetails.id;
                     const mId = selectedDeviceDetails.mqttId || '';
-                    if (selectedDeviceDetails.deviceType === 'cold_storage') {
+                    if (selectedDeviceDetails.deviceType === 'fertigation') {
+                      navigate(`/fertigation-settings?device=${devId}&mqttId=${mId}`);
+                    } else if (selectedDeviceDetails.deviceType === 'cold_storage') {
                       navigate(`/cold-storage?device=${devId}&mqttId=${mId}`);
                     } else if (selectedDeviceDetails.deviceType === 'itc_polyhouse') {
                       navigate(`/polyhouse-settings?device=${devId}&mqttId=${mId}`);

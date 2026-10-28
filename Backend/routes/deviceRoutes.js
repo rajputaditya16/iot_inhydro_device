@@ -38,6 +38,9 @@ router.put('/:id/block', restrictTo('superadmin'), toggleBlockDevice);
 router.route('/:id/push-config')
   .post(restrictTo('admin', 'superadmin'), pushDeviceConfig)
   .put(restrictTo('admin', 'superadmin'), pushDeviceConfig);
+router.route('/:id/config')
+  .post(restrictTo('admin', 'superadmin'), pushDeviceConfig)
+  .put(restrictTo('admin', 'superadmin'), pushDeviceConfig);
 router.route('/:id/setpoints')
   .post(restrictTo('admin', 'superadmin'), pushDeviceConfig)
   .put(restrictTo('admin', 'superadmin'), pushDeviceConfig)

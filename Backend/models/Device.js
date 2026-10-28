@@ -19,7 +19,7 @@ const deviceSchema = new mongoose.Schema(
     },
     deviceType: {
       type: String,
-      enum: ['system2', 'controlling', 'almora', 'almora2', 'cold_storage', 'multi_sensor', 'light_motor_pump', 'office_control', 'monit', 'monnet', 'itc_polyhouse'],
+      enum: ['system2', 'controlling', 'almora', 'almora2', 'cold_storage', 'multi_sensor', 'light_motor_pump', 'office_control', 'monit', 'monnet', 'itc_polyhouse', 'fertigation'],
       default: 'system2',
     },
     mqttId: {
@@ -61,6 +61,18 @@ const deviceSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: '',
+    },
+    settings: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    cropPrograms: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    config: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
     lastUpdated: {
       type: Date,
