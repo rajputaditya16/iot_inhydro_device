@@ -435,7 +435,8 @@ exports.getDeviceAnalytics = async (req, res) => {
 
     // Parse date filters, default to last 24 hours
     let start, end;
-    if (req.query.all === 'true' || req.query.filter === 'all' || req.query.start === 'all') {
+    const isAllHistory = req.query.all === 'true' || req.query.filter === 'all' || req.query.start === 'all';
+    if (isAllHistory) {
       start = new Date(0); // Epoch 1970
       end = new Date(Date.now() + 24 * 60 * 60 * 1000);
     } else {
@@ -450,8 +451,8 @@ exports.getDeviceAnalytics = async (req, res) => {
     const isDownsample = req.query.downsample === 'true' && !isExport;
     const sampleLimit = parseInt(req.query.sampleLimit || req.query.limit) || 1500;
 
-    // ── Redis Cache Check (skip for live & export queries) ──
-    const useCache = !isLive && !isExport;
+    // ── Redis Cache Check (skip for live & export queries, or on explicit refresh) ──
+    const useCache = !isLive && !isExport && req.query.refresh !== 'true';
     let cacheKey = null;
     if (useCache) {
       cacheKey = makeAnalyticsCacheKey(device._id.toString(), {
@@ -475,7 +476,7 @@ exports.getDeviceAnalytics = async (req, res) => {
     const sortOrder = isLive ? { timestamp: -1 } : { timestamp: 1 };
 
     // Build clean indexed query (indexed timestamp range query for 100,000+ to 1,000,000+ records)
-    const targetQuery = isLive
+    const targetQuery = (isLive || isAllHistory)
       ? {}
       : { timestamp: { $gte: start, $lte: end } };
 
@@ -493,14 +494,51 @@ exports.getDeviceAnalytics = async (req, res) => {
 
     if (targetModel) {
       try {
-        // Step 1: Count total documents in range and in collection with generous timeouts
-        const [inRangeCount, collectionCount] = await Promise.all([
-          targetModel.countDocuments(targetQuery).maxTimeMS(20000).catch(() => null),
-          targetModel.estimatedDocumentCount().maxTimeMS(10000).catch(() => null)
-        ]);
+        // Step 1: Count total documents in range and in collection
+        let collectionCount = 0;
+        try {
+          collectionCount = await targetModel.estimatedDocumentCount().maxTimeMS(8000);
+        } catch (cErr) {
+          collectionCount = 0;
+        }
 
-        totalInRange = inRangeCount !== null ? inRangeCount : 0;
-        totalInCollection = collectionCount !== null ? collectionCount : totalInRange;
+        let inRangeCount = null;
+        if (isAllHistory || (start && start.getTime() <= 0)) {
+          inRangeCount = collectionCount > 0 ? collectionCount : null;
+        } else {
+          // Fast index-backed count using timestamp index
+          try {
+            inRangeCount = await targetModel.countDocuments(targetQuery).hint({ timestamp: -1 }).maxTimeMS(12000);
+          } catch (hErr) {
+            try {
+              inRangeCount = await targetModel.countDocuments(targetQuery).maxTimeMS(12000);
+            } catch (cdErr) {
+              inRangeCount = null;
+            }
+          }
+
+          // If countDocuments timed out on massive dataset, calculate realistic range count based on collection boundaries
+          if (inRangeCount === null && collectionCount > 0) {
+            try {
+              const [earliestDoc, latestDoc] = await Promise.all([
+                targetModel.findOne().sort({ timestamp: 1 }).select('timestamp').lean().catch(() => null),
+                targetModel.findOne().sort({ timestamp: -1 }).select('timestamp').lean().catch(() => null),
+              ]);
+              const minTime = earliestDoc?.timestamp ? new Date(earliestDoc.timestamp).getTime() : start.getTime();
+              const maxTime = latestDoc?.timestamp ? new Date(latestDoc.timestamp).getTime() : end.getTime();
+              const totalSpan = Math.max(1, maxTime - minTime);
+              const rangeStart = Math.max(minTime, start.getTime());
+              const rangeEnd = Math.min(maxTime, end.getTime());
+              const effectiveRange = Math.max(0, rangeEnd - rangeStart);
+              inRangeCount = Math.min(collectionCount, Math.round(collectionCount * (effectiveRange / totalSpan)));
+            } catch (estErr) {
+              inRangeCount = collectionCount;
+            }
+          }
+        }
+
+        totalInRange = inRangeCount !== null ? inRangeCount : collectionCount;
+        totalInCollection = collectionCount > 0 ? collectionCount : totalInRange;
 
         // Step 2: Fetch documents based on query type
         if (isLive) {
@@ -517,28 +555,58 @@ exports.getDeviceAnalytics = async (req, res) => {
             .sort(sortOrder)
             .limit(exportLimit)
             .select('timestamp data topic room deviceId mqttId')
-            .maxTimeMS(60000)
+            .maxTimeMS(90000)
             .lean();
         } else if (isDownsample && totalInRange > sampleLimit * 2) {
-          // ── High-Speed Cursor Stride Sampling for 100,000+ records ──
-          // Streams cursor in constant O(1) memory, extracting ~sampleLimit points across entire range in < 500ms
-          const stride = Math.max(1, Math.floor(totalInRange / sampleLimit));
-          const cursor = targetModel.find(targetQuery)
-            .sort(sortOrder)
-            .select('timestamp data topic room deviceId mqttId')
-            .maxTimeMS(60000)
-            .lean()
-            .cursor();
+          // ── High-Speed Server-Side Sampling ──
+          try {
+            const timeSpan = Math.max(1000, end.getTime() - (start.getTime() > 0 ? start.getTime() : (Date.now() - 90 * 24 * 3600 * 1000)));
+            const bucketSizeMs = Math.max(1000, Math.floor(timeSpan / sampleLimit));
 
-          let countIdx = 0;
-          for await (const doc of cursor) {
-            if (countIdx % stride === 0) {
-              packets.push(doc);
+            const samplePipeline = [
+              {
+                $match: {
+                  ...targetQuery,
+                  timestamp: targetQuery.timestamp || { $exists: true, $ne: null }
+                }
+              },
+              {
+                $group: {
+                  _id: {
+                    $subtract: [
+                      { $toLong: { $ifNull: ["$timestamp", "$createdAt"] } },
+                      { $mod: [{ $toLong: { $ifNull: ["$timestamp", "$createdAt"] } }, bucketSizeMs] }
+                    ]
+                  },
+                  doc: { $first: "$$ROOT" }
+                }
+              },
+              { $sort: { "_id": 1 } },
+              { $replaceRoot: { newRoot: "$doc" } }
+            ];
+
+            packets = await targetModel.aggregate(samplePipeline).maxTimeMS(25000);
+          } catch (aggErr) {
+            // Fallback to cursor stride if aggregation is unsupported or timed out
+            const stride = Math.max(1, Math.floor(totalInRange / sampleLimit));
+            const cursor = targetModel.find(targetQuery)
+              .sort(sortOrder)
+              .select('timestamp data topic room deviceId mqttId')
+              .maxTimeMS(30000)
+              .lean()
+              .cursor();
+
+            packets = [];
+            let countIdx = 0;
+            for await (const doc of cursor) {
+              if (countIdx % stride === 0) {
+                packets.push(doc);
+              }
+              countIdx++;
             }
-            countIdx++;
           }
         } else {
-          // Standard range fetch (up to 100,000 records)
+          // Standard range fetch
           const fetchLimit = parseInt(req.query.limit) || 100000;
           packets = await targetModel.find(targetQuery)
             .sort(sortOrder)
@@ -572,11 +640,11 @@ exports.getDeviceAnalytics = async (req, res) => {
             .select('timestamp data topic room deviceId mqttId')
             .maxTimeMS(30000)
             .lean(),
-          TelemetryLog.countDocuments(fallbackQuery).maxTimeMS(10000).catch(() => 0)
+          TelemetryLog.countDocuments(fallbackQuery).maxTimeMS(10000).catch(() => null)
         ]);
 
         packets = fbDocs || [];
-        totalInRange = fbCount || packets.length;
+        totalInRange = fbCount !== null ? fbCount : packets.length;
         totalInCollection = totalInCollection || totalInRange;
       } catch (e) {
         packets = [];

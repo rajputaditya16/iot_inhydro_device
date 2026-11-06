@@ -57,7 +57,10 @@ const getTelemetryModel = (mqttId) => {
     return mongoose.models[collectionName];
   }
 
-  return mongoose.model(collectionName, telemetryLogSchema, collectionName);
+  const model = mongoose.model(collectionName, telemetryLogSchema, collectionName);
+  // Ensure timestamp index exists on dynamic per-device collection for lightning-fast queries
+  model.createIndexes().catch(() => {});
+  return model;
 };
 
 module.exports = TelemetryLog;

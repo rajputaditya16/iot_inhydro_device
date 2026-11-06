@@ -1374,7 +1374,7 @@ const AnalyticsPage = () => {
     return '';
   }, [isOffice, isCold, isPoly, selectedRoom, coldRoomNames]);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (isRefresh = false) => {
     if (!selectedDeviceId) {
       setRawFeeds([]);
       setLoading(false);
@@ -1391,7 +1391,8 @@ const AnalyticsPage = () => {
         roomParam = `&room=${selectedRoom || 'all'}`;
       }
 
-      const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics?start=${start.toISOString()}&end=${end.toISOString()}&downsample=true&sampleLimit=1500${roomParam}`;
+      const refreshParam = isRefresh ? '&refresh=true' : '';
+      const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics?start=${start.toISOString()}&end=${end.toISOString()}&filter=${filter}&downsample=true&sampleLimit=1500${roomParam}${refreshParam}`;
 
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await fetch(url, { headers });
@@ -1494,7 +1495,7 @@ const AnalyticsPage = () => {
       const filename = `${deviceSlug}${roomSlug}_Analytics_${exportLabel}_${dateStr}.${format}`;
 
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
-      const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics?start=${start.toISOString()}&end=${end.toISOString()}&export=true&format=${format}&timezone=${encodeURIComponent(tz)}${roomParam}`;
+      const url = `${API_BASE}/api/devices/${selectedDeviceId}/analytics?start=${start.toISOString()}&end=${end.toISOString()}&filter=${filter}&export=true&format=${format}&timezone=${encodeURIComponent(tz)}${roomParam}`;
 
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const res = await fetch(url, { headers });
@@ -1954,7 +1955,7 @@ const AnalyticsPage = () => {
             )}
 
             <button
-              onClick={fetchData}
+              onClick={() => fetchData(true)}
               disabled={loading}
               className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-medium text-slate-300 transition-all hover:bg-slate-700 hover:text-white disabled:opacity-50"
               title="Refresh data"
@@ -2358,7 +2359,7 @@ const AnalyticsPage = () => {
             </div>
           </div>
           <button
-            onClick={fetchData}
+            onClick={() => fetchData(true)}
             className="rounded-lg bg-red-500/20 px-4 py-2 text-xs font-medium text-red-300 hover:bg-red-500/30 transition-colors"
           >
             Retry
