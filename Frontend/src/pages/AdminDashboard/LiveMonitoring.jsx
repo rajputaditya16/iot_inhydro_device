@@ -12,18 +12,8 @@ import {
   Cpu,
   ChevronDown,
   Activity,
-  Layers,
-  LayoutGrid,
   ChevronRight,
-  ArrowLeft,
-  ShieldCheck,
-  MapPin,
-  Maximize2,
-  X,
-  TrendingUp,
-  AlertTriangle,
   Sun,
-  Fan,
   Leaf,
   Sprout,
   Tag,
@@ -32,7 +22,6 @@ import {
 } from 'lucide-react';
 import LiveChart from '../../components/LiveChart';
 import { SkeletonCard } from '../../components/Skeleton';
-import { useThrottledStream } from '../../hooks/useThrottledStream';
 import { createMqttClient } from '../../utils/mqtt';
 import { telemetryWs } from '../../utils/websocketClient';
 import {
@@ -50,32 +39,6 @@ const DEFAULT_ROOM_NAMES = {
   S5: 'Cold Room 5',
   S6: 'Cold Room 6',
   S7: 'Greenhouse',
-};
-
-const DEFAULT_COLD_ROOM_CROPS = {
-  S1: 'Cold Room 1 Program',
-  S2: 'Cold Room 2 Program',
-  S3: 'Cold Room 3 Program',
-  S4: 'Cold Room 4 Program',
-  S5: 'Cold Room 5 Program',
-  S6: 'Cold Room 6 Program',
-  S7: 'Greenhouse Program',
-};
-
-const DEFAULT_COLD_ROOM_SETUPS = {
-  S1: 'Cold Room 1 Setup',
-  S2: 'Cold Room 2 Setup',
-  S3: 'Cold Room 3 Setup',
-  S4: 'Cold Room 4 Setup',
-  S5: 'Cold Room 5 Setup',
-  S6: 'Cold Room 6 Setup',
-  S7: 'Greenhouse Setup',
-};
-
-const DEFAULT_OFFICE_ROOM_CROPS = {
-  1: 'Room 1 - Lettuce / Greens',
-  2: 'Room 2 - Herbs / Greens',
-  3: 'Room 3 - Climate Crop',
 };
 
 const DEFAULT_OFFICE_ROOM_SETUPS = {
@@ -619,6 +582,8 @@ const LiveMonitoring = () => {
   const [hasNewData, setHasNewData] = useState(true);
   const previousMetricsRef = useRef(null);
   const newDataTimeoutRef = useRef(null);
+  const lastLiveStreamTimeRef = useRef(0);
+  const liveMetricsRef = useRef(initialCachedSnapshot?.activeMetrics || {});
 
   // High-performance micro-batch buffer refs (prevents UI freeze/lag during high-frequency telemetry)
   const incomingBufferRef = useRef([]);
@@ -1013,7 +978,7 @@ const LiveMonitoring = () => {
               { key: 'field1', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
               { key: 'field2', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
               { key: 'field3', label: 'Water Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
-              { key: 'field4', label: 'Fertigation Phase', icon: Activity, unit: '', type: 'default' },
+              // { key: 'field4', label: 'Fertigation Phase', icon: Activity, unit: '', type: 'default' },
             ];
           } else if (isMonitType) {
             fields = [
@@ -1047,12 +1012,20 @@ const LiveMonitoring = () => {
         setActiveFields(fields);
 
         if (!latestFeed) {
-          setLiveDevice({
-            id: selectedDeviceId,
-            name: deviceMeta?.name || 'Live Sensor Data',
-            location: deviceMeta?.location || 'Private Broker Feed',
-            status: deviceMeta?.status || 'offline',
-            lastUpdated: deviceMeta?.lastUpdated || null,
+          setLiveDevice((prev) => {
+            if (prev && prev.status === 'online' && prev.lastUpdated) {
+              const prevDiff = Date.now() - new Date(prev.lastUpdated).getTime();
+              if (prevDiff < 2 * 60 * 1000 && prevDiff > -2 * 60 * 1000) {
+                return prev;
+              }
+            }
+            return {
+              id: selectedDeviceId,
+              name: deviceMeta?.name || 'Live Sensor Data',
+              location: deviceMeta?.location || 'Private Broker Feed',
+              status: deviceMeta?.status || 'offline',
+              lastUpdated: deviceMeta?.lastUpdated || null,
+            };
           });
           setHasNewData(false);
           setLoading(false);
@@ -1099,14 +1072,17 @@ const LiveMonitoring = () => {
           }));
         });
 
+        // If live stream is active (< 25s since last live telemetry packet), DO NOT clobber live chart with DB poll!
+        const isLiveStreamActive = (Date.now() - lastLiveStreamTimeRef.current) < 25000;
         const previousMetrics = previousMetricsRef.current;
         const changed =
           !previousMetrics ||
           Object.keys(currentMetrics).some((key) => currentMetrics[key] !== previousMetrics[key]);
 
         setHasNewData(changed);
-        if (changed) {
+        if (!isLiveStreamActive && changed) {
           previousMetricsRef.current = currentMetrics;
+          liveMetricsRef.current = currentMetrics;
           setActiveMetrics(currentMetrics);
           setChartData(newChartData);
 
@@ -1318,6 +1294,8 @@ const LiveMonitoring = () => {
     const isOfficeControl = deviceMeta?.deviceType === 'office_control';
     let id = deviceMeta?.mqttId;
     if (!id && isOfficeControl) id = 'system2';
+    if (!id && deviceMeta?.deviceType === 'fertigation') id = 'fertigation';
+    if (!id && deviceMeta?.deviceType === 'controlling') id = 'controlling';
     if (!id) id = deviceMeta?.name;
     if (!id) id = deviceMeta?.id || deviceMeta?._id || selectedDeviceId;
     return id;
@@ -1331,6 +1309,8 @@ const LiveMonitoring = () => {
           deviceMeta?.name,
           deviceMeta?.deviceType === 'office_control' ? 'system2' : null,
           deviceMeta?.deviceType === 'controlling' ? 'controlling' : null,
+          deviceMeta?.deviceType === 'fertigation' ? 'fertigation' : null,
+          deviceMeta?.deviceType === 'fertigation' ? 'control12' : null,
           deviceMeta?.deviceType === 'itc_polyhouse' ? (deviceMeta?.mqttId || deviceMeta?.name) : null,
           isMultiSensorDevice ? 'cold_room' : null,
           isMultiSensorDevice ? 'cold_storage' : null,
@@ -1806,8 +1786,110 @@ const LiveMonitoring = () => {
               });
             }
           }
+        } else if (deviceMeta?.deviceType === 'fertigation' || targetMqttId === 'fertigation') {
+          // ── SPECIALIZED FERTIGATION CONTINUOUS STREAM HANDLER ─────────────────
+          // 1. Filter out heartbeat, setpoint sync, and remote command ACKs from resetting sensor metrics
+          const isHeartbeatOrCmd =
+            topic.includes('/heartbeat') ||
+            topic.includes('/setpoints') ||
+            topic.includes('/config') ||
+            topic.includes('/command') ||
+            (rawPayload.status === 'online' && rawPayload.ec === undefined && rawPayload.ph === undefined && rawPayload.water_temp === undefined && rawPayload.field1 === undefined);
+
+          if (isHeartbeatOrCmd) {
+            // Heartbeat confirms device is actively online! DO NOT wipe metrics or charts!
+            hasMatchingTelemetry = true;
+            if (!packet.isRetain) {
+              latestTelemetryTimestamp = new Date();
+            } else if (packetDate && (!latestTelemetryTimestamp || packetDate > latestTelemetryTimestamp)) {
+              latestTelemetryTimestamp = packetDate;
+            }
+            return;
+          }
+
+          // 2. Extract and sanitize genuine sensory telemetry
+          const tel = rawPayload.telemetry || rawPayload.sensors || rawPayload.data || rawPayload;
+
+          const parseNum = (v) => {
+            if (v === null || v === undefined || v === '') return null;
+            const n = parseFloat(v);
+            return Number.isFinite(n) ? n : null;
+          };
+
+          // For fertigation: field1 = Water EC, field2 = Water pH, field3 = Water Temp
+          const rawEc = parseNum(tel.ec ?? tel.pv_ec ?? tel.water_ec ?? (tel.field1 !== undefined ? tel.field1 : null));
+          const rawPh = parseNum(tel.ph ?? tel.pv_ph ?? tel.water_ph ?? (tel.field2 !== undefined ? tel.field2 : null));
+          const rawTemp = parseNum(tel.water_temp ?? tel.pv_water_temp ?? tel.temp ?? (tel.field3 !== undefined ? tel.field3 : null));
+          const phaseStr = tel.phase || tel.fertigation?.phase || (tel.fertigation?.is_running ? 'RUNNING' : 'READY');
+
+          // Preserve previous non-zero readings if a single packet has transient null/disconnected value
+          const prev = liveMetricsRef.current || {};
+          const ecVal = rawEc !== null && rawEc > 0 ? rawEc : (prev.field1 || 0);
+          const phVal = rawPh !== null && rawPh > 0 ? rawPh : (prev.field2 || 0);
+          const tempVal = rawTemp !== null && rawTemp > 0 ? rawTemp : (prev.field3 || 0);
+
+          const hasSensory = rawEc !== null || rawPh !== null || rawTemp !== null;
+
+          if (hasSensory) {
+            hasMatchingTelemetry = true;
+            lastLiveStreamTimeRef.current = Date.now();
+            if (!packet.isRetain) {
+              latestTelemetryTimestamp = new Date();
+            } else if (packetDate && (!latestTelemetryTimestamp || packetDate > latestTelemetryTimestamp)) {
+              latestTelemetryTimestamp = packetDate;
+            }
+
+            const currentMetrics = {
+              field1: ecVal,
+              field2: phVal,
+              field3: tempVal,
+              field4: phaseStr,
+            };
+
+            const fields = [
+              { key: 'field1', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
+              { key: 'field2', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
+              { key: 'field3', label: 'Water Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
+            ];
+
+            liveMetricsRef.current = currentMetrics;
+            setActiveFields(fields);
+            setActiveMetrics(currentMetrics);
+
+            setChartData((prev) => {
+              const newChart = { ...prev };
+              fields.forEach((f) => {
+                const val = currentMetrics[f.key];
+                if (val !== null && val !== undefined && val > 0) {
+                  newChart[f.key] = [
+                    ...(newChart[f.key] || []),
+                    { time: timeStr, value: val },
+                  ].slice(-24);
+                }
+              });
+              return newChart;
+            });
+          }
         } else {
           const tel = payload.telemetry || payload.sensors || payload.data || payload || {};
+
+          // Filter out heartbeat, status, or pure command acks from zeroing out generic device metrics
+          const isHeartbeatOrCmd =
+            topic.includes('/heartbeat') ||
+            topic.endsWith('/status') ||
+            topic.includes('/setpoints') ||
+            topic.includes('/command') ||
+            (rawPayload.status === 'online' && !tel.field1 && !tel.temp && !tel.water_temp && !tel.soil_temp && !tel.moist && !tel.ph && !tel.ec);
+
+          if (isHeartbeatOrCmd) {
+            hasMatchingTelemetry = true;
+            if (!packet.isRetain) latestTelemetryTimestamp = new Date();
+            else if (packetDate && (!latestTelemetryTimestamp || packetDate > latestTelemetryTimestamp)) {
+              latestTelemetryTimestamp = packetDate;
+            }
+            return;
+          }
+
           const tempVal =
             tel.field1 !== undefined
               ? parseFloat(tel.field1)
@@ -1885,16 +1967,7 @@ const LiveMonitoring = () => {
           let currentMetrics = {};
           let fields = [];
 
-          if (deviceMeta?.deviceType === 'fertigation') {
-            const phaseStr = tel.phase || tel.fertigation?.phase || (tel.fertigation?.is_running ? 'RUNNING' : 'READY');
-            currentMetrics = { field1: ecVal, field2: phVal, field3: tempVal, field4: phaseStr };
-            fields = [
-              { key: 'field1', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
-              { key: 'field2', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
-              { key: 'field3', label: 'Water Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
-              { key: 'field4', label: 'Fertigation Phase', icon: Activity, unit: '', type: 'default' },
-            ];
-          } else if (isMonitType) {
+          if (isMonitType) {
             currentMetrics = { field3: ecVal, field4: phVal, field5: roomTempVal, field6: roomHumiVal };
             fields = [
               { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
@@ -1947,6 +2020,7 @@ const LiveMonitoring = () => {
           }
 
           hasMatchingTelemetry = true;
+          lastLiveStreamTimeRef.current = Date.now();
           if (!packet.isRetain) {
             latestTelemetryTimestamp = new Date();
           } else if (packetDate) {
@@ -1955,6 +2029,7 @@ const LiveMonitoring = () => {
             }
           }
 
+          liveMetricsRef.current = currentMetrics;
           setActiveFields(fields);
           setActiveMetrics(currentMetrics);
 
@@ -2231,16 +2306,7 @@ const LiveMonitoring = () => {
               </button>
             )}
 
-            {deviceMeta?.deviceType === 'fertigation' && (
-              <button
-                onClick={() => navigate(`/fertigation-settings?device=${selectedDeviceId}&mqttId=${deviceMeta?.mqttId || ''}`)}
-                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-green-500/15 text-green-400 hover:bg-green-500/25 border border-green-500/30 text-xs font-semibold transition-all shadow-sm shadow-green-500/10 active:scale-95 cursor-pointer"
-                title="Open Fertigation Controller Setpoints & Recirculation Loop"
-              >
-                <Sliders className="h-3.5 w-3.5" />
-                <span>Fertigation Settings</span>
-              </button>
-            )}
+          
           </div>
 
           {/* Right: Last Updated & Refresh */}

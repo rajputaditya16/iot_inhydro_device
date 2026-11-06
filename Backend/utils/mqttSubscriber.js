@@ -21,13 +21,15 @@ const deviceStatusCache = new Map(); // deviceId (string) -> status ('active' | 
  */
 const preloadDeviceCache = async () => {
   try {
-    const devices = await Device.find({}).select('_id mqttId name deviceName status');
+    const devices = await Device.find({}).select('_id mqttId name deviceName status deviceType');
     devices.forEach((dev) => {
       const info = { id: dev._id, status: dev.status || 'active' };
       const idStr = String(dev._id);
       if (dev.mqttId) deviceCache.set(String(dev.mqttId).toLowerCase(), info);
       if (dev.name) deviceCache.set(String(dev.name).toLowerCase(), info);
       if (dev.deviceName) deviceCache.set(String(dev.deviceName).toLowerCase(), info);
+      if (dev.deviceType === 'fertigation') deviceCache.set('fertigation', info);
+      if (dev.deviceType === 'office_control') deviceCache.set('system2', info);
       deviceCache.set(idStr, info);
       deviceStatusCache.set(idStr, dev.status || 'active');
     });
@@ -58,6 +60,7 @@ const resolveDeviceInfo = async (mqttId) => {
         { mqttId: { $regex: new RegExp(`^${cleanRegex}$`, 'i') } },
         { name: { $regex: new RegExp(`^${cleanRegex}$`, 'i') } },
         { deviceName: { $regex: new RegExp(`^${cleanRegex}$`, 'i') } },
+        { deviceType: cleanKey === 'fertigation' ? 'fertigation' : (cleanKey === 'system2' ? 'office_control' : null) },
         { _id: mongoose.Types.ObjectId.isValid(mqttId) ? mqttId : null }
       ].filter(Boolean)
     }).select('_id mqttId name deviceName status');

@@ -539,7 +539,7 @@ export default function FertigationSettings() {
                   InHydro Fertigation &amp; Cyclic Irrigation System
                 </h1>
                 <p className="text-xs text-slate-400">
-                  Precision EC &amp; pH Dosing, Dual-Zone Cyclic Irrigation &amp; 13-Actuator Hardware Control
+                  Precision EC &amp; pH Dosing, Dual-Zone Cyclic Irrigation
                 </p>
               </div>
             </div>
@@ -607,7 +607,7 @@ export default function FertigationSettings() {
         {statusMessage && (
           <div className="mt-3 px-4 py-2.5 rounded-xl bg-green-500/10 border border-green-500/30 text-[#60bf71] text-xs font-medium flex items-center justify-between shadow-sm">
             <span>{statusMessage}</span>
-            <span className="text-[10px] text-slate-400 font-mono">MQTT 147.93.106.142</span>
+            {/* <span className="text-[10px] text-slate-400 font-mono">MQTT 147.93.106.142</span> */}
           </div>
         )}
       </div>

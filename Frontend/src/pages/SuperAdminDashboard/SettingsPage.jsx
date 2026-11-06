@@ -333,14 +333,14 @@ const SettingsPage = () => {
                       className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm text-slate-500 outline-none uppercase"
                     />
                   </div>
-                  <div>
+                  {/* <div>
                     <label className="mb-1.5 block text-xs font-medium text-slate-400">Timezone</label>
                     <select className="w-full rounded-xl border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm text-white outline-none focus:border-blue-500">
                       <option>Asia/Kolkata (IST)</option>
                       <option>UTC</option>
                       <option>America/New_York (EST)</option>
                     </select>
-                  </div>
+                  </div> */}
                 </div>
               </div>
 

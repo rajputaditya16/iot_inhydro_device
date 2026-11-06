@@ -471,7 +471,7 @@ exports.getDeviceAnalytics = async (req, res) => {
     }
 
     // 1. Target collection resolution
-    const primaryMqttId = device.mqttId || (device.deviceType === 'office_control' ? 'system2' : null) || device.name;
+    const primaryMqttId = device.mqttId || (device.deviceType === 'office_control' ? 'system2' : null) || (device.deviceType === 'fertigation' ? 'fertigation' : null) || device.name;
     const targetModel = primaryMqttId ? getTelemetryModel(primaryMqttId) : null;
     const sortOrder = isLive ? { timestamp: -1 } : { timestamp: 1 };
 
@@ -630,6 +630,7 @@ exports.getDeviceAnalytics = async (req, res) => {
             { deviceId: device._id },
             { mqttId: device.mqttId || '' },
             { mqttId: 'system2' },
+            { mqttId: 'fertigation' },
           ].filter(c => c.deviceId || c.mqttId)
         };
 
