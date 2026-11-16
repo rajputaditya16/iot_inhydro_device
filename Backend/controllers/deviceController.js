@@ -227,8 +227,10 @@ exports.pushDeviceConfig = async (req, res) => {
       } else if (device && device.deviceType === 'controlling') {
         await publishToDevice(`inhydro/${deviceRoot}/monitor/setpoints/request_sync`, '1');
       } else {
+        await publishToDevice(`inhydro/${deviceRoot}/request_sync`, '1');
         await publishToDevice(`inhydro/${deviceRoot}/setpoints/request_sync`, '1');
         if (deviceRoot !== deviceRoot.toLowerCase()) {
+          await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/request_sync`, '1');
           await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/setpoints/request_sync`, '1');
         }
       }
@@ -308,6 +310,12 @@ exports.pushDeviceConfig = async (req, res) => {
           if (payload.system_config && typeof payload.system_config === 'object') {
             updateFields['config'] = payload.system_config;
           }
+          if (payload.cyclic_timers && typeof payload.cyclic_timers === 'object') {
+            updateFields['settings.cyclic_timers'] = payload.cyclic_timers;
+          }
+          if (payload.climate_setpoints && typeof payload.climate_setpoints === 'object') {
+            updateFields['settings.climate_setpoints'] = payload.climate_setpoints;
+          }
           if (payload.crop_recipes || payload.cyclic_timers || payload.ec_min || payload.ec_max) {
             updateFields['settings.fertigation'] = {
               crop_recipes: payload.crop_recipes,
@@ -330,14 +338,16 @@ exports.pushDeviceConfig = async (req, res) => {
         await publishToDevice(`inhydro/${deviceRoot}/room${room}/setpoints/update`, payload);
       } else if (device && device.deviceType === 'controlling') {
         await publishToDevice(`inhydro/${deviceRoot}/monitor/setpoints/update`, payload);
-      } else if (device && device.deviceType === 'fertigation') {
+      } else if (device && (device.deviceType === 'fertigation' || device.deviceType === 'rp4iot' || device.deviceType === 'rajapawria' || device.deviceType === 'monit')) {
         await publishToDevice(`inhydro/${deviceRoot}/setpoints/set`, payload);
         await publishToDevice(`inhydro/${deviceRoot}/setpoints/update`, payload);
         await publishToDevice(`inhydro/${deviceRoot}/config/update`, payload);
+        await publishToDevice(`inhydro/${deviceRoot}/control`, payload);
         if (deviceRoot !== deviceRoot.toLowerCase()) {
           await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/setpoints/set`, payload);
           await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/setpoints/update`, payload);
           await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/config/update`, payload);
+          await publishToDevice(`inhydro/${deviceRoot.toLowerCase()}/control`, payload);
         }
       } else {
         await publishToDevice(`inhydro/${deviceRoot}/setpoints/update`, payload);
@@ -660,6 +670,14 @@ exports.getDeviceAnalytics = async (req, res) => {
     // Custom sensor names if configured on device
     const customSensorNames = device.config?.sensor_names || {};
 
+    const isRajaDevice = Boolean(
+      (device?.name && device.name.toLowerCase().includes('raja')) ||
+      (device?.mqttId && device.mqttId.toLowerCase().includes('raja')) ||
+      device?._id?.toString() === '6aa1294d6ee8e27613ac33e9' ||
+      device?.deviceType === 'rp4iot' ||
+      device?.deviceType === 'rajapawria'
+    );
+
     const mappedFeeds = [];
     packets.forEach((p) => {
       const d = p.data || {};
@@ -882,17 +900,34 @@ exports.getDeviceAnalytics = async (req, res) => {
           field17: tel.k != null ? String(tel.k) : (tel.potassium != null ? String(tel.potassium) : null),
         });
       } else if (device.deviceType === 'monit' || device.deviceType === 'monnet' || device.deviceType === 'dosing') {
+        const sData = d.sensor_data || d.sensors || {};
+        const tel = d.telemetry || d || {};
+
+        const temp = sData.temp ?? sData.temperature ?? tel.temp ?? tel.water_temp ?? tel.soil_temp ?? null;
+        const humi = sData.humi ?? sData.humidity ?? sData.hum ?? tel.humi ?? tel.humidity ?? tel.hum ?? tel.moist ?? tel.moisture ?? null;
+        const roomTemp = sData.room_temp ?? sData.temp ?? sData.temperature ?? tel.room_temp ?? tel.temperature ?? tel.temp ?? null;
+        const roomHumi = sData.room_humi ?? sData.humi ?? sData.humidity ?? sData.hum ?? tel.room_humi ?? tel.humidity ?? tel.hum ?? null;
+        const ec = sData.ec ?? sData.soil_ec ?? sData.water_ec ?? tel.ec ?? tel.soil_ec ?? tel.water_ec ?? null;
+        const ph = sData.ph ?? sData.soil_ph ?? sData.water_ph ?? tel.ph ?? tel.soil_ph ?? tel.water_ph ?? null;
+        const orp = sData.orp ?? tel.orp ?? null;
+        const co2 = sData.co2 ?? tel.co2 ?? null;
+
         mappedFeeds.push({
           created_at: packetTime,
           entry_id: mappedFeeds.length + 1,
-          field1: d.temp != null ? String(d.temp) : (d.water_temp != null ? String(d.water_temp) : (d.soil_temp != null ? String(d.soil_temp) : null)),
-          field2: d.moist != null ? String(d.moist) : (d.moisture != null ? String(d.moisture) : (d.soil_moisture != null ? String(d.soil_moisture) : null)),
-          field3: d.ec != null ? String(d.ec) : (d.soil_ec != null ? String(d.soil_ec) : null),
-          field4: d.ph != null ? String(d.ph) : (d.soil_ph != null ? String(d.soil_ph) : null),
-          field5: d.room_temp != null ? String(d.room_temp) : (d.temperature != null ? String(d.temperature) : null),
-          field6: d.room_humi != null ? String(d.room_humi) : (d.humidity != null ? String(d.humidity) : null),
-          field7: d.orp != null ? String(d.orp) : null,
-          field8: d.co2 != null ? String(d.co2) : null,
+          field1: temp != null ? String(temp) : null,
+          field2: humi != null ? String(humi) : null,
+          field3: isRajaDevice ? null : (ec != null ? String(ec) : null),
+          field4: isRajaDevice ? null : (ph != null ? String(ph) : null),
+          field5: roomTemp != null ? String(roomTemp) : null,
+          field6: roomHumi != null ? String(roomHumi) : null,
+          field7: orp != null ? String(orp) : null,
+          field8: co2 != null ? String(co2) : null,
+          sensor_data: sData,
+          relays: d.relays || {},
+          process_state: d.process_state || null,
+          climate_state: d.climate_state || null,
+          data: d,
         });
       } else if (device.deviceType === 'itc_polyhouse') {
         const sData = d.sensor_data || {};
@@ -954,19 +989,35 @@ exports.getDeviceAnalytics = async (req, res) => {
           fertigation_data: d
         });
       } else {
-        // Standard / system2 mapping
+        // Standard / rp4iot / system2 mapping
+        const sData = d.sensor_data || d.sensors || {};
         const tel = d.telemetry || d || {};
+
+        const temp = sData.temp ?? sData.room_temp ?? sData.water_temp ?? sData.temperature ?? tel.water_temp ?? tel.temp ?? tel.soil_temp ?? tel.room_temp ?? null;
+        const humi = sData.humi ?? sData.humidity ?? sData.hum ?? sData.room_humi ?? sData.moisture ?? sData.moist ?? tel.moisture ?? tel.moist ?? tel.humi ?? tel.humidity ?? tel.room_humi ?? null;
+        const ec = sData.ec ?? sData.soil_ec ?? sData.water_ec ?? tel.ec ?? tel.soil_ec ?? tel.water_ec ?? null;
+        const ph = sData.ph ?? sData.soil_ph ?? sData.water_ph ?? tel.ph ?? tel.soil_ph ?? tel.water_ph ?? null;
+        const roomTemp = sData.room_temp ?? sData.temp ?? tel.room_temp ?? tel.temp ?? null;
+        const roomHumi = sData.room_humi ?? sData.humi ?? tel.room_humi ?? tel.humi ?? null;
+        const orp = sData.orp ?? tel.orp ?? null;
+        const co2 = sData.co2 ?? tel.co2 ?? null;
+
         mappedFeeds.push({
           created_at: packetTime,
           entry_id: mappedFeeds.length + 1,
-          field1: tel.water_temp != null ? String(tel.water_temp) : (tel.temp != null ? String(tel.temp) : null),
-          field2: tel.moisture != null ? String(tel.moisture) : (tel.moist != null ? String(tel.moist) : null),
-          field3: tel.ec != null ? String(tel.ec) : null,
-          field4: tel.ph != null ? String(tel.ph) : null,
-          field5: tel.room_temp != null ? String(tel.room_temp) : null,
-          field6: tel.room_humi != null ? String(tel.room_humi) : null,
-          field7: tel.orp != null ? String(tel.orp) : null,
-          field8: tel.co2 != null ? String(tel.co2) : null,
+          field1: temp != null ? String(temp) : null,
+          field2: humi != null ? String(humi) : null,
+          field3: isRajaDevice ? null : (ec != null ? String(ec) : null),
+          field4: isRajaDevice ? null : (ph != null ? String(ph) : null),
+          field5: roomTemp != null ? String(roomTemp) : null,
+          field6: roomHumi != null ? String(roomHumi) : null,
+          field7: orp != null ? String(orp) : null,
+          field8: co2 != null ? String(co2) : null,
+          sensor_data: sData,
+          relays: d.relays || {},
+          process_state: d.process_state || null,
+          climate_state: d.climate_state || null,
+          data: d,
         });
       }
     });
@@ -1086,15 +1137,54 @@ exports.getDeviceAnalytics = async (req, res) => {
           channelData.field15 = 'CO2 Level';
         }
       }
-    } else if (device.deviceType === 'monit' || device.deviceType === 'monnet') {
-      channelData.field1 = 'Water Temp';
-      channelData.field2 = 'Water Moisture';
-      channelData.field3 = 'Water EC';
-      channelData.field4 = 'Water pH';
-      channelData.field5 = 'Room Temp';
-      channelData.field6 = 'Room Humidity';
-      channelData.field7 = 'ORP';
-      channelData.field8 = 'CO2';
+    } else if (isRajaDevice) {
+      // Re-initialize channelData completely for RajapawRia so Water EC & Water pH NEVER appear
+      channelData = {
+        id: device.mqttId || device._id.toString(),
+        name: device.name,
+        field5: 'Room Temp',
+        field6: 'Room Humidity',
+      };
+      if (mappedFeeds.some(f => f.field8 != null && f.field8 !== '')) {
+        channelData.field8 = 'CO2';
+      }
+      mappedFeeds.forEach(f => {
+        f.field3 = null;
+        f.field4 = null;
+      });
+    } else if (device.deviceType === 'monit' || device.deviceType === 'monnet' || device.deviceType === 'dosing') {
+      channelData = {
+        id: device.mqttId || device._id.toString(),
+        name: device.name,
+        field3: 'Water EC',
+        field4: 'Water pH',
+        field5: 'Room Temp',
+        field6: 'Room Humidity',
+      };
+      if (mappedFeeds.some(f => f.field1 != null && f.field1 !== '' && f.field1 !== f.field5)) {
+        channelData.field1 = 'Water Temp';
+      }
+      if (mappedFeeds.some(f => f.field2 != null && f.field2 !== '' && f.field2 !== f.field6)) {
+        channelData.field2 = 'Water Moisture';
+      }
+      if (mappedFeeds.some(f => f.field7 != null && f.field7 !== '')) {
+        channelData.field7 = 'ORP';
+      }
+      if (mappedFeeds.some(f => f.field8 != null && f.field8 !== '')) {
+        channelData.field8 = 'CO2';
+      }
+    } else if (device.deviceType === 'rp4iot') {
+      channelData = {
+        id: device.mqttId || device._id.toString(),
+        name: device.name,
+        field1: 'Temperature',
+        field2: 'Humidity',
+      };
+      if (mappedFeeds.some(f => f.field3 != null && f.field3 !== '')) channelData.field3 = 'Water EC';
+      if (mappedFeeds.some(f => f.field4 != null && f.field4 !== '')) channelData.field4 = 'Water pH';
+      if (mappedFeeds.some(f => f.field5 != null && f.field5 !== '' && f.field5 !== f.field1)) channelData.field5 = 'Room Temp';
+      if (mappedFeeds.some(f => f.field6 != null && f.field6 !== '' && f.field6 !== f.field2)) channelData.field6 = 'Room Humidity';
+      if (mappedFeeds.some(f => f.field8 != null && f.field8 !== '')) channelData.field8 = 'CO2';
     } else if (device.deviceType === 'itc_polyhouse') {
       channelData = {
         id: device.mqttId || device._id.toString(),

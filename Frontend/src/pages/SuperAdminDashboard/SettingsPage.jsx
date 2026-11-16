@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Bell, Shield, Palette, Globe, Save, Moon, Sun, Monitor, Settings, CheckCircle2, X, Eye, EyeOff, AlertCircle, FlaskConical } from 'lucide-react';
+import { User,Save, Monitor, Settings, CheckCircle2, X, Eye, EyeOff, AlertCircle, FlaskConical, Cpu } from 'lucide-react';
 import DeviceSettings from '../AdminDashboard/DeviceSettings';
 import AlmoraSettings from '../AdminDashboard/AlmoraSettings';
 import Almora2Settings from '../AdminDashboard/Almora2Settings';
@@ -11,6 +11,7 @@ import ControllingDeviceSettings from '../AdminDashboard/ControllingDeviceSettin
 import MonitSettings from '../AdminDashboard/MonitSettings';
 import PolyhouseSettings from '../AdminDashboard/PolyhouseSettings';
 import FertigationSettings from '../AdminDashboard/FertigationSettings';
+import Rp4iotSettings from '../AdminDashboard/Rp4iotSettings';
 
 const SettingsPage = () => {
   const [activeTab, setActiveTab] = useState('profile');
@@ -184,7 +185,8 @@ const SettingsPage = () => {
       if (types.includes(type)) return true;
       if (nameCheck && (
         name.includes('cold') || name.includes('storage') || name.includes('room') ||
-        name.includes('fert') || mqttId.includes('fert') || mqttId.includes('control12')
+        name.includes('fert') || mqttId.includes('fert') || mqttId.includes('control12') ||
+        name.includes('raja') || mqttId.includes('raja') || name.includes('rp4') || mqttId.includes('rp4')
       )) return true;
       return false;
     });
@@ -203,6 +205,7 @@ const SettingsPage = () => {
       ...(hasType(['monit', 'monnet', 'monit_device', 'dosing']) ? [{ key: 'monit_config', label: 'Monnet Setup', icon: Monitor }] : []),
       ...(hasType(['itc_polyhouse']) ? [{ key: 'polyhouse_config', label: 'Polyhouse Setup', icon: Monitor }] : []),
       ...(hasType(['fertigation'], true) ? [{ key: 'fertigation_config', label: 'Fertigation Setup', icon: FlaskConical }] : []),
+      ...(hasType(['rp4iot', 'rajapawria'], true) ? [{ key: 'rajapawria_config', label: 'RajapawRia Setup', icon: Cpu }] : []),
     ] : []),
   ];
 
@@ -298,6 +301,11 @@ const SettingsPage = () => {
           {/* Fertigation Controller */}
           {activeTab === 'fertigation_config' && (
             <FertigationSettings />
+          )}
+
+          {/* RajapawRia Setup */}
+          {activeTab === 'rajapawria_config' && (
+            <Rp4iotSettings isEmbedded={true} />
           )}
 
           {/* Profile */}

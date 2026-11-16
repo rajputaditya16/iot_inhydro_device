@@ -181,8 +181,8 @@ const SvgSparkline = memo(({ data = [], color = '#60bf71', height = 36 }) => {
 // ── Memoized Atomic Metric Card (P2 Optimization) ────────
 const BigMetric = memo(
   ({ label, value, unit, icon: Icon, type, isOnline = true }) => {
-    const isValValid = Number.isFinite(value) && (type === 'default' ? true : value > 0);
-    const safeValue = isOnline && isValValid ? value : null;
+    const isValValid = Number.isFinite(value) && value !== null && (type === 'default' ? true : value > 0);
+    const safeValue = isValValid ? value : null;
     const status = isOnline && safeValue != null ? getMetricStatus(type, safeValue) : 'offline';
     const color = isOnline && safeValue != null && status !== 'offline' ? getMetricColor(status) : 'text-slate-400';
 
@@ -247,10 +247,10 @@ const BigMetric = memo(
 const EcMetricCard = memo(
   ({ label = 'Electrical Conductivity (EC)', ecVal, unit = 'mS/cm', isOnline = true }) => {
     const isValValid = Number.isFinite(ecVal) && ecVal > 0;
-    const effectiveEc = isOnline && isValValid ? ecVal : null;
+    const effectiveEc = isValValid ? ecVal : null;
     const tdsVal = effectiveEc != null ? Math.round(effectiveEc * 500) : null;
-    const ecStatus = effectiveEc != null ? getMetricStatus('ec', effectiveEc) : 'offline';
-    const ecColor = effectiveEc != null && ecStatus !== 'offline' ? getMetricColor(ecStatus) : 'text-slate-400';
+    const ecStatus = isOnline && effectiveEc != null ? getMetricStatus('ec', effectiveEc) : 'offline';
+    const ecColor = isOnline && effectiveEc != null && ecStatus !== 'offline' ? getMetricColor(ecStatus) : 'text-slate-400';
     const bgMap = {
       'text-emerald-400': 'bg-emerald-500/10 border-emerald-500/20',
       'text-yellow-400': 'bg-yellow-500/10 border-yellow-500/20',
@@ -564,7 +564,32 @@ const LiveMonitoring = () => {
   const cachedLiveRaw = typeof window !== 'undefined' && initialSelectedId ? sessionStorage.getItem(`live_cache_${initialSelectedId}`) : null;
   let initialCachedSnapshot = null;
   try {
-    if (cachedLiveRaw) initialCachedSnapshot = JSON.parse(cachedLiveRaw);
+    if (cachedLiveRaw) {
+      initialCachedSnapshot = JSON.parse(cachedLiveRaw);
+      const isRajaInit =
+        String(initialSelectedId || '').toLowerCase().includes('raja') ||
+        String(queryParamDevice || '').toLowerCase().includes('raja') ||
+        initialSelectedId === '6aa1294d6ee8e27613ac33e9';
+      if (isRajaInit && initialCachedSnapshot) {
+        if (Array.isArray(initialCachedSnapshot.activeFields)) {
+          initialCachedSnapshot.activeFields = initialCachedSnapshot.activeFields.filter(
+            (f) =>
+              f.key !== 'field3' &&
+              f.key !== 'field4' &&
+              !String(f.label || '').toLowerCase().includes('ec') &&
+              !String(f.label || '').toLowerCase().includes('ph')
+          );
+        }
+        if (initialCachedSnapshot.chartData) {
+          delete initialCachedSnapshot.chartData.field3;
+          delete initialCachedSnapshot.chartData.field4;
+        }
+        if (initialCachedSnapshot.activeMetrics) {
+          delete initialCachedSnapshot.activeMetrics.field3;
+          delete initialCachedSnapshot.activeMetrics.field4;
+        }
+      }
+    }
   } catch (e) { }
 
   const [loading, setLoading] = useState(!initialCachedSnapshot);
@@ -707,6 +732,26 @@ const LiveMonitoring = () => {
   const isOfficeControlDevice = deviceMeta?.deviceType === 'office_control';
   const isControllingDevice = deviceMeta?.deviceType === 'controlling';
   const isStandardDevice = !isMultiSensorDevice && !isOfficeControlDevice && !isControllingDevice && !isPolyhouseDevice;
+
+  // ── RajapawRia Controller Identifier (MD02 Room Temp & Humidity ONLY - No Water EC/pH) ──
+  const isRajaDevice = useMemo(() => {
+    if (!deviceMeta) {
+      const q = String(queryParamDevice || selectedDeviceId || '').toLowerCase();
+      return q === 'raja' || q.includes('raja') || q === '6aa1294d6ee8e27613ac33e9';
+    }
+    const name = String(deviceMeta.name || '').toLowerCase();
+    const mqttId = String(deviceMeta.mqttId || '').toLowerCase();
+    const id = String(deviceMeta._id || deviceMeta.id || '').toLowerCase();
+    const type = String(deviceMeta.deviceType || '').toLowerCase();
+    return (
+      name.includes('raja') ||
+      mqttId === 'raja' ||
+      mqttId.includes('raja') ||
+      id === '6aa1294d6ee8e27613ac33e9' ||
+      type === 'rp4iot' ||
+      type === 'rajapawria'
+    );
+  }, [deviceMeta, queryParamDevice, selectedDeviceId]);
 
   // ── Real-time freshness ticker (ticks every 5 seconds to evaluate device timeout) ──
   const [nowTime, setNowTime] = useState(Date.now());
@@ -964,6 +1009,20 @@ const LiveMonitoring = () => {
             ...getFieldDisplayInfo(channel[k]),
           }));
 
+        // For RajapawRia — delhi: strictly remove Water EC and Water pH
+        if (isRajaDevice) {
+          fields = fields.filter((f) => {
+            const lbl = String(f.label || '').toLowerCase();
+            const k = String(f.key || '').toLowerCase();
+            return (
+              !lbl.includes('ec') &&
+              !lbl.includes('ph') &&
+              k !== 'field3' &&
+              k !== 'field4'
+            );
+          });
+        }
+
         if (fields.length === 0) {
           const isMonitType =
             deviceMeta?.deviceType === 'monit' ||
@@ -973,7 +1032,12 @@ const LiveMonitoring = () => {
             deviceMeta?.deviceType === 'almora' ||
             deviceMeta?.deviceType === 'almora2';
 
-          if (deviceMeta?.deviceType === 'fertigation') {
+          if (isRajaDevice) {
+            fields = [
+              { key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
+              { key: 'field6', label: 'Room Humidity', icon: Droplets, unit: '%', type: 'moisture' },
+            ];
+          } else if (deviceMeta?.deviceType === 'fertigation') {
             fields = [
               { key: 'field1', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
               { key: 'field2', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
@@ -986,6 +1050,11 @@ const LiveMonitoring = () => {
               { key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
               { key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
               { key: 'field6', label: 'Room Humidity', icon: Droplets, unit: '%', type: 'moisture' },
+            ];
+          } else if (deviceMeta?.deviceType === 'rp4iot') {
+            fields = [
+              { key: 'field1', label: 'Temperature', icon: Thermometer, unit: '°C', type: 'temperature' },
+              { key: 'field2', label: 'Humidity', icon: Droplets, unit: '%', type: 'moisture' },
             ];
           } else if (isAlmoraType) {
             fields = [
@@ -1056,20 +1125,52 @@ const LiveMonitoring = () => {
           return device;
         });
 
+        const sData = latestFeed.sensor_data || latestFeed.telemetry?.sensor_data || latestFeed.data?.sensor_data || {};
         const currentMetrics = {};
         fields.forEach((f) => {
-          currentMetrics[f.key] = parseFloat(latestFeed[f.key]) || 0;
+          let val = latestFeed[f.key] != null && latestFeed[f.key] !== '' ? parseFloat(latestFeed[f.key]) : null;
+          if (val === null || isNaN(val)) {
+            if (f.key === 'field5' || (f.key === 'field1' && !fields.some(x => x.key === 'field5'))) {
+              val = sData.room_temp ?? sData.temp ?? sData.temperature ?? null;
+            } else if (f.key === 'field6' || (f.key === 'field2' && !fields.some(x => x.key === 'field6'))) {
+              val = sData.room_humi ?? sData.humi ?? sData.humidity ?? null;
+            } else if (f.key === 'field3') {
+              val = sData.ec ?? sData.soil_ec ?? sData.water_ec ?? null;
+            } else if (f.key === 'field4') {
+              val = sData.ph ?? sData.soil_ph ?? sData.water_ph ?? null;
+            } else if (f.key === 'field8') {
+              val = sData.co2 ?? null;
+            }
+          }
+          currentMetrics[f.key] = val != null && !isNaN(val) ? parseFloat(val) : 0;
         });
 
         const newChartData = {};
         fields.forEach((f) => {
-          newChartData[f.key] = feeds.map((feed) => ({
-            time: new Date(feed.created_at || feed.timestamp || Date.now()).toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-            value: parseFloat(feed[f.key]) || 0,
-          }));
+          newChartData[f.key] = feeds.map((feed) => {
+            const feedSData = feed.sensor_data || feed.telemetry?.sensor_data || feed.data?.sensor_data || {};
+            let val = feed[f.key] != null && feed[f.key] !== '' ? parseFloat(feed[f.key]) : null;
+            if (val === null || isNaN(val)) {
+              if (f.key === 'field5' || (f.key === 'field1' && !fields.some(x => x.key === 'field5'))) {
+                val = feedSData.room_temp ?? feedSData.temp ?? feedSData.temperature ?? null;
+              } else if (f.key === 'field6' || (f.key === 'field2' && !fields.some(x => x.key === 'field6'))) {
+                val = feedSData.room_humi ?? feedSData.humi ?? feedSData.humidity ?? null;
+              } else if (f.key === 'field3') {
+                val = feedSData.ec ?? feedSData.soil_ec ?? feedSData.water_ec ?? null;
+              } else if (f.key === 'field4') {
+                val = feedSData.ph ?? feedSData.soil_ph ?? feedSData.water_ph ?? null;
+              } else if (f.key === 'field8') {
+                val = feedSData.co2 ?? null;
+              }
+            }
+            return {
+              time: new Date(feed.created_at || feed.timestamp || Date.now()).toLocaleTimeString('en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+              value: val != null && !isNaN(val) ? parseFloat(val) : 0,
+            };
+          });
         });
 
         // If live stream is active (< 25s since last live telemetry packet), DO NOT clobber live chart with DB poll!
@@ -1078,6 +1179,13 @@ const LiveMonitoring = () => {
         const changed =
           !previousMetrics ||
           Object.keys(currentMetrics).some((key) => currentMetrics[key] !== previousMetrics[key]);
+
+        if (isRajaDevice) {
+          delete currentMetrics.field3;
+          delete currentMetrics.field4;
+          delete newChartData.field3;
+          delete newChartData.field4;
+        }
 
         setHasNewData(changed);
         if (!isLiveStreamActive && changed) {
@@ -1280,7 +1388,7 @@ const LiveMonitoring = () => {
         setHasNewData(false);
         setLoading(false);
       });
-  }, [deviceMeta, selectedDeviceId, getFieldDisplayInfo, API_BASE, token]);
+  }, [deviceMeta, selectedDeviceId, getFieldDisplayInfo, API_BASE, token, isRajaDevice]);
 
   useEffect(() => {
     if (selectedDeviceId) {
@@ -1872,6 +1980,14 @@ const LiveMonitoring = () => {
           }
         } else {
           const tel = payload.telemetry || payload.sensors || payload.data || payload || {};
+          const sData = rawPayload.sensor_data || payload.sensor_data || rawPayload.sensors || payload.sensors || {};
+
+          // Check if payload contains sensory telemetry
+          const hasSensory = Boolean(
+            sData.temp !== undefined || sData.humi !== undefined || sData.temperature !== undefined || sData.humidity !== undefined ||
+            tel.field1 !== undefined || tel.field2 !== undefined || tel.temp !== undefined || tel.water_temp !== undefined ||
+            tel.soil_temp !== undefined || tel.room_temp !== undefined || tel.moist !== undefined || tel.ph !== undefined || tel.ec !== undefined
+          );
 
           // Filter out heartbeat, status, or pure command acks from zeroing out generic device metrics
           const isHeartbeatOrCmd =
@@ -1879,7 +1995,7 @@ const LiveMonitoring = () => {
             topic.endsWith('/status') ||
             topic.includes('/setpoints') ||
             topic.includes('/command') ||
-            (rawPayload.status === 'online' && !tel.field1 && !tel.temp && !tel.water_temp && !tel.soil_temp && !tel.moist && !tel.ph && !tel.ec);
+            (rawPayload.status === 'online' && !hasSensory);
 
           if (isHeartbeatOrCmd) {
             hasMatchingTelemetry = true;
@@ -1890,71 +2006,6 @@ const LiveMonitoring = () => {
             return;
           }
 
-          const tempVal =
-            tel.field1 !== undefined
-              ? parseFloat(tel.field1)
-              : tel.temp !== undefined
-                ? parseFloat(tel.temp)
-                : tel.water_temp !== undefined
-                  ? parseFloat(tel.water_temp)
-                  : tel.soil_temp !== undefined
-                    ? parseFloat(tel.soil_temp)
-                    : tel.room_temp !== undefined
-                      ? parseFloat(tel.room_temp)
-                      : 0;
-          const moistVal =
-            tel.field2 !== undefined
-              ? parseFloat(tel.field2)
-              : tel.moist !== undefined
-                ? parseFloat(tel.moist)
-                : tel.moisture !== undefined
-                  ? parseFloat(tel.moisture)
-                  : tel.humidity !== undefined
-                    ? parseFloat(tel.humidity)
-                    : tel.room_humi !== undefined
-                      ? parseFloat(tel.room_humi)
-                      : 0;
-          const phVal =
-            tel.field3 !== undefined
-              ? parseFloat(tel.field3)
-              : tel.ph !== undefined
-                ? parseFloat(tel.ph)
-                : tel.soil_ph !== undefined
-                  ? parseFloat(tel.soil_ph)
-                  : 0;
-          const ecVal =
-            tel.field4 !== undefined
-              ? parseFloat(tel.field4)
-              : tel.ec !== undefined
-                ? parseFloat(tel.ec)
-                : tel.soil_ec !== undefined
-                  ? parseFloat(tel.soil_ec)
-                  : 0;
-          const roomTempVal =
-            tel.field5 !== undefined
-              ? parseFloat(tel.field5)
-              : tel.room_temp !== undefined
-                ? parseFloat(tel.room_temp)
-                : 0;
-          const roomHumiVal =
-            tel.field6 !== undefined
-              ? parseFloat(tel.field6)
-              : tel.room_humi !== undefined
-                ? parseFloat(tel.room_humi)
-                : 0;
-          const orpVal =
-            tel.field7 !== undefined
-              ? parseFloat(tel.field7)
-              : tel.orp !== undefined
-                ? parseFloat(tel.orp)
-                : 0;
-          const co2Val =
-            tel.field8 !== undefined
-              ? parseFloat(tel.field8)
-              : tel.co2 !== undefined
-                ? parseFloat(tel.co2)
-                : 0;
-
           const isMonitType =
             deviceMeta?.deviceType === 'monit' ||
             deviceMeta?.deviceType === 'monnet' ||
@@ -1964,17 +2015,141 @@ const LiveMonitoring = () => {
             deviceMeta?.deviceType === 'almora' ||
             deviceMeta?.deviceType === 'almora2';
 
-          let currentMetrics = {};
+          const tempVal =
+            tel.field1 !== undefined && tel.field1 !== null ? parseFloat(tel.field1) :
+            sData.temp !== undefined && sData.temp !== null ? parseFloat(sData.temp) :
+            sData.room_temp !== undefined && sData.room_temp !== null ? parseFloat(sData.room_temp) :
+            sData.temperature !== undefined && sData.temperature !== null ? parseFloat(sData.temperature) :
+            sData.water_temp !== undefined && sData.water_temp !== null ? parseFloat(sData.water_temp) :
+            tel.temp !== undefined && tel.temp !== null ? parseFloat(tel.temp) :
+            tel.room_temp !== undefined && tel.room_temp !== null ? parseFloat(tel.room_temp) :
+            tel.water_temp !== undefined && tel.water_temp !== null ? parseFloat(tel.water_temp) :
+            tel.soil_temp !== undefined && tel.soil_temp !== null ? parseFloat(tel.soil_temp) :
+            tel.temperature !== undefined && tel.temperature !== null ? parseFloat(tel.temperature) :
+            0;
+
+          const moistVal =
+            tel.field2 !== undefined && tel.field2 !== null ? parseFloat(tel.field2) :
+            sData.humi !== undefined && sData.humi !== null ? parseFloat(sData.humi) :
+            sData.humidity !== undefined && sData.humidity !== null ? parseFloat(sData.humidity) :
+            sData.hum !== undefined && sData.hum !== null ? parseFloat(sData.hum) :
+            sData.room_humi !== undefined && sData.room_humi !== null ? parseFloat(sData.room_humi) :
+            sData.moist !== undefined && sData.moist !== null ? parseFloat(sData.moist) :
+            sData.moisture !== undefined && sData.moisture !== null ? parseFloat(sData.moisture) :
+            tel.humi !== undefined && tel.humi !== null ? parseFloat(tel.humi) :
+            tel.humidity !== undefined && tel.humidity !== null ? parseFloat(tel.humidity) :
+            tel.hum !== undefined && tel.hum !== null ? parseFloat(tel.hum) :
+            tel.room_humi !== undefined && tel.room_humi !== null ? parseFloat(tel.room_humi) :
+            tel.moist !== undefined && tel.moist !== null ? parseFloat(tel.moist) :
+            tel.moisture !== undefined && tel.moisture !== null ? parseFloat(tel.moisture) :
+            0;
+
+          const ecVal =
+            sData.ec !== undefined && sData.ec !== null ? parseFloat(sData.ec) :
+            sData.soil_ec !== undefined && sData.soil_ec !== null ? parseFloat(sData.soil_ec) :
+            sData.water_ec !== undefined && sData.water_ec !== null ? parseFloat(sData.water_ec) :
+            tel.ec !== undefined && tel.ec !== null ? parseFloat(tel.ec) :
+            tel.soil_ec !== undefined && tel.soil_ec !== null ? parseFloat(tel.soil_ec) :
+            tel.water_ec !== undefined && tel.water_ec !== null ? parseFloat(tel.water_ec) :
+            (tel.field3 !== undefined && tel.field3 !== null ? parseFloat(tel.field3) : (tel.field4 !== undefined && tel.field4 !== null && !isMonitType ? parseFloat(tel.field4) : 0));
+
+          const phVal =
+            sData.ph !== undefined && sData.ph !== null ? parseFloat(sData.ph) :
+            sData.soil_ph !== undefined && sData.soil_ph !== null ? parseFloat(sData.soil_ph) :
+            sData.water_ph !== undefined && sData.water_ph !== null ? parseFloat(sData.water_ph) :
+            tel.ph !== undefined && tel.ph !== null ? parseFloat(tel.ph) :
+            tel.soil_ph !== undefined && tel.soil_ph !== null ? parseFloat(tel.soil_ph) :
+            tel.water_ph !== undefined && tel.water_ph !== null ? parseFloat(tel.water_ph) :
+            (tel.field4 !== undefined && tel.field4 !== null ? parseFloat(tel.field4) : (tel.field3 !== undefined && tel.field3 !== null && !isMonitType ? parseFloat(tel.field3) : 0));
+
+          const roomTempVal =
+            tel.field5 !== undefined && tel.field5 !== null ? parseFloat(tel.field5) :
+            sData.room_temp !== undefined && sData.room_temp !== null ? parseFloat(sData.room_temp) :
+            tel.room_temp !== undefined && tel.room_temp !== null ? parseFloat(tel.room_temp) :
+            (sData.temp !== undefined && sData.temp !== null ? parseFloat(sData.temp) : tempVal);
+
+          const roomHumiVal =
+            tel.field6 !== undefined && tel.field6 !== null ? parseFloat(tel.field6) :
+            sData.room_humi !== undefined && sData.room_humi !== null ? parseFloat(sData.room_humi) :
+            tel.room_humi !== undefined && tel.room_humi !== null ? parseFloat(tel.room_humi) :
+            (sData.humi !== undefined && sData.humi !== null ? parseFloat(sData.humi) : moistVal);
+
+          const orpVal =
+            tel.field7 !== undefined && tel.field7 !== null ? parseFloat(tel.field7) :
+            sData.orp !== undefined && sData.orp !== null ? parseFloat(sData.orp) :
+            tel.orp !== undefined && tel.orp !== null ? parseFloat(tel.orp) :
+            0;
+
+          const co2Val =
+            tel.field8 !== undefined && tel.field8 !== null ? parseFloat(tel.field8) :
+            sData.co2 !== undefined && sData.co2 !== null ? parseFloat(sData.co2) :
+            tel.co2 !== undefined && tel.co2 !== null ? parseFloat(tel.co2) :
+            0;
+
+          let currentMetrics = {
+            field1: tempVal,
+            field2: moistVal,
+            field3: ecVal,
+            field4: phVal,
+            field5: roomTempVal,
+            field6: roomHumiVal,
+            field7: orpVal,
+            field8: co2Val,
+          };
           let fields = [];
 
-          if (isMonitType) {
-            currentMetrics = { field3: ecVal, field4: phVal, field5: roomTempVal, field6: roomHumiVal };
+          if (isRajaDevice) {
+            currentMetrics.field5 = roomTempVal;
+            currentMetrics.field6 = roomHumiVal;
+            currentMetrics.field1 = roomTempVal;
+            currentMetrics.field2 = roomHumiVal;
+            delete currentMetrics.field3;
+            delete currentMetrics.field4;
+
+            fields = [
+              { key: 'field5', label: ' Temperature', icon: Thermometer, unit: '°C', type: 'temperature' },
+              { key: 'field6', label: ' Humidity', icon: Droplets, unit: '%', type: 'moisture' },
+            ];
+            if (co2Val > 0) {
+              fields.push({ key: 'field8', label: 'CO2 Level', icon: Activity, unit: 'ppm', type: 'co2' });
+            }
+          } else if (isMonitType) {
+            currentMetrics.field3 = ecVal;
+            currentMetrics.field4 = phVal;
+            currentMetrics.field5 = roomTempVal;
+            currentMetrics.field6 = roomHumiVal;
+
             fields = [
               { key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' },
               { key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' },
-              { key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
-              { key: 'field6', label: 'Room Humidity', icon: Droplets, unit: '%', type: 'moisture' },
+              { key: 'field5', label: ' Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
+              { key: 'field6', label: ' Humidity', icon: Droplets, unit: '%', type: 'moisture' },
             ];
+
+            // If water temp / soil moisture are distinct and present, include them as well
+            if (tel.water_temp !== undefined && tel.water_temp !== null && parseFloat(tel.water_temp) !== roomTempVal) {
+              fields.unshift({ key: 'field1', label: 'Water Temp', icon: Thermometer, unit: '°C', type: 'temperature' });
+            }
+            if (tel.moist !== undefined && tel.moist !== null && parseFloat(tel.moist) !== roomHumiVal) {
+              fields.splice(1, 0, { key: 'field2', label: 'Soil Moisture', icon: Droplets, unit: '%', type: 'moisture' });
+            }
+            if (co2Val > 0) {
+              fields.push({ key: 'field8', label: 'CO2 Level', icon: Activity, unit: 'ppm', type: 'co2' });
+            }
+          } else if (deviceMeta?.deviceType === 'rp4iot') {
+            fields = [
+              { key: 'field1', label: 'Temperature', icon: Thermometer, unit: '°C', type: 'temperature' },
+              { key: 'field2', label: 'Humidity', icon: Droplets, unit: '%', type: 'moisture' },
+            ];
+            if (ecVal > 0 || tel.ec !== undefined || tel.field3 !== undefined) {
+              fields.push({ key: 'field3', label: 'Water EC', icon: Zap, unit: 'mS/cm', type: 'ec' });
+            }
+            if (phVal > 0 || tel.ph !== undefined || tel.field4 !== undefined) {
+              fields.push({ key: 'field4', label: 'Water pH', icon: FlaskConical, unit: 'pH', type: 'ph' });
+            }
+            if (co2Val > 0) {
+              fields.push({ key: 'field8', label: 'CO2 Level', icon: Activity, unit: 'ppm', type: 'co2' });
+            }
           } else if (isAlmoraType) {
             currentMetrics = {
               field1: tempVal,
@@ -1997,25 +2172,24 @@ const LiveMonitoring = () => {
               fields.push({ key: 'field8', label: 'CO2 Level', icon: Activity, unit: 'ppm', type: 'co2' });
             }
           } else {
-            currentMetrics = {
-              field1: tempVal,
-              field2: moistVal,
-              field3: phVal,
-              field4: ecVal,
-              field5: roomTempVal,
-              field6: roomHumiVal,
-            };
             fields = [
               { key: 'field1', label: 'Temperature', icon: Thermometer, unit: '°C', type: 'temperature' },
               { key: 'field2', label: 'Moisture / Humidity', icon: Droplets, unit: '%', type: 'moisture' },
-              { key: 'field3', label: 'pH Level', icon: FlaskConical, unit: 'pH', type: 'ph' },
-              { key: 'field4', label: 'EC Level', icon: Zap, unit: 'mS/cm', type: 'ec' },
             ];
-            if (roomTempVal > 0 || roomHumiVal > 0) {
-              fields.push(
-                { key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' },
-                { key: 'field6', label: 'Room Humidity', icon: Droplets, unit: '%', type: 'moisture' }
-              );
+            if (phVal > 0 || tel.ph !== undefined || tel.field3 !== undefined) {
+              fields.push({ key: 'field3', label: 'pH Level', icon: FlaskConical, unit: 'pH', type: 'ph' });
+            }
+            if (ecVal > 0 || tel.ec !== undefined || tel.field4 !== undefined) {
+              fields.push({ key: 'field4', label: 'EC Level', icon: Zap, unit: 'mS/cm', type: 'ec' });
+            }
+            if (roomTempVal > 0 && roomTempVal !== tempVal) {
+              fields.push({ key: 'field5', label: 'Room Temp', icon: Thermometer, unit: '°C', type: 'temperature' });
+            }
+            if (roomHumiVal > 0 && roomHumiVal !== moistVal) {
+              fields.push({ key: 'field6', label: 'Room Humidity', icon: Droplets, unit: '%', type: 'moisture' });
+            }
+            if (co2Val > 0) {
+              fields.push({ key: 'field8', label: 'CO2 Level', icon: Activity, unit: 'ppm', type: 'co2' });
             }
           }
 
@@ -2035,6 +2209,10 @@ const LiveMonitoring = () => {
 
           setChartData((prev) => {
             const newChart = { ...prev };
+            if (isRajaDevice) {
+              delete newChart.field3;
+              delete newChart.field4;
+            }
             fields.forEach((f) => {
               newChart[f.key] = [
                 ...(newChart[f.key] || []),
@@ -2067,7 +2245,7 @@ const LiveMonitoring = () => {
         }, 2000);
       }
     },
-    [candidateIdentifiers, deviceMeta, selectedDeviceId, isMultiSensorDevice, isOfficeControlDevice, isControllingDevice, isPolyhouseDevice]
+    [candidateIdentifiers, deviceMeta, selectedDeviceId, isMultiSensorDevice, isOfficeControlDevice, isControllingDevice, isPolyhouseDevice, isRajaDevice]
   );
 
   // ── High-Performance Micro-Batch Queue (Prevents UI stutter and frame drops) ──
@@ -2295,16 +2473,6 @@ const LiveMonitoring = () => {
               {deviceMeta?.status === 'blocked' ? 'Blocked' : isDeviceOnline ? 'Online' : 'Offline'}
             </span>
 
-            {isMultiSensorDevice && (
-              <button
-                onClick={() => navigate(`/cold-storage?device=${selectedDeviceId}&mqttId=${deviceMeta?.mqttId || ''}`)}
-                className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-semibold transition-all shadow-sm shadow-emerald-500/10 active:scale-95"
-                title="Open Cold Storage Setpoints & Schedule"
-              >
-                <Sliders className="h-3.5 w-3.5" />
-                <span>Cold Storage Settings</span>
-              </button>
-            )}
 
           
           </div>

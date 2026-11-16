@@ -30,6 +30,10 @@ const preloadDeviceCache = async () => {
       if (dev.deviceName) deviceCache.set(String(dev.deviceName).toLowerCase(), info);
       if (dev.deviceType === 'fertigation') deviceCache.set('fertigation', info);
       if (dev.deviceType === 'office_control') deviceCache.set('system2', info);
+      if (dev.deviceType === 'rp4iot') {
+        deviceCache.set('rp4iot', info);
+        deviceCache.set('rp4_controller', info);
+      }
       deviceCache.set(idStr, info);
       deviceStatusCache.set(idStr, dev.status || 'active');
     });
@@ -60,7 +64,7 @@ const resolveDeviceInfo = async (mqttId) => {
         { mqttId: { $regex: new RegExp(`^${cleanRegex}$`, 'i') } },
         { name: { $regex: new RegExp(`^${cleanRegex}$`, 'i') } },
         { deviceName: { $regex: new RegExp(`^${cleanRegex}$`, 'i') } },
-        { deviceType: cleanKey === 'fertigation' ? 'fertigation' : (cleanKey === 'system2' ? 'office_control' : null) },
+        { deviceType: cleanKey === 'fertigation' ? 'fertigation' : (cleanKey === 'system2' ? 'office_control' : (cleanKey === 'rp4_controller' || cleanKey === 'rp4iot' ? 'rp4iot' : null)) },
         { _id: mongoose.Types.ObjectId.isValid(mqttId) ? mqttId : null }
       ].filter(Boolean)
     }).select('_id mqttId name deviceName status');
@@ -235,6 +239,8 @@ const startMqttSubscriber = () => {
         payloadData && typeof payloadData === 'object' && (
           payloadData.sensor_data ||
           payloadData.rooms ||
+          payloadData.process_state || payloadData.climate_state ||
+          payloadData.cyclic_timers || payloadData.climate_setpoints ||
           payloadData.S1 || payloadData.S2 || payloadData.S3 || payloadData.S4 || payloadData.S5 || payloadData.S6 || payloadData.S7 ||
           payloadData.temp !== undefined || payloadData.t !== undefined || payloadData.temperature !== undefined ||
           payloadData.humi !== undefined || payloadData.h !== undefined || payloadData.humidity !== undefined ||
@@ -242,7 +248,7 @@ const startMqttSubscriber = () => {
           payloadData.relays || payloadData.relay_states ||
           payloadData.sensors || Array.isArray(payloadData.data) || Array.isArray(payloadData.readings) ||
           payloadData.status === 'online' || payloadData.heartbeat !== undefined || payloadData.ping !== undefined ||
-          topic.includes('/heartbeat') || topic.includes('/telemetry') || topic.includes('/status')
+          topic.includes('/heartbeat') || topic.includes('/telemetry') || topic.includes('/status') || topic.includes('/state')
         )
       );
 
@@ -284,6 +290,44 @@ const startMqttSubscriber = () => {
           updateFields['settings'] = payloadData.sensor_setpoints;
         } else if (payloadData?.port && payloadData?.settings) {
           updateFields[`settings.${payloadData.port}`] = payloadData.settings;
+        }
+
+        if (payloadData?.cyclic_timers && typeof payloadData.cyclic_timers === 'object') {
+          updateFields['settings.cyclic_timers'] = payloadData.cyclic_timers;
+        }
+        if (payloadData?.climate_setpoints && typeof payloadData.climate_setpoints === 'object') {
+          const cs = payloadData.climate_setpoints;
+          const dStart = cs['HUMI D_Start'] || cs['DAY Start'] || '06:00';
+          const dStop = cs['HUMI D_Stop'] || cs['DAY Stop'] || '18:00';
+          const nStart = cs['HUMI N_Start'] || cs['NIGHT Start'] || '18:00';
+          const nStop = cs['HUMI N_Stop'] || cs['NIGHT Stop'] || '06:00';
+          const fogMode = cs['fogger_trigger_mode'] || cs['FOGGER TRIGGER MODE'] || 'SENSOR';
+
+          updateFields['settings.climate_setpoints'] = {
+            ...cs,
+            'HUMI D_Start': dStart,
+            'DAY Start': dStart,
+            'HUMI D_Stop': dStop,
+            'DAY Stop': dStop,
+            'HUMI N_Start': nStart,
+            'NIGHT Start': nStart,
+            'HUMI N_Stop': nStop,
+            'NIGHT Stop': nStop,
+            'fogger_trigger_mode': fogMode,
+            'FOGGER TRIGGER MODE': fogMode,
+          };
+        }
+        if (payloadData?.process_state && typeof payloadData.process_state === 'object') {
+          updateFields['settings.process_state'] = payloadData.process_state;
+        }
+        if (payloadData?.climate_state && typeof payloadData.climate_state === 'object') {
+          updateFields['settings.climate_state'] = payloadData.climate_state;
+        }
+        if (payloadData?.relays && typeof payloadData.relays === 'object') {
+          updateFields['settings.relays'] = payloadData.relays;
+        }
+        if (payloadData?.relay_states) {
+          updateFields['settings.relay_states'] = payloadData.relay_states;
         }
 
         if (payloadData?.system_config && typeof payloadData.system_config === 'object') {
@@ -339,6 +383,10 @@ const startMqttSubscriber = () => {
             sensor_data: item.sensor_data,
             dli_data: item.dli_data || {},
             relay_states: item.relay_states || {},
+            relays: item.relays || {},
+            process_state: item.process_state || null,
+            climate_state: item.climate_state || null,
+            simulation_mode: item.simulation_mode ?? false,
             common_pump_active: item.common_pump_active ?? false,
             active_water_zone: item.active_water_zone || null,
             room_paused_states: item.room_paused_states || {},
